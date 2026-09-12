@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SchoolHub</title>
+<style>
+:root{
+  --bg:#f6f5f2;--panel:#fff;--ink:#1d1d1f;--muted:#6b6b70;--line:#e6e4df;--hover:#f1efea;
+  --red:#c2372d;--red-bg:#fbe8e5;--amber:#a86400;--amber-bg:#fcefd8;--blue:#2657c1;--blue-bg:#e6edfc;
+  --green:#1f7a3a;--green-bg:#e1f3e6;--gray-bg:#edebe6;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#131315;--panel:#1b1b1e;--ink:#ececee;--muted:#9a9aa1;--line:#2b2b30;--hover:#232327;
+  --red:#ff8074;--red-bg:#3a1f1c;--amber:#f2b451;--amber-bg:#382a13;--blue:#93b2ff;--blue-bg:#1c2640;
+  --green:#72d28f;--green-bg:#152e1d;--gray-bg:#26262a;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif}
+a{color:var(--blue);text-decoration:none}a:hover{text-decoration:underline}
+.muted{color:var(--muted)}
+header{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.bar{max-width:1180px;margin:0 auto;padding:12px 24px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+h1{font-size:17px;margin:0;font-weight:650;letter-spacing:-.01em}
+.sync{font-size:12.5px;color:var(--muted)}.sync.stale{color:var(--amber)}
+.spacer{flex:1}
+.seg{display:inline-flex;background:var(--gray-bg);border-radius:9px;padding:3px}
+.seg button{border:0;background:none;color:var(--muted);font:inherit;font-weight:560;padding:5px 12px;border-radius:7px;cursor:pointer}
+.seg button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.12)}
+input[type=search]{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);width:210px}
+label.tog{color:var(--muted);font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer;user-select:none}
+main{max-width:1180px;margin:0 auto;padding:20px 24px 80px}
+.banner{background:var(--blue-bg);color:var(--blue);border-radius:10px;padding:10px 14px;margin-bottom:18px;font-size:13px}
+.banner a{font-weight:600}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:22px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.stat b{display:block;font-size:24px;font-weight:650;font-variant-numeric:tabular-nums}
+.stat span{color:var(--muted);font-size:12.5px}
+.stat.red b{color:var(--red)}.stat.amber b{color:var(--amber)}
+.errors{background:var(--amber-bg);color:var(--amber);border-radius:10px;padding:10px 14px;margin-bottom:18px;font-size:13px}
+.errors ul{margin:4px 0 0;padding-left:18px}
+.group{margin-bottom:22px}
+.group h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:0 0 8px;font-weight:600}
+.list{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.row{display:grid;grid-template-columns:120px minmax(0,1fr) auto 150px 104px 28px;gap:14px;align-items:center;padding:10px 14px;border-top:1px solid var(--line);cursor:pointer}
+.row:first-child{border-top:0}.row:hover{background:var(--hover)}
+.chip{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.name{font-weight:560;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.name small{color:var(--muted);font-weight:400;margin-left:8px}
+.plat{font-size:11.5px;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 7px;white-space:nowrap}
+.due{font-size:12.5px;color:var(--muted);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.pill{font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:99px;white-space:nowrap;text-align:center;font-variant-numeric:tabular-nums}
+.s-missing{background:var(--red-bg);color:var(--red)}.s-soon,.s-flagged,.s-check{background:var(--amber-bg);color:var(--amber)}
+.s-todo{background:var(--gray-bg);color:var(--ink)}.s-submitted{background:var(--blue-bg);color:var(--blue)}
+.s-graded,.s-marked{background:var(--green-bg);color:var(--green)}.s-offline,.s-excused,.s-expired{background:var(--gray-bg);color:var(--muted)}
+.check{width:26px;height:26px;border-radius:50%;border:1.5px solid var(--line);background:none;color:transparent;cursor:pointer;display:grid;place-items:center;font-size:13px;font-weight:700;padding:0;transition:all .15s}
+.check:hover{border-color:var(--green);color:var(--green)}
+.check.on{background:var(--green);border-color:var(--green);color:var(--panel)}
+.courses{display:grid;grid-template-columns:220px minmax(0,1fr);gap:22px}
+.clist{display:flex;flex-direction:column;gap:2px;position:sticky;top:76px;align-self:start}
+.clist button{text-align:left;border:0;background:none;color:var(--ink);font:inherit;padding:8px 10px;border-radius:8px;cursor:pointer;display:flex;gap:8px;align-items:center}
+.clist button:hover{background:var(--hover)}
+.clist button.on{background:var(--panel);box-shadow:0 0 0 1px var(--line)}
+.clist .n{margin-left:auto;color:var(--muted);font-size:12px}
+.chead{display:flex;align-items:baseline;gap:14px;margin-bottom:14px;flex-wrap:wrap}
+.chead h2{margin:0;font-size:20px;letter-spacing:-.01em}
+.sub{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:26px 0 8px;font-weight:600}
+.mat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px 14px}
+details.mod{border-top:1px solid var(--line);padding:9px 0}details.mod:first-child{border-top:0}
+details.mod summary{cursor:pointer;font-weight:560}
+details.mod ul{margin:6px 0 2px;padding-left:20px}details.mod li{margin:3px 0}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.28);z-index:9}
+aside{position:fixed;top:0;right:0;bottom:0;width:min(580px,100%);background:var(--panel);z-index:10;border-left:1px solid var(--line);overflow:auto;padding:22px 24px 60px;box-shadow:-12px 0 32px rgba(0,0,0,.14)}
+aside h3{margin:6px 40px 8px 0;font-size:20px;letter-spacing:-.01em}
+aside .meta{color:var(--muted);font-size:13px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+aside h4{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:22px 0 6px}
+.note{font-size:13px;color:var(--muted);margin-top:10px}.note.warn{color:var(--amber)}
+.files a{display:flex;gap:8px;padding:7px 0;border-top:1px solid var(--line)}.files a:first-child{border-top:0}
+.files .sz{margin-left:auto;color:var(--muted);font-size:12px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.btn{border:1px solid var(--line);border-radius:8px;padding:6px 11px;font:inherit;font-size:13px;color:var(--ink);background:var(--bg);cursor:pointer}
+.btn:hover{text-decoration:none;background:var(--hover)}
+.btn.primary{background:var(--green);border-color:var(--green);color:var(--panel);font-weight:600}
+.comment{background:var(--bg);border-radius:8px;padding:8px 10px;margin:6px 0;font-size:13px;white-space:pre-wrap}
+iframe{width:100%;border:1px solid var(--line);border-radius:10px;height:380px;background:#fff}
+.close{position:absolute;top:14px;right:16px;border:0;background:var(--gray-bg);color:var(--ink);border-radius:8px;width:30px;height:30px;font-size:17px;cursor:pointer}
+.empty{color:var(--muted);padding:40px;text-align:center}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);border-radius:12px;padding:10px 10px 10px 16px;display:flex;gap:14px;align-items:center;z-index:20;box-shadow:0 8px 28px rgba(0,0,0,.25);font-size:13.5px;max-width:calc(100% - 32px);overflow:hidden}
+.toast button{border:0;background:var(--bg);color:var(--ink);font:inherit;font-weight:650;border-radius:8px;padding:5px 14px;cursor:pointer}
+.toast .timer{position:absolute;left:0;bottom:0;height:3px;background:var(--green);animation:shrink linear forwards}
+@keyframes shrink{from{width:100%}to{width:0}}
+@media (max-width:780px){
+  .row{grid-template-columns:minmax(0,1fr) auto 28px}.row .chip,.row .plat,.row .due{display:none}
+  .courses{grid-template-columns:1fr}.clist{position:static;flex-direction:row;flex-wrap:wrap}
+  input[type=search]{width:100%}
+}
+</style>
+</head>
+<body>
+<header><div class="bar">
+  <h1>SchoolHub</h1><span id="sync" class="sync"></span><button class="btn" id="syncBtn" hidden>Sync now</button>
+  <span class="spacer"></span>
+  <div class="seg" id="seg"><button data-view="upcoming">Upcoming</button><button data-view="courses">By course</button></div>
+  <input type="search" id="q" placeholder="Search assignments…">
+  <label class="tog"><input type="checkbox" id="showDone"> Show done</label>
+</div></header>
+<main id="main"></main>
+<div id="scrim" class="scrim" hidden></div>
+<aside id="drawer" hidden></aside>
+
+<script src="data.js"></script>
+<script>
+const D = window.SCHOOL_DATA;
+const $ = s => document.querySelector(s);
+const LIVE = location.protocol.startsWith('http');   // served by server.py (marks + opening files work)
+const UNDO_MS = 6000;
+const PALETTE = ['#2f6fdf','#d9534f','#2a9d6a','#a970d6','#e08a1e','#1aa3b8','#c9487f','#6d7a8c','#8a6d3b','#4f8a3a'];
+const mem = {
+  get(k, d){ try { const v = localStorage.getItem('sh:' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v){ try { localStorage.setItem('sh:' + k, JSON.stringify(v)); } catch {} },
+};
+const state = { view: mem.get('view', 'upcoming'), showDone: mem.get('showDone', false), course: mem.get('course', null), q: '' };
+const now = new Date();
+
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const num = n => n == null ? '' : (Math.round(n * 100) / 100).toString();
+const size = b => b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1e3)) + ' KB';
+const sod = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const dayDiff = d => Math.round((sod(d) - sod(now)) / 864e5);
+const api = (path, body) => fetch(path, {
+  method: 'POST', headers: {'Content-Type': 'application/json', 'X-SchoolHub': '1'}, body: JSON.stringify(body),
+}).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+
+// Files: through the local server when live (PDFs open in a tab, everything else in its Mac app).
+const VIEWABLE = /\.(pdf|png|jpe?g|gif|svg|txt|md)$/i;
+const fileUrl = p => LIVE ? '/file?p=' + encodeURIComponent(p) : 'file://' + p.split('/').map(encodeURIComponent).join('/');
+function fileAttrs(p){
+  if (!LIVE) return `href="${fileUrl(p)}"`;
+  return VIEWABLE.test(p) ? `href="${fileUrl(p)}" target="_blank"` : `href="#" data-open="${esc(p)}"`;
+}
+const folderAttrs = p => LIVE ? `href="#" data-open="${esc(p)}"` : `href="${fileUrl(p)}"`;
+function siteName(url){
+  if (!url) return '';
+  if (url.includes('gradescope')) return 'Gradescope';
+  if (url.includes('autolab')) return 'Autolab';
+  if (url.includes('instructure') || url.includes('canvas')) return 'Canvas';
+  return 'course site';
+}
+
+function fmtDue(iso, long, allDay){
+  if (!iso) return 'No due date';
+  const d = new Date(iso), days = dayDiff(d);
+  const t = allDay ? '' : d.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+  if (long) return d.toLocaleDateString([], {weekday:'long', month:'short', day:'numeric'}) + (t ? ', ' + t : '');
+  if (days === 0) return ('Today ' + t).trim();
+  if (days === 1) return ('Tomorrow ' + t).trim();
+  if (days === -1) return ('Yesterday ' + t).trim();
+  if (days > 1 && days <= 7) return (d.toLocaleDateString([], {weekday:'short'}) + ' ' + t).trim();
+  return d.toLocaleDateString([], {month:'short', day:'numeric', year: d.getFullYear() !== now.getFullYear() ? 'numeric' : undefined});
+}
+function ago(iso){
+  const h = (Date.now() - new Date(iso)) / 36e5;
+  return h < 1 ? Math.max(1, Math.round(h * 60)) + ' min ago' : h < 48 ? Math.round(h) + 'h ago' : Math.round(h / 24) + 'd ago';
+}
+
+if (!D) {
+  $('#main').innerHTML = '<p class="empty">No data yet. Run <code>python3 sync.py</code> in the SchoolHub folder.</p>';
+  throw new Error('no data');
+}
+
+const courses = D.courses.map((c, i) => ({...c, color: c.color || PALETTE[i % PALETTE.length]}));
+const all = courses.flatMap(c => c.assignments.map(a => ({...a, course: c})));
+const byId = Object.fromEntries(all.map(a => [a.id, a]));
+
+// Marks as of the last sync; replaced by the live copy from server.py when available.
+let marks = Object.fromEntries(all.filter(a => a.marked_done).map(a => [a.id, {marked_at: a.marked_done}]));
+
+const SOURCE_DONE = ['submitted','graded','excused'];
+const past = a => a.due_at && new Date(a.due_at) < now;
+function eff(a){
+  const m = marks[a.id];
+  if (m && !SOURCE_DONE.includes(a.status)) {
+    // The nightly check result only applies if it saw this exact mark.
+    return a.marked_done === m.marked_at && a.mark_check === 'not_found' ? 'flagged' : 'marked';
+  }
+  if (a.status === 'todo' && a.due_at && new Date(a.due_at) - now < 48 * 36e5) return 'soon';
+  return a.status;
+}
+const isDone = a => { const s = eff(a); return [...SOURCE_DONE, 'expired', 'marked'].includes(s) || (s === 'offline' && (!a.due_at || past(a))); };
+const needsAttention = a => ['missing','flagged','check'].includes(eff(a));
+const canMark = a => LIVE && !SOURCE_DONE.includes(a.status);
+
+function pillText(a, s){
+  if (s === 'graded' && a.score != null) return num(a.score) + (a.points ? ' / ' + num(a.points) : '');
+  if (s === 'graded' && a.grade) return a.grade;
+  return {missing:'Missing', soon:'Due soon', todo:'To do', submitted:'Submitted', graded:'Graded', offline:'Offline',
+          excused:'Excused', expired:'Old', marked:'Done ✓', flagged:'Not found', check:'Confirm'}[s];
+}
+const PILL_TIP = {
+  flagged: 'You marked this done, but the nightly check found no submission',
+  check: "SchoolHub can't see this course's submissions yet. If you turned it in, click ✓",
+  marked: 'Marked done by you',
+};
+
+function row(a){
+  const s = eff(a), nf = (a.files?.length || 0), m = !!marks[a.id];
+  return `<div class="row" data-id="${esc(a.id)}">
+    <span class="chip"><i class="dot" style="background:${a.course.color}"></i>${esc(a.course.short || a.course.name)}</span>
+    <span class="name">${esc(a.name)}${nf ? `<small>📎 ${nf}</small>` : ''}${a.late ? '<small>late</small>' : ''}${a.due_changed_from ? '<small>📅 date changed</small>' : ''}</span>
+    <span class="plat">${esc(a.platform)}</span>
+    <span class="due">${fmtDue(a.due_at, false, a.all_day)}</span>
+    <span class="pill s-${s}" title="${esc(PILL_TIP[s] || '')}">${esc(pillText(a, s))}</span>
+    ${canMark(a) ? `<button class="check ${m ? 'on' : ''}" data-mark="${esc(a.id)}" title="${m ? 'Unmark' : 'Mark as done'}" aria-label="${m ? 'Unmark' : 'Mark as done'}">✓</button>` : '<span></span>'}
+  </div>`;
+}
+
+const byDue = (x, y) => (x.due_at ? new Date(x.due_at) : Infinity) - (y.due_at ? new Date(y.due_at) : Infinity);
+
+function visible(){
+  const q = state.q.trim().toLowerCase();
+  return a => (!q || `${a.name} ${a.course.short} ${a.course.name} ${a.platform}`.toLowerCase().includes(q))
+    && (state.showDone || !isDone(a) || needsAttention(a));
+}
+
+function upcomingView(vis){
+  const order = ['Needs attention','Today','Tomorrow','Next 7 days','Later','No due date','Earlier'];
+  const G = Object.fromEntries(order.map(k => [k, []]));
+  for (const a of all.filter(vis)) {
+    if (needsAttention(a)) { G['Needs attention'].push(a); continue; }
+    if (!a.due_at) { G['No due date'].push(a); continue; }
+    const d = dayDiff(new Date(a.due_at));
+    G[d < 0 ? 'Earlier' : d === 0 ? 'Today' : d === 1 ? 'Tomorrow' : d <= 7 ? 'Next 7 days' : 'Later'].push(a);
+  }
+  G['Needs attention'].sort((x, y) => byDue(y, x));
+  G['Earlier'].sort((x, y) => byDue(y, x));
+  for (const k of ['Today','Tomorrow','Next 7 days','Later']) G[k].sort(byDue);
+  const html = order.filter(k => G[k].length).map(k =>
+    `<section class="group"><h2>${k} · ${G[k].length}</h2><div class="list">${G[k].map(row).join('')}</div></section>`).join('');
+  return html || '<p class="empty">Nothing to show. You’re all caught up 🎉</p>';
+}
+
+function coursesView(vis){
+  const cur = courses.find(c => c.id === state.course) || courses[0];
+  const left = courses.map(c => {
+    const open = all.filter(a => a.course === c && !isDone(a)).length;
+    return `<button data-course="${esc(c.id)}" class="${c === cur ? 'on' : ''}"><i class="dot" style="background:${c.color}"></i><span>${esc(c.short || c.name)}</span><span class="n">${open || ''}</span></button>`;
+  }).join('');
+  const list = all.filter(a => a.course === cur && vis(a)).sort(byDue);
+  const mats = (cur.materials || []).map(m => `<details class="mod"><summary>${esc(m.name)} <span class="muted">· ${m.items.length}</span></summary><ul>${
+    m.items.map(it => it.path
+      ? `<li><a ${fileAttrs(it.path)}>${esc(it.name)}</a> <span class="muted">${size(it.size)}</span></li>`
+      : `<li><a href="${esc(it.url || '#')}" target="_blank">${esc(it.name)}</a> <span class="muted">${esc(it.type)}</span></li>`).join('')
+  }</ul></details>`).join('');
+  return `<div class="courses"><nav class="clist">${left}</nav><div>
+    <div class="chead"><h2>${esc(cur.name)}</h2>${cur.stale ? '<span class="note warn">Showing the last good copy (the site changed; see the issue above)</span>' : ''}
+      ${cur.url ? `<a href="${esc(cur.url)}" target="_blank">Open ${siteName(cur.url)} ↗</a>` : ''}
+      ${cur.folder ? `<a ${folderAttrs(cur.folder)}>Open folder</a>` : ''}</div>
+    ${list.length ? `<div class="list">${list.map(row).join('')}</div>` : '<p class="empty">No assignments to show.</p>'}
+    ${mats ? `<div class="sub">Course materials</div><div class="mat">${mats}</div>` : ''}
+  </div></div>`;
+}
+
+function stats(){
+  const open = all.filter(a => !isDone(a));
+  const attention = all.filter(needsAttention).length;
+  const soon = open.filter(a => eff(a) === 'soon').length;
+  const week = open.filter(a => a.due_at && !past(a) && dayDiff(new Date(a.due_at)) <= 7).length;
+  const banner = LIVE ? '' : `<div class="banner">To mark assignments done and open files in their apps, use <a href="http://localhost:8722">localhost:8722</a>.</div>`;
+  const errs = D.errors?.length ? `<div class="errors"><b>Last sync had ${D.errors.length} issue(s)</b><ul>${D.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>` : '';
+  return banner + errs + `<div class="stats">
+    <div class="stat ${attention ? 'red' : ''}"><b>${attention}</b><span>Need attention</span></div>
+    <div class="stat ${soon ? 'amber' : ''}"><b>${soon}</b><span>Due in the next 48h</span></div>
+    <div class="stat"><b>${week}</b><span>Due in the next 7 days</span></div>
+    <div class="stat"><b>${D.new_files?.length || 0}</b><span>New files from last sync</span></div>
+  </div>`;
+}
+
+function render(){
+  document.querySelectorAll('#seg button').forEach(b => b.classList.toggle('on', b.dataset.view === state.view));
+  $('#showDone').checked = state.showDone;
+  const hrs = (now - new Date(D.generated_at)) / 36e5;
+  $('#sync').textContent = 'Synced ' + ago(D.generated_at);
+  $('#sync').classList.toggle('stale', hrs > 30);
+  const vis = visible();
+  $('#main').innerHTML = stats() + (state.view === 'courses' ? coursesView(vis) : upcomingView(vis));
+}
+
+function fileList(title, files){
+  if (!files?.length) return '';
+  return `<h4>${title}</h4><div class="files">${files.map(f =>
+    `<a ${fileAttrs(f.path)}>📄 ${esc(f.name)}<span class="sz">${size(f.size)}</span></a>`).join('')}</div>`;
+}
+
+function markNote(a, s){
+  const m = marks[a.id];
+  if (!m) return s === 'check'
+    ? `<div class="note warn">SchoolHub can't see ${esc(a.platform)} submissions for this course (no Gradescope login yet), so it can't confirm this on its own. If you turned it in, mark it done.</div>`
+    : '';
+  if (s === 'flagged') return `<div class="note warn">You marked this done ${ago(m.marked_at)}, but the nightly check found no submission on ${esc(a.platform)}. Double-check it went through.</div>`;
+  if (!a.verifiable) return `<div class="note">Marked done ${ago(m.marked_at)}. SchoolHub can't see ${esc(a.platform)} submissions, so this one is on your word.</div>`;
+  if (a.marked_done === m.marked_at && a.mark_check === 'confirmed') return '<div class="note">Confirmed by the nightly check.</div>';
+  return `<div class="note">Marked done ${ago(m.marked_at)}. The nightly sync will double-check ${esc(a.platform)} for your submission.</div>`;
+}
+
+let drawerId = null;
+function openDrawer(id){
+  const a = byId[id]; if (!a) return;
+  drawerId = id;
+  const s = eff(a), m = marks[a.id];
+  const doc = `<base target="_blank"><style>body{font:15px/1.5 -apple-system,sans-serif;color:#222;margin:14px}img{max-width:100%}</style>${a.description_html || ''}`;
+  const instructions = a.folder && a.description_html ? `${a.folder}/Instructions.html` : null;
+  $('#drawer').innerHTML = `<button class="close" id="close" aria-label="Close">×</button>
+    <span class="chip"><i class="dot" style="background:${a.course.color}"></i>${esc(a.course.name)}</span>
+    <h3>${esc(a.name)}</h3>
+    <div class="meta"><span class="pill s-${s}">${esc(pillText(a, s))}</span>
+      <span>${a.due_at ? (a.all_day ? 'On ' : 'Due ') + esc(fmtDue(a.due_at, true, a.all_day)) : 'No due date'}</span>
+      ${a.due_changed_from ? `<span>· moved from ${esc(fmtDue(a.due_changed_from, true, a.all_day))}</span>` : ''}<span>· ${esc(a.platform)}</span>${a.points ? `<span>· ${num(a.points)} pts</span>` : ''}${a.late ? '<span>· Late</span>' : ''}</div>
+    <div class="actions">
+      ${canMark(a) ? `<button class="btn ${m ? '' : 'primary'}" data-mark="${esc(a.id)}">${m ? 'Unmark done' : '✓ Mark as done'}</button>` : ''}
+      ${a.url ? `<a class="btn" href="${esc(a.url)}" target="_blank">Open on ${siteName(a.url)} ↗</a>` : ''}
+      ${a.gradescope_url ? `<a class="btn" href="${esc(a.gradescope_url)}" target="_blank">Open on Gradescope ↗</a>` : ''}
+      ${a.folder ? `<a class="btn" ${folderAttrs(a.folder)}>Open folder</a>` : ''}
+      ${instructions ? `<a class="btn" ${LIVE ? `href="#" data-open="${esc(instructions)}"` : `href="${fileUrl(instructions)}"`}>Offline instructions</a>` : ''}
+    </div>
+    ${markNote(a, s)}
+    ${a.submitted_at ? `<h4>Submission</h4><div>Submitted ${esc(fmtDue(a.submitted_at, true))}${a.late ? ' (late)' : ''}</div>` : ''}
+    ${fileList('Your submitted files', a.submitted_files)}
+    ${a.comments?.length ? `<h4>Feedback</h4>${a.comments.map(c => `<div class="comment"><b>${esc(c.author)}</b> · <span class="muted">${esc(fmtDue(c.at))}</span>\n${esc(c.text)}</div>`).join('')}` : ''}
+    ${fileList('Assignment files', a.files)}
+    ${a.description_html ? `<h4>Instructions</h4><iframe sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc="${esc(doc)}"></iframe>` : ''}`;
+  $('#drawer').hidden = $('#scrim').hidden = false;
+  $('#close').onclick = closeDrawer;
+}
+function closeDrawer(){ drawerId = null; $('#drawer').hidden = $('#scrim').hidden = true; }
+
+// ---- mark as done, with undo ----
+let toastTimer = null;
+function toast(msg, undo){
+  clearTimeout(toastTimer);
+  $('#toast')?.remove();
+  const el = document.createElement('div');
+  el.className = 'toast'; el.id = 'toast'; el.setAttribute('role', 'status');
+  el.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button>Undo</button>' : ''}<i class="timer" style="animation-duration:${UNDO_MS}ms"></i>`;
+  document.body.append(el);
+  if (undo) el.querySelector('button').onclick = () => { clearTimeout(toastTimer); el.remove(); undo(); };
+  toastTimer = setTimeout(() => el.remove(), UNDO_MS);
+}
+async function setMark(id, done){
+  const a = byId[id], prev = marks[id];
+  if (done) marks[id] = {marked_at: new Date().toISOString()}; else delete marks[id];
+  refresh();
+  try {
+    marks = await api('/api/mark', {id, done, name: a.name, course: a.course.short});
+    refresh();
+    return true;
+  } catch {
+    if (prev) marks[id] = prev; else delete marks[id];
+    refresh();
+    toast("Couldn't save. Is the SchoolHub server running?");
+    return false;
+  }
+}
+function toggleMark(id){
+  const done = !marks[id], a = byId[id];
+  // Show Undo right away; setMark swaps in an error toast if the save fails.
+  toast(done ? `Marked “${a.name}” done` : `Unmarked “${a.name}”`, () => setMark(id, !done));
+  setMark(id, done);
+}
+function refresh(){ render(); if (drawerId) openDrawer(drawerId); }
+
+document.addEventListener('click', e => {
+  const mk = e.target.closest('[data-mark]');
+  if (mk) { e.preventDefault(); e.stopPropagation(); return toggleMark(mk.dataset.mark); }
+  const op = e.target.closest('[data-open]');
+  if (op) { e.preventDefault(); return api('/api/open', {path: op.dataset.open}).catch(() => toast("Couldn't open that file.")); }
+  const r = e.target.closest('.row'); if (r) return openDrawer(r.dataset.id);
+  const c = e.target.closest('[data-course]'); if (c) { state.course = c.dataset.course; mem.set('course', state.course); render(); }
+  const v = e.target.closest('#seg button'); if (v) { state.view = v.dataset.view; mem.set('view', state.view); render(); }
+});
+$('#scrim').onclick = closeDrawer;
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); if (e.key === '/' && document.activeElement !== $('#q')) { e.preventDefault(); $('#q').focus(); } });
+$('#q').addEventListener('input', e => { state.q = e.target.value; render(); });
+$('#showDone').addEventListener('change', e => { state.showDone = e.target.checked; mem.set('showDone', state.showDone); render(); });
+// ---- sync now ----
+const syncBtn = $('#syncBtn');
+function showSyncing(on){ syncBtn.disabled = on; syncBtn.textContent = on ? 'Syncing…' : 'Sync now'; }
+async function pollSync(){
+  let s;
+  try { s = await fetch('/api/sync').then(r => r.json()); } catch { showSyncing(false); return toast("Couldn't reach the SchoolHub server."); }
+  if (s.running) { showSyncing(true); return setTimeout(pollSync, 2000); }
+  try { sessionStorage.setItem('sh:synced', JSON.stringify({ok: s.ok, output: s.output})); } catch {}
+  location.reload();
+}
+if (LIVE) {
+  syncBtn.hidden = false;
+  syncBtn.onclick = () => api('/api/sync', {}).then(() => { showSyncing(true); setTimeout(pollSync, 1500); })
+    .catch(() => toast("Couldn't start a sync. Is the SchoolHub server running?"));
+  fetch('/api/sync').then(r => r.json()).then(s => { if (s.running) { showSyncing(true); pollSync(); } }).catch(() => {});
+  let done = null;
+  try { done = JSON.parse(sessionStorage.getItem('sh:synced')); sessionStorage.removeItem('sh:synced'); } catch {}
+  if (done) {
+    const summary = (done.output || '').split('\n').find(l => l.startsWith('[schoolhub]'))?.replace('[schoolhub] ', '') || '';
+    const issues = (done.output || '').split('\n').filter(l => /^(⚠️|🔎|❌)/.test(l)).length;
+    toast(done.ok ? `Sync finished${summary ? ' · ' + summary : ''}${issues ? ` · ${issues} alert(s)` : ''}` : 'Sync failed. See state/server.log');
+  }
+}
+
+render();
+if (LIVE) fetch('/api/marks').then(r => r.json()).then(m => { marks = m; render(); }).catch(() => {});
+</script>
+</body>
+</html>

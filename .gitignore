@@ -1,0 +1,13 @@
+# Secrets — Canvas token and Gradescope password
+config.json
+
+# Your own school data: assignments, grades, feedback, marks, download history, logs
+data.js
+data.js.tmp
+state/
+
+# Local environment
+.venv/
+__pycache__/
+*.pyc
+.DS_Store

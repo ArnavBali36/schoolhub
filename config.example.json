@@ -1,0 +1,19 @@
+{
+  "canvas_base_url": "https://canvas.your-school.edu",
+  "canvas_token": "PASTE_YOUR_CANVAS_API_TOKEN_HERE",
+  "school_root": "~/Desktop/School",
+  "canvas_courses": {
+    "123456": {"folder": "Concepts of Mathematics", "short": "21-127"},
+    "123457": {"folder": "Other/Onboarding Course", "short": "Onboarding", "skip": true}
+  },
+  "web_courses": [
+    {"type": "cs15122", "url": "https://www.cs.cmu.edu/~15122", "folder": "15-122", "short": "15-122"}
+  ],
+  "gradescope": {
+    "email": "you@your-school.edu",
+    "password": "PASTE_YOUR_GRADESCOPE_PASSWORD_HERE",
+    "courses": {
+      "1234567": {"skip": true, "note": "not a real class"}
+    }
+  }
+}
