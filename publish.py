@@ -29,6 +29,7 @@ PLACEHOLDER = """<!doctype html><meta charset="utf-8"><meta name="robots" conten
 """
 
 VERCEL_JSON = {
+    "trailingSlash": True,   # so /<secret> redirects to /<secret>/ instead of 404ing
     "headers": [
         {"source": "/(.*)", "headers": [
             {"key": "X-Robots-Tag", "value": "noindex, nofollow"},
@@ -51,6 +52,8 @@ def build(cfg):
     shutil.copy2(HUB / "data.js", page / "data.js")
     (SITE / "index.html").write_text(PLACEHOLDER)
     (SITE / "robots.txt").write_text("User-agent: *\nDisallow: /\n")
+    # Without this the CLI falls back to the repo's .gitignore, which excludes data.js.
+    (SITE / ".vercelignore").write_text("# Upload everything in this folder.\n")
     (SITE / "vercel.json").write_text(json.dumps(VERCEL_JSON, indent=2) + "\n")
     return site
 
