@@ -11,3 +11,6 @@ state/
 __pycache__/
 *.pyc
 .DS_Store
+
+# Built phone site: contains a copy of data.js (your grades)
+schoolhub-site/

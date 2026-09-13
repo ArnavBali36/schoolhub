@@ -87,6 +87,26 @@ To run it at login on macOS, copy `examples/com.schoolhub.server.plist` to
 It stops itself after 15 minutes (`SCHOOLHUB_TIMEOUT` seconds) rather than hanging, keeps the last
 good copy of anything it couldn't reach, and reports the timeout.
 
+## Phone view (optional)
+
+`publish.py` builds a read-only copy of the dashboard into `schoolhub-site/` and can deploy it to
+Vercel, so you can check your assignments from your phone:
+
+```bash
+.venv/bin/python publish.py            # build only
+npx vercel login                       # once
+.venv/bin/python publish.py --deploy   # build + deploy, prints your URL
+```
+
+There's no login screen. Instead the page is published under one unguessable path segment
+(generated into `config.json` as `site.secret`), with `robots.txt` and `X-Robots-Tag: noindex` so it
+stays out of search engines. **Anyone with the link can read your assignments and grades, so treat
+the link like a password.** Prefer a real login? Put the site behind your host's password protection
+and drop the secret path.
+
+The hosted copy is read-only: no ✓ buttons and no file links, since both need the local server.
+Re-run `publish.py --deploy` (or add it to your nightly job) to refresh it.
+
 ## Where files land
 
 ```

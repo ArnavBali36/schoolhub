@@ -76,14 +76,24 @@ aside h3{margin:6px 40px 8px 0;font-size:20px;letter-spacing:-.01em}
 aside .meta{color:var(--muted);font-size:13px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
 aside h4{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:22px 0 6px}
 .note{font-size:13px;color:var(--muted);margin-top:10px}.note.warn{color:var(--amber)}
-.files a{display:flex;gap:8px;padding:7px 0;border-top:1px solid var(--line)}.files a:first-child{border-top:0}
+.files a,.files .offsite{display:flex;gap:8px;padding:7px 0;border-top:1px solid var(--line)}
+.files a:first-child,.files .offsite:first-child{border-top:0}
+.offsite{color:var(--muted)}
 .files .sz{margin-left:auto;color:var(--muted);font-size:12px}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
 .btn{border:1px solid var(--line);border-radius:8px;padding:6px 11px;font:inherit;font-size:13px;color:var(--ink);background:var(--bg);cursor:pointer}
 .btn:hover{text-decoration:none;background:var(--hover)}
 .btn.primary{background:var(--green);border-color:var(--green);color:var(--panel);font-weight:600}
 .comment{background:var(--bg);border-radius:8px;padding:8px 10px;margin:6px 0;font-size:13px;white-space:pre-wrap}
-iframe{width:100%;border:1px solid var(--line);border-radius:10px;height:380px;background:#fff}
+.doc{font-size:14.5px;line-height:1.6}
+.doc img{max-width:100%;height:auto;border-radius:6px}
+.doc p{margin:9px 0}.doc ul,.doc ol{margin:9px 0;padding-left:22px}.doc li{margin:4px 0}
+.doc h1,.doc h2,.doc h3,.doc h4{font-size:15px;margin:16px 0 6px;font-weight:650}
+.doc a{word-break:break-word}
+.doc table{display:block;overflow-x:auto;border-collapse:collapse;margin:10px 0}
+.doc td,.doc th{border:1px solid var(--line);padding:6px 9px;text-align:left}
+.doc pre{overflow-x:auto;background:var(--bg);padding:10px;border-radius:8px}
+.doc iframe,.doc video{max-width:100%}
 .close{position:absolute;top:14px;right:16px;border:0;background:var(--gray-bg);color:var(--ink);border-radius:8px;width:30px;height:30px;font-size:17px;cursor:pointer}
 .empty{color:var(--muted);padding:40px;text-align:center}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);border-radius:12px;padding:10px 10px 10px 16px;display:flex;gap:14px;align-items:center;z-index:20;box-shadow:0 8px 28px rgba(0,0,0,.25);font-size:13.5px;max-width:calc(100% - 32px);overflow:hidden}
@@ -91,9 +101,23 @@ iframe{width:100%;border:1px solid var(--line);border-radius:10px;height:380px;b
 .toast .timer{position:absolute;left:0;bottom:0;height:3px;background:var(--green);animation:shrink linear forwards}
 @keyframes shrink{from{width:100%}to{width:0}}
 @media (max-width:780px){
-  .row{grid-template-columns:minmax(0,1fr) auto 28px}.row .chip,.row .plat,.row .due{display:none}
+  .bar{padding:10px 14px;gap:10px}h1{font-size:16px}
+  main{padding:14px 14px 70px}
+  .stats{grid-template-columns:1fr 1fr;gap:8px}.stat{padding:10px 12px}.stat b{font-size:21px}
+  .row{grid-template-columns:minmax(0,1fr) auto 32px;grid-template-areas:"name pill check" "chip due check";
+       row-gap:3px;column-gap:10px;padding:11px 12px}
+  .row .name{grid-area:name;white-space:normal;line-height:1.3}
+  .row .pill{grid-area:pill;align-self:start}
+  .row .chip{grid-area:chip}
+  .row .due{grid-area:due;align-self:end}
+  .row .plat{display:none}
+  .row .check{grid-area:check;width:32px;height:32px;align-self:center}
   .courses{grid-template-columns:1fr}.clist{position:static;flex-direction:row;flex-wrap:wrap}
   input[type=search]{width:100%}
+  aside{width:100%;padding:18px 16px calc(50px + env(safe-area-inset-bottom))}
+  aside h3{font-size:18px}
+  .close{width:34px;height:34px}
+  .toast{left:12px;right:12px;transform:none;max-width:none}
 }
 </style>
 </head>
@@ -113,7 +137,8 @@ iframe{width:100%;border:1px solid var(--line);border-radius:10px;height:380px;b
 <script>
 const D = window.SCHOOL_DATA;
 const $ = s => document.querySelector(s);
-const LIVE = location.protocol.startsWith('http');   // served by server.py (marks + opening files work)
+let LIVE = false;                                   // true once server.py answers: marks, file opening, Sync now
+const LOCAL_FILES = location.protocol === 'file:';  // opened straight off disk: file:// links work
 const UNDO_MS = 6000;
 const PALETTE = ['#2f6fdf','#d9534f','#2a9d6a','#a970d6','#e08a1e','#1aa3b8','#c9487f','#6d7a8c','#8a6d3b','#4f8a3a'];
 const mem = {
@@ -136,10 +161,15 @@ const api = (path, body) => fetch(path, {
 const VIEWABLE = /\.(pdf|png|jpe?g|gif|svg|txt|md)$/i;
 const fileUrl = p => LIVE ? '/file?p=' + encodeURIComponent(p) : 'file://' + p.split('/').map(encodeURIComponent).join('/');
 function fileAttrs(p){
-  if (!LIVE) return `href="${fileUrl(p)}"`;
-  return VIEWABLE.test(p) ? `href="${fileUrl(p)}" target="_blank"` : `href="#" data-open="${esc(p)}"`;
+  if (LIVE) return VIEWABLE.test(p) ? `href="${fileUrl(p)}" target="_blank"` : `href="#" data-open="${esc(p)}"`;
+  if (LOCAL_FILES) return `href="${fileUrl(p)}"`;
+  return null;  // read-only view: the file only exists on your Mac
 }
-const folderAttrs = p => LIVE ? `href="#" data-open="${esc(p)}"` : `href="${fileUrl(p)}"`;
+const folderAttrs = p => LIVE ? `href="#" data-open="${esc(p)}"` : LOCAL_FILES ? `href="${fileUrl(p)}"` : null;
+const linked = (inner, path) => {
+  const attrs = fileAttrs(path);
+  return attrs ? `<a ${attrs}>${inner}</a>` : `<span class="offsite" title="On your Mac: ${esc(path)}">${inner}</span>`;
+};
 function siteName(url){
   if (!url) return '';
   if (url.includes('gradescope')) return 'Gradescope';
@@ -249,13 +279,13 @@ function coursesView(vis){
   const list = all.filter(a => a.course === cur && vis(a)).sort(byDue);
   const mats = (cur.materials || []).map(m => `<details class="mod"><summary>${esc(m.name)} <span class="muted">· ${m.items.length}</span></summary><ul>${
     m.items.map(it => it.path
-      ? `<li><a ${fileAttrs(it.path)}>${esc(it.name)}</a> <span class="muted">${size(it.size)}</span></li>`
+      ? `<li>${linked(esc(it.name), it.path)} <span class="muted">${size(it.size)}</span></li>`
       : `<li><a href="${esc(it.url || '#')}" target="_blank">${esc(it.name)}</a> <span class="muted">${esc(it.type)}</span></li>`).join('')
   }</ul></details>`).join('');
   return `<div class="courses"><nav class="clist">${left}</nav><div>
     <div class="chead"><h2>${esc(cur.name)}</h2>${cur.stale ? '<span class="note warn">Showing the last good copy (the site changed; see the issue above)</span>' : ''}
       ${cur.url ? `<a href="${esc(cur.url)}" target="_blank">Open ${siteName(cur.url)} ↗</a>` : ''}
-      ${cur.folder ? `<a ${folderAttrs(cur.folder)}>Open folder</a>` : ''}</div>
+      ${cur.folder && folderAttrs(cur.folder) ? `<a ${folderAttrs(cur.folder)}>Open folder</a>` : ''}</div>
     ${list.length ? `<div class="list">${list.map(row).join('')}</div>` : '<p class="empty">No assignments to show.</p>'}
     ${mats ? `<div class="sub">Course materials</div><div class="mat">${mats}</div>` : ''}
   </div></div>`;
@@ -266,7 +296,9 @@ function stats(){
   const attention = all.filter(needsAttention).length;
   const soon = open.filter(a => eff(a) === 'soon').length;
   const week = open.filter(a => a.due_at && !past(a) && dayDiff(new Date(a.due_at)) <= 7).length;
-  const banner = LIVE ? '' : `<div class="banner">To mark assignments done and open files in their apps, use <a href="http://localhost:8722">localhost:8722</a>.</div>`;
+  const banner = LIVE ? '' : LOCAL_FILES
+    ? `<div class="banner">To mark assignments done and open files in their apps, use <a href="http://localhost:8722">localhost:8722</a>.</div>`
+    : `<div class="banner">Read-only view. Your files and the ✓ buttons live on your Mac; this page shows the last sync.</div>`;
   const errs = D.errors?.length ? `<div class="errors"><b>Last sync had ${D.errors.length} issue(s)</b><ul>${D.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>` : '';
   return banner + errs + `<div class="stats">
     <div class="stat ${attention ? 'red' : ''}"><b>${attention}</b><span>Need attention</span></div>
@@ -286,10 +318,26 @@ function render(){
   $('#main').innerHTML = stats() + (state.view === 'courses' ? coursesView(vis) : upcomingView(vis));
 }
 
+// Instructions come from course pages, so strip anything executable before showing them inline.
+function safeHtml(html){
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('script,style,iframe,object,embed,form,input,button,link,meta').forEach(el => el.remove());
+  for (const el of doc.querySelectorAll('*')) {
+    for (const attr of [...el.attributes]) {
+      const name = attr.name.toLowerCase(), value = attr.value.trim().toLowerCase();
+      const isUrl = ['href','src','xlink:href','action'].includes(name);
+      if (name.startsWith('on') || (isUrl && (value.startsWith('javascript:') || value.startsWith('data:text/html'))))
+        el.removeAttribute(attr.name);
+    }
+    if (el.tagName === 'A') { el.target = '_blank'; el.rel = 'noopener noreferrer'; }
+  }
+  return doc.body.innerHTML;
+}
+
 function fileList(title, files){
   if (!files?.length) return '';
   return `<h4>${title}</h4><div class="files">${files.map(f =>
-    `<a ${fileAttrs(f.path)}>📄 ${esc(f.name)}<span class="sz">${size(f.size)}</span></a>`).join('')}</div>`;
+    linked(`📄 ${esc(f.name)}<span class="sz">${size(f.size)}</span>`, f.path)).join('')}</div>`;
 }
 
 function markNote(a, s){
@@ -308,7 +356,6 @@ function openDrawer(id){
   const a = byId[id]; if (!a) return;
   drawerId = id;
   const s = eff(a), m = marks[a.id];
-  const doc = `<base target="_blank"><style>body{font:15px/1.5 -apple-system,sans-serif;color:#222;margin:14px}img{max-width:100%}</style>${a.description_html || ''}`;
   const instructions = a.folder && a.description_html ? `${a.folder}/Instructions.html` : null;
   $('#drawer').innerHTML = `<button class="close" id="close" aria-label="Close">×</button>
     <span class="chip"><i class="dot" style="background:${a.course.color}"></i>${esc(a.course.name)}</span>
@@ -320,15 +367,15 @@ function openDrawer(id){
       ${canMark(a) ? `<button class="btn ${m ? '' : 'primary'}" data-mark="${esc(a.id)}">${m ? 'Unmark done' : '✓ Mark as done'}</button>` : ''}
       ${a.url ? `<a class="btn" href="${esc(a.url)}" target="_blank">Open on ${siteName(a.url)} ↗</a>` : ''}
       ${a.gradescope_url ? `<a class="btn" href="${esc(a.gradescope_url)}" target="_blank">Open on Gradescope ↗</a>` : ''}
-      ${a.folder ? `<a class="btn" ${folderAttrs(a.folder)}>Open folder</a>` : ''}
-      ${instructions ? `<a class="btn" ${LIVE ? `href="#" data-open="${esc(instructions)}"` : `href="${fileUrl(instructions)}"`}>Offline instructions</a>` : ''}
+      ${a.folder && folderAttrs(a.folder) ? `<a class="btn" ${folderAttrs(a.folder)}>Open folder</a>` : ''}
+      ${instructions && (LIVE || LOCAL_FILES) ? `<a class="btn" ${LIVE ? `href="#" data-open="${esc(instructions)}"` : `href="${fileUrl(instructions)}"`}>Offline instructions</a>` : ''}
     </div>
     ${markNote(a, s)}
     ${a.submitted_at ? `<h4>Submission</h4><div>Submitted ${esc(fmtDue(a.submitted_at, true))}${a.late ? ' (late)' : ''}</div>` : ''}
     ${fileList('Your submitted files', a.submitted_files)}
     ${a.comments?.length ? `<h4>Feedback</h4>${a.comments.map(c => `<div class="comment"><b>${esc(c.author)}</b> · <span class="muted">${esc(fmtDue(c.at))}</span>\n${esc(c.text)}</div>`).join('')}` : ''}
     ${fileList('Assignment files', a.files)}
-    ${a.description_html ? `<h4>Instructions</h4><iframe sandbox="allow-popups allow-popups-to-escape-sandbox" srcdoc="${esc(doc)}"></iframe>` : ''}`;
+    ${a.description_html ? `<h4>Instructions</h4><div class="doc">${safeHtml(a.description_html)}</div>` : ''}`;
   $('#drawer').hidden = $('#scrim').hidden = false;
   $('#close').onclick = closeDrawer;
 }
@@ -392,7 +439,7 @@ async function pollSync(){
   try { sessionStorage.setItem('sh:synced', JSON.stringify({ok: s.ok, output: s.output})); } catch {}
   location.reload();
 }
-if (LIVE) {
+function enableServerFeatures(){
   syncBtn.hidden = false;
   syncBtn.onclick = () => api('/api/sync', {}).then(() => { showSyncing(true); setTimeout(pollSync, 1500); })
     .catch(() => toast("Couldn't start a sync. Is the SchoolHub server running?"));
@@ -407,7 +454,13 @@ if (LIVE) {
 }
 
 render();
-if (LIVE) fetch('/api/marks').then(r => r.json()).then(m => { marks = m; render(); }).catch(() => {});
+// Only your Mac answers this; anywhere else (phone, Vercel) the page stays a read-only view.
+fetch('/api/marks').then(r => r.ok ? r.json() : Promise.reject()).then(m => {
+  marks = m;
+  LIVE = true;
+  enableServerFeatures();
+  render();
+}).catch(() => {});
 </script>
 </body>
 </html>
