@@ -589,6 +589,16 @@ def main():
     tmp.write_text("window.SCHOOL_DATA = " + json.dumps(data) + ";\n")
     tmp.replace(DATA_JS)
 
+    site = cfg.get("site") or {}
+    if site.get("auto_deploy"):
+        try:
+            import publish
+            publish.build(cfg)
+            url = publish.deploy(site)
+            print(f"[schoolhub] published to {url}", file=sys.stderr)
+        except Exception as e:
+            errors.append(f"Publishing the phone view failed: {e}")
+
     lines = attention(courses, flagged, changes, store, errors, now)
     if lines:
         print("\n".join(lines))

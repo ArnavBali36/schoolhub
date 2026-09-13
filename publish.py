@@ -55,18 +55,34 @@ def build(cfg):
     return site
 
 
+def production_url(fallback=None):
+    """The stable https://<project>.vercel.app address, not the per-deploy one."""
+    try:
+        name = json.loads((SITE / ".vercel" / "project.json").read_text()).get("projectName")
+        if name:
+            return f"https://{name}.vercel.app"
+    except (FileNotFoundError, KeyError, json.JSONDecodeError):
+        pass
+    return fallback
+
+
 def deploy(site):
-    cmd = ["npx", "--yes", "vercel@latest", "deploy", "--prod", "--yes"]
+    npx = shutil.which("npx") or next((p for p in ("/opt/homebrew/bin/npx", "/usr/local/bin/npx")
+                                        if Path(p).exists()), None)
+    if not npx:
+        raise RuntimeError("npx not found; install Node.js or add it to PATH")
+    cmd = [npx, "--yes", "vercel@latest", "deploy", "--prod", "--yes"]
     if site.get("vercel_token"):
         cmd += ["--token", site["vercel_token"]]
-    result = subprocess.run(cmd, cwd=SITE, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(cmd, cwd=SITE, capture_output=True, text=True, timeout=900)
     output = (result.stdout + result.stderr).strip()
     if result.returncode != 0:
-        print(output[-1500:], file=sys.stderr)
-        sys.exit("Deploy failed. Run `npx vercel login` first, or put a token in config.json "
-                 "under site.vercel_token.")
-    urls = [ln.strip() for ln in output.splitlines() if ln.strip().startswith("https://")]
-    return urls[-1] if urls else None
+        raise RuntimeError("deploy failed: " + output[-600:])
+    # npm chatter can share a line with the URL, so take the first URL-looking token.
+    urls = [word for line in output.splitlines() for word in line.split()
+            if word.startswith("https://") and ".vercel.app" in word]
+    deployed = urls[-1].split(".vercel.app")[0] + ".vercel.app" if urls else None
+    return production_url(deployed)
 
 
 def main():
@@ -74,8 +90,13 @@ def main():
     site = build(cfg)
     print(f"Built {SITE}")
     if "--deploy" in sys.argv:
-        url = deploy(site)
+        try:
+            url = deploy(site)
+        except RuntimeError as e:
+            sys.exit(f"{e}\n\nRun `npx vercel login` first, or set site.vercel_token in config.json.")
         if url:
+            site["url"] = url
+            CONFIG.write_text(json.dumps(cfg, indent=2) + "\n")
             print(f"\nYour page: {url}/{site['secret']}/")
 
 

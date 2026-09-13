@@ -105,7 +105,11 @@ the link like a password.** Prefer a real login? Put the site behind your host's
 and drop the secret path.
 
 The hosted copy is read-only: no ✓ buttons and no file links, since both need the local server.
-Re-run `publish.py --deploy` (or add it to your nightly job) to refresh it.
+Set `site.auto_deploy` to `true` in `config.json` and every sync republishes it, so the phone view
+keeps up with the nightly run.
+
+New Vercel projects enable "Vercel Authentication" (Settings → Deployment Protection), which puts a
+Vercel login in front of the site. Turn it off if you want the link to just work.
 
 ## Where files land
 
