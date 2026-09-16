@@ -20,6 +20,9 @@ put them yourself, and writes a static page you open in your browser. Everything
 - **Tracks status** per assignment: To do, Due soon, Submitted, Graded, Missing, Offline.
 - **Mark as done** with ✓ for work the APIs can't see (paper hand-ins, Autolab). The next sync
   double-checks each mark against Canvas/Gradescope and flags any it can't confirm.
+- **Add your own tasks** with the **+** button (or press **N**): a name, a course or "Personal", an
+  optional due date and time, and notes. They get ✓, Undo, overdue warnings and due-soon alerts like
+  everything else, and they show up on the phone view.
 - **Tells you what changed**: due dates that moved, newly posted assignments, work due within 36
   hours that isn't done, and anything newly missing.
 - **Fails loudly**: if a course website changes shape, the parser refuses to guess — it reports the
@@ -61,6 +64,7 @@ open dashboard.html
 `server.py` serves the dashboard on <http://localhost:8722>, which adds:
 
 - the ✓ **mark as done** buttons (saved to `state/marks.json`, checked by the next sync)
+- the **+** button for your own tasks (saved to `state/tasks.json`)
 - **Sync now** in the header
 - files opening in their real apps, and folders in Finder
 - a **catch-up sync** if the data is more than 20 hours old

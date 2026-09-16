@@ -38,6 +38,7 @@ STATE = HUB / "state"
 MANIFEST = STATE / "manifest.json"
 ALERTED = STATE / "alerted.json"
 MARKS = STATE / "marks.json"
+TASKS = STATE / "tasks.json"
 DATA_JS = HUB / "data.js"
 MAX_BYTES = 250 * 1024 * 1024
 OFFLINE_TYPES = {"none", "on_paper", "not_graded"}
@@ -431,6 +432,30 @@ def sync_web(cfg, store, errors, now, previous):
     return out
 
 
+# ---------- your own tasks (the dashboard's + button) ----------
+
+def add_tasks(courses, now):
+    """Place tasks from state/tasks.json under the course you picked, or under "Personal"."""
+    for c in courses:  # a stale course copied from the last run can still carry old task rows
+        c["assignments"] = [a for a in c["assignments"] if not a.get("is_task")]
+    courses[:] = [c for c in courses if c["id"] != "personal"]
+    by_id = {c["id"]: c for c in courses}
+    personal = {"id": "personal", "source": "personal", "name": "Personal tasks", "short": "Personal",
+                "color": "#8e8e93", "url": None, "folder": None, "assignments": [], "materials": []}
+    for t in load_json(TASKS, {}).values():
+        due = parse_ts(t.get("due_at"))
+        by_id.get(t.get("course_id"), personal)["assignments"].append({
+            "id": t["id"], "name": t["name"], "due_at": t.get("due_at"), "all_day": bool(t.get("all_day")),
+            "points": None, "status": "overdue" if due and due < now else "todo",
+            "score": None, "grade": None, "submitted_at": None, "late": False,
+            "platform": "My task", "verifiable": False, "url": None, "folder": None,
+            "files": [], "submitted_files": [], "description_html": "", "comments": [],
+            "notes": t.get("notes", ""), "is_task": True, "course_id": t.get("course_id") or "personal",
+        })
+    if personal["assignments"]:
+        courses.append(personal)
+
+
 # ---------- "mark as done" double-check ----------
 
 def apply_marks(courses):
@@ -499,6 +524,8 @@ def detect_changes(courses, previous):
         if old is None or c.get("stale"):
             continue
         for a in c["assignments"]:
+            if a.get("is_task"):
+                continue  # you made it yourself; no need to announce it
             prev = old.get(a["id"])
             if prev is None:
                 added.append((c, a))
@@ -528,9 +555,10 @@ def attention(courses, flagged, changes, store, errors, now):
             if a["status"] == "todo" and not a.get("marked_done") and due - now < timedelta(hours=36):
                 state = "not submitted" if a.get("verifiable") else "not marked done"
                 lines.append(f"⏰ {c['short']}: {a['name']} is due {fmt_local(due)} and {state}")
-            elif a["status"] == "missing" and a["id"] not in alerted and now - due < timedelta(days=21):
+            elif (a["status"] in ("missing", "overdue") and not a.get("marked_done")
+                  and a["id"] not in alerted and now - due < timedelta(days=21)):
                 alerted[a["id"]] = now.isoformat()
-                lines.append(f"❌ {c['short']}: {a['name']} is missing (was due {fmt_local(due)})")
+                lines.append(f"❌ {c['short']}: {a['name']} is {a['status']} (was due {fmt_local(due)})")
     moved, added = changes
     finished = ("submitted", "graded", "excused", "expired")
     for c, a in moved:
@@ -581,6 +609,7 @@ def main():
     finally:
         signal.alarm(0)
     store.save()
+    add_tasks(courses, now)
     flagged = apply_marks(courses)
     changes = detect_changes(courses, previous)
 

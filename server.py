@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """SchoolHub local server: http://localhost:8722
 
-Serves the dashboard and your class files, and saves "mark as done" clicks to
-state/marks.json so the nightly sync can double-check them. Listens on 127.0.0.1 only.
+Serves the dashboard and your class files, saves "mark as done" clicks to state/marks.json
+(which the nightly sync double-checks), and stores your own tasks in state/tasks.json. Listens on 127.0.0.1 only.
 """
 import json
 import mimetypes
+import re
 import subprocess
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,6 +19,8 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 HUB = Path(__file__).resolve().parent
 MARKS = HUB / "state" / "marks.json"
+TASKS = HUB / "state" / "tasks.json"
+TASK_ID = re.compile(r"^task:[a-z0-9]{8,32}$")
 PORT = 8722
 ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 PAGES = {"/": "dashboard.html", "/dashboard.html": "dashboard.html", "/data.js": "data.js"}
@@ -53,18 +57,41 @@ def allowed_path(p):
     return path if path.exists() else None
 
 
-def load_marks():
+def read_state(path):
     try:
-        return json.loads(MARKS.read_text())
+        return json.loads(path.read_text())
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
 
-def save_marks(marks):
-    MARKS.parent.mkdir(exist_ok=True)
-    tmp = MARKS.with_suffix(".tmp")
-    tmp.write_text(json.dumps(marks, indent=1))
-    tmp.replace(MARKS)
+def write_state(path, obj):
+    path.parent.mkdir(exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(obj, indent=1))
+    tmp.replace(path)
+
+
+def clean_task(body, existing):
+    """Validate a task from the dashboard form. Returns (task, error)."""
+    name = str(body.get("name") or "").strip()[:200]
+    if not name:
+        return None, "a task needs a name"
+    due = body.get("due_at") or None
+    if due:
+        try:
+            datetime.fromisoformat(str(due).replace("Z", "+00:00"))
+        except ValueError:
+            return None, "due_at must be an ISO date"
+    stamp = datetime.now(timezone.utc).isoformat()
+    return {
+        "name": name,
+        "course_id": str(body.get("course_id") or "personal")[:80],
+        "due_at": due,
+        "all_day": bool(due) and bool(body.get("all_day")),
+        "notes": str(body.get("notes") or "").strip()[:5000],
+        "created_at": (existing or {}).get("created_at") or body.get("created_at") or stamp,
+        "updated_at": stamp,
+    }, None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -101,9 +128,12 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/sync":
             with SYNC_LOCK:
                 return self._json(sync_state)
+        if url.path == "/api/tasks":
+            with LOCK:
+                return self._json({"tasks": read_state(TASKS)})
         if url.path == "/api/marks":
             with LOCK:
-                return self._json(load_marks())
+                return self._json(read_state(MARKS))
         if url.path == "/file":
             p = allowed_path(parse_qs(url.query).get("p", [""])[0])
             if not p or not p.is_file():
@@ -131,14 +161,34 @@ class Handler(BaseHTTPRequestHandler):
             if not aid:
                 return self._send(400, b"missing id")
             with LOCK:
-                marks = load_marks()
+                marks = read_state(MARKS)
                 if body.get("done"):
                     marks[aid] = {"marked_at": datetime.now(timezone.utc).isoformat(),
                                   "name": body.get("name"), "course": body.get("course")}
                 else:
                     marks.pop(aid, None)
-                save_marks(marks)
+                write_state(MARKS, marks)
             return self._json(marks)
+
+        if path == "/api/task":
+            tid = str(body.get("id") or "") or f"task:{uuid.uuid4().hex[:12]}"
+            if not TASK_ID.match(tid):
+                return self._send(400, b"bad task id")
+            with LOCK:
+                tasks = read_state(TASKS)
+                task, error = clean_task(body, tasks.get(tid))
+                if error:
+                    return self._send(400, error.encode())
+                tasks[tid] = {"id": tid, **task}
+                write_state(TASKS, tasks)
+            return self._json({"task": tasks[tid], "tasks": tasks})
+
+        if path == "/api/task/delete":
+            with LOCK:
+                tasks = read_state(TASKS)
+                removed = tasks.pop(str(body.get("id") or ""), None)
+                write_state(TASKS, tasks)
+            return self._json({"removed": removed, "tasks": tasks})
 
         if path == "/api/sync":
             with SYNC_LOCK:
