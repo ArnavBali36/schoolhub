@@ -432,6 +432,23 @@ def sync_web(cfg, store, errors, now, previous):
     return out
 
 
+# ---------- marks and tasks: cloud database if connected, else local files ----------
+
+def load_user_state(name):
+    """Marks/tasks from the shared database when connected (the phone can change them), else local."""
+    path = MARKS if name == "marks" else TASKS
+    try:
+        import cloud
+        db = cloud.connect()
+        if db:
+            data = db.get_all(name)
+            save_json(path, data)
+            return data
+    except Exception:
+        pass
+    return load_json(path, {})
+
+
 # ---------- your own tasks (the dashboard's + button) ----------
 
 def add_tasks(courses, now):
@@ -442,7 +459,7 @@ def add_tasks(courses, now):
     by_id = {c["id"]: c for c in courses}
     personal = {"id": "personal", "source": "personal", "name": "Personal tasks", "short": "Personal",
                 "color": "#8e8e93", "url": None, "folder": None, "assignments": [], "materials": []}
-    for t in load_json(TASKS, {}).values():
+    for t in load_user_state("tasks").values():
         due = parse_ts(t.get("due_at"))
         by_id.get(t.get("course_id"), personal)["assignments"].append({
             "id": t["id"], "name": t["name"], "due_at": t.get("due_at"), "all_day": bool(t.get("all_day")),
@@ -451,6 +468,7 @@ def add_tasks(courses, now):
             "platform": "My task", "verifiable": False, "url": None, "folder": None,
             "files": [], "submitted_files": [], "description_html": "", "comments": [],
             "notes": t.get("notes", ""), "is_task": True, "course_id": t.get("course_id") or "personal",
+            "created_at": t.get("created_at", ""),
         })
     if personal["assignments"]:
         courses.append(personal)
@@ -460,7 +478,7 @@ def add_tasks(courses, now):
 
 def apply_marks(courses):
     """Compare dashboard marks (state/marks.json) with what Canvas/Gradescope report."""
-    marks = load_json(MARKS, {})
+    marks = load_user_state("marks")
     flagged = []
     for c in courses:
         for a in c["assignments"]:

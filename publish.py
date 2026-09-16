@@ -55,6 +55,8 @@ def build(cfg):
     # Without this the CLI falls back to the repo's .gitignore, which excludes data.js.
     (SITE / ".vercelignore").write_text("# Upload everything in this folder.\n")
     (SITE / "vercel.json").write_text(json.dumps(VERCEL_JSON, indent=2) + "\n")
+    # The phone's read/write API for marks and tasks (a Vercel function).
+    shutil.copytree(HUB / "vercel" / "api", SITE / "api", dirs_exist_ok=True)
     return site
 
 

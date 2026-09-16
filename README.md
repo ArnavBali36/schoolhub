@@ -108,12 +108,32 @@ stays out of search engines. **Anyone with the link can read your assignments an
 the link like a password.** Prefer a real login? Put the site behind your host's password protection
 and drop the secret path.
 
-The hosted copy is read-only: no ✓ buttons and no file links, since both need the local server.
+The hosted copy has no file links (files live on your Mac), and it's read-only unless you connect
+the free database below.
 Set `site.auto_deploy` to `true` in `config.json` and every sync republishes it, so the phone view
 keeps up with the nightly run.
 
 New Vercel projects enable "Vercel Authentication" (Settings → Deployment Protection), which puts a
 Vercel login in front of the site. Turn it off if you want the link to just work.
+
+## Edit from your phone (optional, free)
+
+Connect a free Upstash Redis database to the Vercel project and the phone view can save ✓ marks and
+tasks too. Your Mac and phone then share one copy of both; grades and files stay where they are.
+
+1. Vercel dashboard → your project → **Storage** → **Create Database** → **Upstash for Redis** →
+   Free plan → connect it to the project.
+2. Give the site's API its key, and pull the database credentials to your Mac:
+   ```bash
+   cd schoolhub-site
+   printf '%s' "<site.secret from config.json>" | npx vercel env add SCHOOLHUB_SECRET production
+   npx vercel env pull ../state/cloud.env --environment=production
+   ```
+3. Restart `server.py` (on first start it copies your existing marks and tasks up), then run
+   `publish.py --deploy`.
+
+`vercel/api/state.js` only answers requests that carry the site's secret path segment. The database
+token stays on Vercel and in `state/cloud.env` (gitignored) and never reaches the browser.
 
 ## Where files land
 

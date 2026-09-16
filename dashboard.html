@@ -172,7 +172,9 @@ dialog.task .buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:4p
 <script>
 const D = window.SCHOOL_DATA;
 const $ = s => document.querySelector(s);
-let LIVE = false;                                   // true once server.py answers: marks, file opening, Sync now
+let LIVE = false;                                   // true once server.py answers: file opening, Sync now
+let WRITE = null;                                   // where ✓ marks and tasks save: 'local' (your Mac) or 'cloud' (phone site)
+const SITE_KEY = location.pathname.split('/').filter(Boolean)[0] || '';  // the phone site's secret path segment
 const LOCAL_FILES = location.protocol === 'file:';  // opened straight off disk: file:// links work
 const UNDO_MS = 6000;
 const PALETTE = ['#2f6fdf','#d9534f','#2a9d6a','#a970d6','#e08a1e','#1aa3b8','#c9487f','#6d7a8c','#8a6d3b','#4f8a3a'];
@@ -191,6 +193,20 @@ const dayDiff = d => Math.round((sod(d) - sod(now)) / 864e5);
 const api = (path, body) => fetch(path, {
   method: 'POST', headers: {'Content-Type': 'application/json', 'X-SchoolHub': '1'}, body: JSON.stringify(body),
 }).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+const cloudApi = body => fetch('/api/state/', {
+  method: body ? 'POST' : 'GET',
+  headers: {'Content-Type': 'application/json', 'X-SchoolHub-Key': SITE_KEY},
+  body: body ? JSON.stringify(body) : undefined,
+}).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+// Same calls whether saving through your Mac's server or the phone site's cloud database.
+const backend = {
+  async mark(id, done, a){
+    const body = {id, done, name: a.name, course: a.course.short};
+    return WRITE === 'cloud' ? (await cloudApi({action: 'mark', ...body})).marks : api('/api/mark', body);
+  },
+  saveTask: body => WRITE === 'cloud' ? cloudApi({action: 'task', ...body}) : api('/api/task', body),
+  deleteTask: id => WRITE === 'cloud' ? cloudApi({action: 'deleteTask', id}) : api('/api/task/delete', {id}),
+};
 
 // Files: through the local server when live (PDFs open in a tab, everything else in its Mac app).
 const VIEWABLE = /\.(pdf|png|jpe?g|gif|svg|txt|md)$/i;
@@ -242,7 +258,8 @@ function taskItem(t){
   return {id: t.id, name: t.name, due_at: t.due_at, all_day: !!t.all_day, points: null,
     status: due && due < now ? 'overdue' : 'todo', score: null, grade: null, submitted_at: null, late: false,
     platform: 'My task', verifiable: false, url: null, folder: null, files: [], submitted_files: [],
-    description_html: '', comments: [], notes: t.notes || '', is_task: true, course_id: t.course_id || 'personal'};
+    description_html: '', comments: [], notes: t.notes || '', is_task: true, course_id: t.course_id || 'personal',
+    created_at: t.created_at || ''};
 }
 function rebuild(){
   let base = D.courses;
@@ -275,7 +292,7 @@ function eff(a){
 }
 const isDone = a => { const s = eff(a); return [...SOURCE_DONE, 'expired', 'marked'].includes(s) || (s === 'offline' && (!a.due_at || past(a))); };
 const needsAttention = a => ['missing','overdue','flagged','check'].includes(eff(a));
-const canMark = a => LIVE && !SOURCE_DONE.includes(a.status);
+const canMark = a => WRITE && !SOURCE_DONE.includes(a.status);
 
 function pillText(a, s){
   if (s === 'graded' && a.score != null) return num(a.score) + (a.points ? ' / ' + num(a.points) : '');
@@ -302,6 +319,10 @@ function row(a){
 }
 
 const byDue = (x, y) => (x.due_at ? new Date(x.due_at) : Infinity) - (y.due_at ? new Date(y.due_at) : Infinity);
+// Your own tasks with no due date stay pinned to the top, in the order you added them.
+const undatedTask = a => a.is_task && !a.due_at;
+const listOrder = (x, y) => (undatedTask(y) - undatedTask(x)) || byDue(x, y)
+  || (undatedTask(x) ? String(x.created_at).localeCompare(String(y.created_at)) : 0);
 
 function visible(){
   const q = state.q.trim().toLowerCase();
@@ -310,9 +331,10 @@ function visible(){
 }
 
 function upcomingView(vis){
-  const order = ['Needs attention','Today','Tomorrow','Next 7 days','Later','No due date','Earlier'];
+  const order = ['My tasks','Needs attention','Today','Tomorrow','Next 7 days','Later','No due date','Earlier'];
   const G = Object.fromEntries(order.map(k => [k, []]));
   for (const a of all.filter(vis)) {
+    if (undatedTask(a)) { G['My tasks'].push(a); continue; }
     if (needsAttention(a)) { G['Needs attention'].push(a); continue; }
     if (!a.due_at) { G['No due date'].push(a); continue; }
     const d = dayDiff(new Date(a.due_at));
@@ -320,6 +342,7 @@ function upcomingView(vis){
   }
   G['Needs attention'].sort((x, y) => byDue(y, x));
   G['Earlier'].sort((x, y) => byDue(y, x));
+  G['My tasks'].sort(listOrder);
   for (const k of ['Today','Tomorrow','Next 7 days','Later']) G[k].sort(byDue);
   const html = order.filter(k => G[k].length).map(k =>
     `<section class="group"><h2>${k} · ${G[k].length}</h2><div class="list">${G[k].map(row).join('')}</div></section>`).join('');
@@ -332,7 +355,7 @@ function coursesView(vis){
     const open = all.filter(a => a.course === c && !isDone(a)).length;
     return `<button data-course="${esc(c.id)}" class="${c === cur ? 'on' : ''}"><i class="dot" style="background:${c.color}"></i><span>${esc(c.short || c.name)}</span><span class="n">${open || ''}</span></button>`;
   }).join('');
-  const list = all.filter(a => a.course === cur && vis(a)).sort(byDue);
+  const list = all.filter(a => a.course === cur && vis(a)).sort(listOrder);
   const mats = (cur.materials || []).map(m => `<details class="mod"><summary>${esc(m.name)} <span class="muted">· ${m.items.length}</span></summary><ul>${
     m.items.map(it => it.path
       ? `<li>${linked(esc(it.name), it.path)} <span class="muted">${size(it.size)}</span></li>`
@@ -352,7 +375,7 @@ function stats(){
   const attention = all.filter(needsAttention).length;
   const soon = open.filter(a => eff(a) === 'soon').length;
   const week = open.filter(a => a.due_at && !past(a) && dayDiff(new Date(a.due_at)) <= 7).length;
-  const banner = LIVE ? '' : LOCAL_FILES
+  const banner = LIVE || WRITE ? '' : LOCAL_FILES
     ? `<div class="banner">To mark assignments done and open files in their apps, use <a href="http://localhost:8722">localhost:8722</a>.</div>`
     : `<div class="banner">Read-only view. Your files and the ✓ buttons live on your Mac; this page shows the last sync.</div>`;
   const errs = D.errors?.length ? `<div class="errors"><b>Last sync had ${D.errors.length} issue(s)</b><ul>${D.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>` : '';
@@ -422,7 +445,7 @@ function openDrawer(id){
       ${a.due_changed_from ? `<span>· moved from ${esc(fmtDue(a.due_changed_from, true, a.all_day))}</span>` : ''}<span>· ${esc(a.platform)}</span>${a.points ? `<span>· ${num(a.points)} pts</span>` : ''}${a.late ? '<span>· Late</span>' : ''}</div>
     <div class="actions">
       ${canMark(a) ? `<button class="btn ${m ? '' : 'primary'}" data-mark="${esc(a.id)}">${m ? 'Unmark done' : '✓ Mark as done'}</button>` : ''}
-      ${a.is_task && LIVE ? `<button class="btn" data-edit-task="${esc(a.id)}">Edit</button><button class="btn" data-delete-task="${esc(a.id)}">Delete</button>` : ''}
+      ${a.is_task && WRITE ? `<button class="btn" data-edit-task="${esc(a.id)}">Edit</button><button class="btn" data-delete-task="${esc(a.id)}">Delete</button>` : ''}
       ${a.url ? `<a class="btn" href="${esc(a.url)}" target="_blank">Open on ${siteName(a.url)} ↗</a>` : ''}
       ${a.gradescope_url ? `<a class="btn" href="${esc(a.gradescope_url)}" target="_blank">Open on Gradescope ↗</a>` : ''}
       ${a.folder && folderAttrs(a.folder) ? `<a class="btn" ${folderAttrs(a.folder)}>Open folder</a>` : ''}
@@ -457,13 +480,13 @@ async function setMark(id, done){
   if (done) marks[id] = {marked_at: new Date().toISOString()}; else delete marks[id];
   refresh();
   try {
-    marks = await api('/api/mark', {id, done, name: a.name, course: a.course.short});
+    marks = await backend.mark(id, done, a);
     refresh();
     return true;
   } catch {
     if (prev) marks[id] = prev; else delete marks[id];
     refresh();
-    toast("Couldn't save. Is the SchoolHub server running?");
+    toast("Couldn't save. Check your connection and try again.");
     return false;
   }
 }
@@ -491,7 +514,7 @@ document.addEventListener('keydown', e => {
   const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
   if (e.key === 'Escape' && !taskDialog.open) closeDrawer();
   if (e.key === '/' && !typing) { e.preventDefault(); $('#q').focus(); }
-  if (e.key === 'n' && LIVE && !typing && !taskDialog.open && !e.metaKey && !e.ctrlKey) { e.preventDefault(); openTaskForm(); }
+  if (e.key === 'n' && WRITE && !typing && !taskDialog.open && !e.metaKey && !e.ctrlKey) { e.preventDefault(); openTaskForm(); }
 });
 $('#q').addEventListener('input', e => { state.q = e.target.value; render(); });
 $('#showDone').addEventListener('change', e => { state.showDone = e.target.checked; mem.set('showDone', state.showDone); render(); });
@@ -524,23 +547,23 @@ async function saveTask(e){
     due_at: date ? new Date(`${date}T${time || '23:59'}`).toISOString() : null, all_day: !!date && !time};
   if (editingTask) body.id = editingTask;
   try {
-    const r = await api('/api/task', body);
+    const r = await backend.saveTask(body);
     taskDialog.close();
     refreshTasks(r.tasks);
     if (editingTask) toast(`Saved “${name}”`);
-    else toast(`Added “${name}”`, () => api('/api/task/delete', {id: r.task.id}).then(x => refreshTasks(x.tasks)));
+    else toast(`Added “${name}”`, () => backend.deleteTask(r.task.id).then(x => refreshTasks(x.tasks)));
   } catch {
-    toast("Couldn't save the task. Is the SchoolHub server running?");
+    toast("Couldn't save the task. Check your connection and try again.");
   }
 }
 async function deleteTask(id){
   const removed = tasks?.[id];
   if (!removed) return;
   try {
-    const r = await api('/api/task/delete', {id});
+    const r = await backend.deleteTask(id);
     if (drawerId === id) closeDrawer();
     refreshTasks(r.tasks);
-    toast(`Deleted “${removed.name}”`, () => api('/api/task', removed).then(x => refreshTasks(x.tasks)));
+    toast(`Deleted “${removed.name}”`, () => backend.saveTask(removed).then(x => refreshTasks(x.tasks)));
   } catch {
     toast("Couldn't delete the task.");
   }
@@ -576,14 +599,39 @@ function enableServerFeatures(){
   }
 }
 
+// Pick up changes made on your other device when you come back to this tab.
+async function reloadState(){
+  try {
+    if (WRITE === 'cloud') {
+      const s = await cloudApi();
+      marks = s.marks;
+      refreshTasks(s.tasks);
+    } else if (WRITE === 'local') {
+      marks = await fetch('/api/marks').then(r => r.json());
+      refreshTasks((await fetch('/api/tasks').then(r => r.json())).tasks);
+    }
+  } catch {}
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadState(); });
+
 render();
-// Only your Mac answers this; anywhere else (phone, Vercel) the page stays a read-only view.
+// Your Mac's server answers /api/marks. On the phone site, try the cloud database instead;
+// if that isn't connected either, the page stays a read-only view.
 fetch('/api/marks').then(r => r.ok ? r.json() : Promise.reject()).then(m => {
   marks = m;
   LIVE = true;
+  WRITE = 'local';
   enableServerFeatures();
   render();
-}).catch(() => {});
+}).catch(() => {
+  if (LOCAL_FILES || !SITE_KEY) return;
+  cloudApi().then(s => {
+    marks = s.marks;
+    WRITE = 'cloud';
+    $('#fab').hidden = false;
+    refreshTasks(s.tasks);
+  }).catch(() => {});
+});
 </script>
 </body>
 </html>

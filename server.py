@@ -17,10 +17,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
+import cloud
+
 HUB = Path(__file__).resolve().parent
 MARKS = HUB / "state" / "marks.json"
 TASKS = HUB / "state" / "tasks.json"
 TASK_ID = re.compile(r"^task:[a-z0-9]{8,32}$")
+FILES = {"marks": MARKS, "tasks": TASKS}
+CLOUD = cloud.connect()  # shared with the phone view when state/cloud.env exists
 PORT = 8722
 ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 PAGES = {"/": "dashboard.html", "/dashboard.html": "dashboard.html", "/data.js": "data.js"}
@@ -69,6 +73,34 @@ def write_state(path, obj):
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(obj, indent=1))
     tmp.replace(path)
+
+
+def load(name):
+    """Marks or tasks: from the cloud database when connected (the phone can change them), else local."""
+    if CLOUD:
+        try:
+            data = CLOUD.get_all(name)
+            write_state(FILES[name], data)  # local copy for offline reads and the nightly sync
+            return data
+        except (OSError, RuntimeError):
+            pass
+    return read_state(FILES[name])
+
+
+def put(name, key, obj):
+    if CLOUD:
+        CLOUD.put(name, key, obj)
+    data = read_state(FILES[name])
+    data[key] = obj
+    write_state(FILES[name], data)
+
+
+def remove(name, key):
+    if CLOUD:
+        CLOUD.remove(name, key)
+    data = read_state(FILES[name])
+    data.pop(key, None)
+    write_state(FILES[name], data)
 
 
 def clean_task(body, existing):
@@ -130,10 +162,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(sync_state)
         if url.path == "/api/tasks":
             with LOCK:
-                return self._json({"tasks": read_state(TASKS)})
+                return self._json({"tasks": load("tasks")})
         if url.path == "/api/marks":
             with LOCK:
-                return self._json(read_state(MARKS))
+                return self._json(load("marks"))
         if url.path == "/file":
             p = allowed_path(parse_qs(url.query).get("p", [""])[0])
             if not p or not p.is_file():
@@ -161,13 +193,15 @@ class Handler(BaseHTTPRequestHandler):
             if not aid:
                 return self._send(400, b"missing id")
             with LOCK:
-                marks = read_state(MARKS)
-                if body.get("done"):
-                    marks[aid] = {"marked_at": datetime.now(timezone.utc).isoformat(),
-                                  "name": body.get("name"), "course": body.get("course")}
-                else:
-                    marks.pop(aid, None)
-                write_state(MARKS, marks)
+                try:
+                    if body.get("done"):
+                        put("marks", aid, {"marked_at": datetime.now(timezone.utc).isoformat(),
+                                           "name": body.get("name"), "course": body.get("course")})
+                    else:
+                        remove("marks", aid)
+                except (OSError, RuntimeError):
+                    return self._send(502, b"couldn't reach the cloud database")
+                marks = load("marks")
             return self._json(marks)
 
         if path == "/api/task":
@@ -175,19 +209,26 @@ class Handler(BaseHTTPRequestHandler):
             if not TASK_ID.match(tid):
                 return self._send(400, b"bad task id")
             with LOCK:
-                tasks = read_state(TASKS)
-                task, error = clean_task(body, tasks.get(tid))
+                task, error = clean_task(body, load("tasks").get(tid))
                 if error:
                     return self._send(400, error.encode())
-                tasks[tid] = {"id": tid, **task}
-                write_state(TASKS, tasks)
-            return self._json({"task": tasks[tid], "tasks": tasks})
+                task = {"id": tid, **task}
+                try:
+                    put("tasks", tid, task)
+                except (OSError, RuntimeError):
+                    return self._send(502, b"couldn't reach the cloud database")
+                tasks = load("tasks")
+            return self._json({"task": task, "tasks": tasks})
 
         if path == "/api/task/delete":
             with LOCK:
-                tasks = read_state(TASKS)
-                removed = tasks.pop(str(body.get("id") or ""), None)
-                write_state(TASKS, tasks)
+                tid = str(body.get("id") or "")
+                removed = load("tasks").get(tid)
+                try:
+                    remove("tasks", tid)
+                except (OSError, RuntimeError):
+                    return self._send(502, b"couldn't reach the cloud database")
+                tasks = load("tasks")
             return self._json({"removed": removed, "tasks": tasks})
 
         if path == "/api/sync":
@@ -225,5 +266,11 @@ def catch_up_loop():
 
 
 if __name__ == "__main__":
+    if CLOUD:
+        for name, path in FILES.items():
+            try:
+                cloud.seed(CLOUD, name, read_state(path))
+            except (OSError, RuntimeError):
+                pass
     threading.Thread(target=catch_up_loop, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
