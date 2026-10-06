@@ -121,6 +121,16 @@ its own port (where `platform.json` answers 204 No Content), from disk or as the
 is no platform, and nothing changes. The last answer is kept in the browser (localStorage
 `qp.platform`), so the switch is drawn from the first paint on the next visit.
 
+A platform that also serves your other devices (say, your phone over a private network to the Mac)
+adds `"remote": true` to `platform.json` for their requests. The dashboard then offers nothing that
+would act on the Mac's own screen: files the browser can show (PDFs, pictures, text) open in a tab
+as usual, every other file downloads (its link carries a small ↓ and the tooltip "Downloads to this
+device"), and a folder is shown as text ("On your Mac: ~/…") instead of Open folder. Marks, tasks
+and Sync now work as on the Mac. If `platform.json` gives any other answer than 200 or 204 (or
+404), the page plays safe and behaves as remote. The forwarding server must also refuse `api/open`
+and `api/reveal` itself for those requests: the page leaving them out is a convenience, not the
+protection.
+
 ## Tests
 
 ```bash
@@ -128,6 +138,8 @@ is no platform, and nothing changes. The last answer is kept in the browser (loc
 ```
 
 They use a throwaway folder with made-up data, never your `config.json`, `state/` or `data.js`.
+The checks of the dashboard's file and folder links run its own code under Node when `node` is
+installed, and are skipped otherwise.
 
 ## Nightly sync
 

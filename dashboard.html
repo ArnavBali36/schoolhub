@@ -191,6 +191,11 @@ aside h4{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:va
 .files a,.files .offsite{display:flex;gap:8px;padding:7px 0;border-top:1px solid var(--border)}
 .files a:first-child,.files .offsite:first-child{border-top:0}
 .offsite{color:var(--muted)}
+/* A folder named where it cannot be opened from here (another device): "On your Mac: ~/…". */
+.where{color:var(--muted);font-size:13px;overflow-wrap:anywhere;min-width:0}
+/* A file that downloads to this device instead of opening (from another device): a small arrow. */
+a.dl::after{content:"\2193";content:"\2193" / "";display:inline-block;margin-left:.3em;color:var(--muted);font-size:12px}
+.files a.dl::after{margin-left:0}
 .files .sz{margin-left:auto;color:var(--muted);font-size:12px}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
 .comment{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;margin:6px 0;font-size:13px;white-space:pre-wrap}

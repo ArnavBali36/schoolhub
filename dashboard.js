@@ -8,6 +8,9 @@
 const D = window.SCHOOL_DATA;
 const $ = s => document.querySelector(s);
 let LIVE = false;                                   // true once server.py answers: file opening, Sync now
+// Reached from another device through a platform (platform.json says "remote": true): files and
+// folders never open on the Mac's screen from here. Set together with LIVE.
+let REMOTE = false;
 let WRITE = null;                                   // where ✓ marks and tasks save: 'local' (your Mac) or 'cloud' (phone site)
 // publish.py marks the phone site's page; only there is the first path segment its secret.
 const PHONE = document.querySelector('meta[name="schoolhub-site"]')?.content === 'phone';
@@ -58,24 +61,50 @@ const backend = {
   deleteTask: id => WRITE === 'cloud' ? cloudApi({action: 'deleteTask', id}) : api('api/task/delete', {id}),
 };
 
-// Files: through the local server when live (PDFs open in a tab, everything else in its Mac app).
+// ---- files and folders ----
+// Through the local server when live. On the Mac, PDFs, pictures and text open in a tab, everything
+// else in its Mac app (api/open), and folders in Finder. From another device (REMOTE) nothing opens
+// on the Mac's screen: what the browser shows opens in a tab, anything else downloads, and a folder
+// is only named ("On your Mac: …"). Opened from disk, file:// links; on the phone site, names only.
 const VIEWABLE = /\.(pdf|png|jpe?g|gif|svg|txt|md)$/i;
 // Through the server the file's name sits in the path too (file/<name>?p=…), so a PDF's tab is
 // titled with it; the server only reads p. A backslash, which a forwarding server may refuse in a
 // path, is left out of that name.
+const baseName = p => p.split('/').pop().replace(/\\/g, '_') || 'file';
 const fileUrl = p => LIVE
-  ? 'file/' + encodeURIComponent(p.split('/').pop().replace(/\\/g, '_') || 'file') + '?p=' + encodeURIComponent(p)
+  ? 'file/' + encodeURIComponent(baseName(p)) + '?p=' + encodeURIComponent(p)
   : 'file://' + p.split('/').map(encodeURIComponent).join('/');
+const openOnMac = p => `href="#" data-open="${esc(p)}"`;
+// A file saved to the device the page is on, marked so (a small ↓ and a tooltip) before the tap.
+const downloads = p => `href="${fileUrl(p)}" download="${esc(baseName(p))}" class="dl" title="Downloads to this device"`;
 function fileAttrs(p){
-  if (LIVE) return VIEWABLE.test(p) ? `href="${fileUrl(p)}" target="_blank"` : `href="#" data-open="${esc(p)}"`;
+  if (LIVE) {
+    if (VIEWABLE.test(p)) return `href="${fileUrl(p)}" target="_blank"`;
+    return REMOTE ? downloads(p) : openOnMac(p);
+  }
   if (LOCAL_FILES) return `href="${fileUrl(p)}"`;
   return null;  // read-only view: the file only exists on your Mac
 }
-const folderAttrs = p => LIVE ? `href="#" data-open="${esc(p)}"` : LOCAL_FILES ? `href="${fileUrl(p)}"` : null;
+const folderAttrs = p => LIVE ? (REMOTE ? null : openOnMac(p)) : LOCAL_FILES ? `href="${fileUrl(p)}"` : null;
+// A course's saved instructions page (Instructions.html): opened in the Mac's browser, or from disk.
+// From another device the drawer's own copy of the instructions is the one to read.
+const instructionsAttrs = p => LIVE ? (REMOTE ? null : openOnMac(p)) : LOCAL_FILES ? `href="${fileUrl(p)}"` : null;
+const onMac = p => 'On your Mac: ' + p.replace(/^\/Users\/[^/]+(?=\/|$)/, '~');
 const linked = (inner, path) => {
   const attrs = fileAttrs(path);
   return attrs ? `<a ${attrs}>${inner}</a>` : `<span class="offsite" title="On your Mac: ${esc(path)}">${inner}</span>`;
 };
+// A folder: Open folder where it can open, its place on the Mac as plain text from another device.
+function folderLink(p, cls){
+  const attrs = folderAttrs(p);
+  if (attrs) return `<a${cls ? ` class="${cls}"` : ''} ${attrs}>Open folder</a>`;
+  return REMOTE ? `<span class="where">${esc(onMac(p))}</span>` : '';
+}
+// Whether platform.json's answer says the page was reached from another device. SchoolHub's own
+// server answers 204 (no platform: this Mac). Any other answer, or one that cannot be read, counts as
+// another device, so the page then offers only what works from anywhere.
+const isRemote = async r => r.status === 200 ? (await r.json())?.remote === true : r.status !== 204 && r.status !== 404;
+// ---- end of files and folders ----
 function siteName(url){
   if (!url) return '';
   if (url.includes('gradescope')) return 'Gradescope';
@@ -223,7 +252,7 @@ function coursesView(vis){
   return `<div class="courses"><nav class="clist" aria-label="Courses">${left}</nav><div>
     <div class="chead"><h2>${esc(cur.name)}</h2>${cur.stale ? '<span class="note warn">Showing the last good copy (the site changed; see the issue above)</span>' : ''}
       ${cur.url ? `<a href="${esc(cur.url)}" target="_blank">Open ${siteName(cur.url)} ↗</a>` : ''}
-      ${cur.folder && folderAttrs(cur.folder) ? `<a ${folderAttrs(cur.folder)}>Open folder</a>` : ''}</div>
+      ${cur.folder ? folderLink(cur.folder) : ''}</div>
     ${list.length ? `<div class="list">${list.map(row).join('')}</div>` : '<p class="empty">No assignments to show.</p>'}
     ${mats ? `<div class="sub">Course materials</div><div class="mat">${mats}</div>` : ''}
   </div></div>`;
@@ -369,9 +398,10 @@ function openDrawer(id, fromKeyboard = false){
       ${a.is_task && WRITE ? `<button type="button" class="btn" data-edit-task="${esc(a.id)}">Edit</button><button type="button" class="btn" data-delete-task="${esc(a.id)}">Delete</button>` : ''}
       ${a.url ? `<a class="btn" href="${esc(a.url)}" target="_blank">Open on ${siteName(a.url)} ↗</a>` : ''}
       ${a.gradescope_url ? `<a class="btn" href="${esc(a.gradescope_url)}" target="_blank">Open on Gradescope ↗</a>` : ''}
-      ${a.folder && folderAttrs(a.folder) ? `<a class="btn" ${folderAttrs(a.folder)}>Open folder</a>` : ''}
-      ${instructions && (LIVE || LOCAL_FILES) ? `<a class="btn" ${LIVE ? `href="#" data-open="${esc(instructions)}"` : `href="${fileUrl(instructions)}"`}>Offline instructions</a>` : ''}
+      ${a.folder && folderAttrs(a.folder) ? folderLink(a.folder, 'btn') : ''}
+      ${instructions && instructionsAttrs(instructions) ? `<a class="btn" ${instructionsAttrs(instructions)}>Offline instructions</a>` : ''}
     </div>
+    ${a.folder && REMOTE ? `<div class="note">${folderLink(a.folder)}</div>` : ''}
     ${markNote(a, s)}
     ${a.is_task && a.notes ? `<h4>Notes</h4><div class="comment">${esc(a.notes)}</div>` : ''}
     ${a.submitted_at ? `<h4>Submission</h4><div>Submitted ${esc(fmtDue(a.submitted_at, true))}${a.late ? ' (late)' : ''}</div>` : ''}
@@ -439,7 +469,8 @@ document.addEventListener('click', e => {
   const et = e.target.closest('[data-edit-task]'); if (et) { e.preventDefault(); return openTaskForm(et.dataset.editTask); }
   const dt = e.target.closest('[data-delete-task]'); if (dt) { e.preventDefault(); return deleteTask(dt.dataset.deleteTask); }
   const op = e.target.closest('[data-open]');
-  if (op) { e.preventDefault(); return api('api/open', {path: op.dataset.open}).catch(() => toast("Couldn't open that file.")); }
+  // Never from another device: what opens there would open on the Mac's screen.
+  if (op) { e.preventDefault(); if (REMOTE) return; return api('api/open', {path: op.dataset.open}).catch(() => toast("Couldn't open that file.")); }
   // A click the keyboard made (Enter or Space on a name) has no click count.
   const r = e.target.closest('.row'); if (r) return openDrawer(r.dataset.id, e.detail === 0);
   const c = e.target.closest('[data-course]'); if (c) { state.course = c.dataset.course; mem.set('course', state.course); render(); }
@@ -564,9 +595,12 @@ if (PHONE) {
     refreshTasks(s.tasks);
   }).catch(() => {});
 } else if (!LOCAL_FILES) {
-  // Your Mac's server answers api/marks, at / on its own port or under a platform's prefix.
-  getJson('api/marks').then(m => {
+  // Your Mac's server answers api/marks, at / on its own port or under a platform's prefix, and a
+  // platform says in platform.json whether the page was reached from another device.
+  const remote = fetch('platform.json', {cache: 'no-store'}).then(isRemote).catch(() => true);
+  Promise.all([getJson('api/marks'), remote]).then(([m, far]) => {
     marks = m;
+    REMOTE = far;
     LIVE = true;
     WRITE = 'local';
     enableServerFeatures();
