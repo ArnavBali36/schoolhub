@@ -65,12 +65,15 @@ open dashboard.html
 
 - the ✓ **mark as done** buttons (saved to `state/marks.json`, checked by the next sync)
 - the **+** button for your own tasks (saved to `state/tasks.json`)
-- **Sync now** in the header
+- **Sync now**, next to the time of the last sync (in the header, or above the lists on a phone)
 - files opening in their real apps, and folders in Finder
 - a **catch-up sync** if the data is more than 20 hours old
 
 It binds to `127.0.0.1` only, refuses cross-site requests (custom-header + Host checks), and never
-serves its own folder, so your token stays out of the browser.
+serves its own folder (however its name is spelled: macOS ignores case) or any hidden file or folder,
+so your token stays out of the browser. Class files are shown, never run: an SVG or HTML file opens
+in a sandbox with no script, and a `.js` file comes as plain text. The page itself runs only its own
+scripts (a Content-Security-Policy of `script-src 'self'`).
 
 ```bash
 .venv/bin/python server.py
@@ -79,6 +82,52 @@ serves its own folder, so your token stays out of the browser.
 To run it at login on macOS, copy `examples/com.schoolhub.server.plist` to
 `~/Library/LaunchAgents/`, fix the paths inside, and
 `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.schoolhub.server.plist`.
+
+To run a second copy beside it (say, a test folder), give it another port:
+`SCHOOLHUB_PORT=8733 .venv/bin/python server.py`.
+
+**After updating SchoolHub** (`git pull`), restart the server: it reads its list of page files when
+it starts, so an old one serves the new page without its scripts and the dashboard stays blank. If
+it runs at login: `launchctl kickstart -k gui/$(id -u)/com.schoolhub.server`.
+
+## Light and dark
+
+The button at the right of the header steps through **System**, **Light** and **Dark**. System
+follows your Mac's appearance, and changes with it while the page is open. The choice is saved in
+the browser (localStorage `qp.theme`), and a change in one tab applies to every other open tab of
+the same address. `theme-init.js` sets the theme before the page first paints, so it never flashes
+the other one, and `bar.js` fills in the header (the theme button, the view you were on) before it
+is first drawn.
+
+## Running under a path prefix
+
+The dashboard asks its own server for everything with relative URLs (`api/marks`, `data.js`,
+`file/<name>?p=…`), so another server can put it under a path such as `/school/` by forwarding
+`/school/<rest>` to `http://127.0.0.1:8722/<rest>` (with `Host` set to `127.0.0.1:8722`, and the
+`X-SchoolHub` header passed through on POSTs). The page's scripts are files of their own, so it
+also runs under a Content-Security-Policy of `script-src 'self'`. In a class file's link the name
+is only there so the browser's tab shows it; the server serves the file that `p` names.
+
+If that server also answers `platform.json` next to the page, the dashboard joins it as one
+platform: the plain title becomes a switch between the apps, and **O** opens the other one.
+
+```json
+{"apps": [{"id": "quant", "name": "QuantPrep", "href": "/"},
+          {"id": "school", "name": "School", "href": "/school/"}]}
+```
+
+`id` `school` is SchoolHub itself; every `href` must be a path on the same address. Opened on
+its own port (where `platform.json` answers 204 No Content), from disk or as the phone view there
+is no platform, and nothing changes. The last answer is kept in the browser (localStorage
+`qp.platform`), so the switch is drawn from the first paint on the next visit.
+
+## Tests
+
+```bash
+.venv/bin/python -m unittest discover tests
+```
+
+They use a throwaway folder with made-up data, never your `config.json`, `state/` or `data.js`.
 
 ## Nightly sync
 

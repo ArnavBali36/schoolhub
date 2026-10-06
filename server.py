@@ -6,6 +6,7 @@ Serves the dashboard and your class files, saves "mark as done" clicks to state/
 """
 import json
 import mimetypes
+import os
 import re
 import subprocess
 import sys
@@ -25,9 +26,23 @@ TASKS = HUB / "state" / "tasks.json"
 TASK_ID = re.compile(r"^task:[a-z0-9]{8,32}$")
 FILES = {"marks": MARKS, "tasks": TASKS}
 CLOUD = cloud.connect()  # shared with the phone view when state/cloud.env exists
-PORT = 8722
+PORT = int(os.environ.get("SCHOOLHUB_PORT") or 8722)  # another port for a test copy beside the real one
 ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
-PAGES = {"/": "dashboard.html", "/dashboard.html": "dashboard.html", "/data.js": "data.js"}
+PAGES = {"/": "dashboard.html", "/dashboard.html": "dashboard.html", "/dashboard.js": "dashboard.js",
+         "/theme-init.js": "theme-init.js", "/bar.js": "bar.js", "/data.js": "data.js", "/favicon.svg": "favicon.svg"}
+PAGE_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml"}
+# The dashboard runs only its own scripts (it has none inline), and shows pictures in assignment
+# instructions from Canvas over https. A platform that forwards to this server gives it the same policy.
+PAGE_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; "
+            "connect-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+# Course files come from Canvas and course sites: they are shown, never run. An SVG or HTML file opened
+# from the dashboard runs in a sandbox with no script; a PDF runs none (a sandbox would stop the
+# browser's PDF view). A script file is sent as plain text, so no page can load it as a script.
+FILE_CSP = ("sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; media-src 'self'; "
+            "frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+PDF_CSP = ("default-src 'self'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+           "connect-src 'none'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+SCRIPT_TYPE = re.compile(r"(java|ecma|j|live)script", re.I)  # text/javascript and the like, not postscript
 STALE_HOURS = 20
 LOCK = threading.Lock()
 SYNC_LOCK = threading.Lock()
@@ -49,16 +64,33 @@ def school_root():
     return Path(cfg["school_root"]).expanduser().resolve()
 
 
+def identity(path):
+    """A file or folder as the disk knows it: the same for every spelling of its name."""
+    st = path.stat()
+    return st.st_dev, st.st_ino
+
+
 def allowed_path(p):
-    """Only files inside the School folder, and never SchoolHub itself (config holds the token)."""
+    """A file or folder inside the School folder, or None. Never SchoolHub's own folder (config.json
+    holds your Canvas token and Gradescope password, state/ your marks) and never a hidden one.
+
+    The Mac's disk ignores case, so ".../schoolhub/config.json" is the same file as
+    ".../SchoolHub/config.json": folders are compared by identity on the disk, not by name."""
+    if not isinstance(p, str) or not p:
+        return None
     try:
-        path = Path(p).expanduser().resolve()
-    except (OSError, RuntimeError):
+        path = Path(p).expanduser().resolve(strict=True)
+        chain = [path, *path.parents]
+        ids = [identity(x) for x in chain]
+        root, hub = identity(school_root()), identity(HUB)
+    except (OSError, RuntimeError, ValueError):
         return None
-    root = school_root()
-    if root not in path.parents or path == HUB or HUB in path.parents:
+    if hub in ids or root not in ids[1:]:
         return None
-    return path if path.exists() else None
+    # The file itself and its folders below the School folder: none of them hidden (.git, .env).
+    if any(x.name.startswith(".") for x in chain[:ids.index(root)]):
+        return None
+    return path
 
 
 def read_state(path):
@@ -137,6 +169,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
         for k, v in (headers or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -155,8 +188,16 @@ class Handler(BaseHTTPRequestHandler):
             f = HUB / PAGES[url.path]
             if not f.exists():
                 return self._send(404, b"not found")
-            ctype = "text/html; charset=utf-8" if f.suffix == ".html" else "text/javascript; charset=utf-8"
-            return self._send(200, f.read_bytes(), ctype)
+            page = f.suffix == ".html"
+            return self._send(200, f.read_bytes(), PAGE_TYPES[f.suffix],
+                              {"Content-Security-Policy": PAGE_CSP} if page else None)
+        if url.path == "/platform.json":
+            # On its own server SchoolHub is not part of a platform: nothing to describe, so the page
+            # keeps its plain title. (A 204 rather than a 404, which browsers log as an error.)
+            self.send_response(204)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
         if url.path == "/api/sync":
             with SYNC_LOCK:
                 return self._json(sync_state)
@@ -166,13 +207,18 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/marks":
             with LOCK:
                 return self._json(load("marks"))
-        if url.path == "/file":
+        # /file?p=<path>, or /file/<name>?p=<path>: the name is only for the browser (a PDF tab
+        # shows it as its title); the file is always the one p names.
+        if url.path == "/file" or url.path.startswith("/file/"):
             p = allowed_path(parse_qs(url.query).get("p", [""])[0])
             if not p or not p.is_file():
                 return self._send(404, b"not found")
             ctype = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
+            if SCRIPT_TYPE.search(ctype):
+                ctype = "text/plain; charset=utf-8"
             return self._send(200, p.read_bytes(), ctype,
-                              {"Content-Disposition": f"inline; filename*=UTF-8''{quote(p.name)}"})
+                              {"Content-Disposition": f"inline; filename*=UTF-8''{quote(p.name)}",
+                               "Content-Security-Policy": PDF_CSP if ctype == "application/pdf" else FILE_CSP})
         self._send(404, b"not found")
 
     do_HEAD = do_GET
@@ -185,6 +231,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
         except (json.JSONDecodeError, ValueError):
+            return self._send(400, b"bad request")
+        if not isinstance(body, dict):
             return self._send(400, b"bad request")
         path = urlsplit(self.path).path
 

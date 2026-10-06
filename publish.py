@@ -40,6 +40,20 @@ VERCEL_JSON = {
 }
 
 
+# The page's scripts and icon, next to it on the phone site as on the local server.
+PAGE_FILES = ("theme-init.js", "bar.js", "dashboard.js", "data.js", "favicon.svg")
+# Tells the page's scripts it is the phone site, the only place the first path segment is the secret.
+# It goes first in <head>, so bar.js, which runs in <head>, reads it.
+PHONE_MARK = '<meta name="schoolhub-site" content="phone">'
+
+
+def phone_page(html):
+    """dashboard.html with the phone site's mark at the top of its head."""
+    if "<head>" not in html:
+        raise RuntimeError("dashboard.html has no <head>")
+    return html.replace("<head>", "<head>\n" + PHONE_MARK, 1)
+
+
 def build(cfg):
     site = cfg.setdefault("site", {})
     if not site.get("secret"):
@@ -48,8 +62,9 @@ def build(cfg):
         print(f"Generated secret path: /{site['secret']}/")
     page = SITE / site["secret"]
     page.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(HUB / "dashboard.html", page / "index.html")
-    shutil.copy2(HUB / "data.js", page / "data.js")
+    (page / "index.html").write_text(phone_page((HUB / "dashboard.html").read_text(encoding="utf-8")), encoding="utf-8")
+    for name in PAGE_FILES:
+        shutil.copy2(HUB / name, page / name)
     (SITE / "index.html").write_text(PLACEHOLDER)
     (SITE / "robots.txt").write_text("User-agent: *\nDisallow: /\n")
     # Without this the CLI falls back to the repo's .gitignore, which excludes data.js.
