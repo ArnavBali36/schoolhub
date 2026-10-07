@@ -99,6 +99,21 @@ class ServerTest(unittest.TestCase):
         """GET /file?p=<p> (or /file/<name>?p=<p>, as the dashboard links them)."""
         return self.request("GET", ("/file/" + quote(name) if name else "/file") + "?p=" + quote(str(p)), full=True)
 
+    def test_a_sync_from_the_server_adds_its_output_to_state_sync_log(self):
+        # Where the page's "Sync failed" points. The throwaway folder has no sync.py, so it fails.
+        log = self.server_mod.HUB / "state" / "sync.log"
+        log.unlink(missing_ok=True)
+        self.server_mod.run_sync()
+        self.assertIs(self.server_mod.sync_state["ok"], False)
+        text = log.read_text()
+        self.assertRegex(text, r"^--- sync from the server, \S+: failed\n")
+        self.assertIn("sync.py", text)
+        self.assertEqual(self.server_mod.sync_log(), log)
+        # Each run adds to it.
+        self.server_mod.run_sync()
+        self.assertEqual(log.read_text().count("--- sync from the server"), 2)
+        log.unlink()
+
     def test_pages_served(self):
         for path, ctype in [("/", "text/html"), ("/dashboard.html", "text/html"), ("/dashboard.js", "text/javascript"),
                             ("/theme-init.js", "text/javascript"), ("/bar.js", "text/javascript"),

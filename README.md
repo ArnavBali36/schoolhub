@@ -65,7 +65,8 @@ open dashboard.html
 
 - the ✓ **mark as done** buttons (saved to `state/marks.json`, checked by the next sync)
 - the **+** button for your own tasks (saved to `state/tasks.json`)
-- **Sync now**, next to the time of the last sync (in the header, or above the lists on a phone)
+- **Sync now**, next to the time of the last sync (in the header, or above the lists on a phone);
+  each sync the server runs adds its output to `state/sync.log`, which is where "Sync failed" points
 - files opening in their real apps, and folders in Finder
 - a **catch-up sync** if the data is more than 20 hours old
 
@@ -82,6 +83,9 @@ scripts (a Content-Security-Policy of `script-src 'self'`).
 To run it at login on macOS, copy `examples/com.schoolhub.server.plist` to
 `~/Library/LaunchAgents/`, fix the paths inside, and
 `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.schoolhub.server.plist`.
+Its log goes to `~/Library/Logs/schoolhub-server.log`, not into the SchoolHub folder, because macOS
+refuses to start a launch agent whose log file is inside a folder it protects, such as Desktop (the
+service then fails with `EX_CONFIG`).
 
 To run a second copy beside it (say, a test folder), give it another port:
 `SCHOOLHUB_PORT=8733 .venv/bin/python server.py`.
@@ -155,6 +159,9 @@ installed, and are skipped otherwise. The Turso checks run against a stand-in fo
 ```
 0 5 * * *  /path/to/schoolhub/.venv/bin/python /path/to/schoolhub/sync.py
 ```
+
+To keep its summary line in `state/sync.log` too, beside the syncs the server runs, end the line with
+`2>> /path/to/schoolhub/state/sync.log` (what needs your attention still comes by cron's mail).
 
 It stops itself after 15 minutes (`SCHOOLHUB_TIMEOUT` seconds) rather than hanging, keeps the last
 good copy of anything it couldn't reach, and reports the timeout.

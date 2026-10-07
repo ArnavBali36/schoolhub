@@ -577,7 +577,7 @@ function enableServerFeatures(){
   if (done) {
     const summary = (done.output || '').split('\n').find(l => l.startsWith('[schoolhub]'))?.replace('[schoolhub] ', '') || '';
     const issues = (done.output || '').split('\n').filter(l => /^(⚠️|🔎|❌)/.test(l)).length;
-    toast(done.ok ? `Sync finished${summary ? ' · ' + summary : ''}${issues ? ` · ${issues} alert(s)` : ''}` : 'Sync failed. See state/server.log');
+    toast(done.ok ? `Sync finished${summary ? ' · ' + summary : ''}${issues ? ` · ${issues} alert(s)` : ''}` : 'Sync failed. See state/sync.log');
   }
 }
 // ---- end of sync now ----

@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Runs the SchoolHub server at login. Replace /PATH/TO/schoolhub with your own path,
-     copy to ~/Library/LaunchAgents/, then:
-       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.schoolhub.server.plist -->
+<!-- Runs the SchoolHub server at login. Replace /PATH/TO/schoolhub with your own path and
+     /Users/YOU with your home folder (launchd does not expand ~), copy to ~/Library/LaunchAgents/,
+     then:
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.schoolhub.server.plist
+     The log goes to ~/Library/Logs: macOS refuses to start a launch agent whose log is inside a
+     folder it protects, such as Desktop (it then fails with EX_CONFIG). -->
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.schoolhub.server</string>
@@ -13,7 +16,7 @@
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/PATH/TO/schoolhub/state/server.log</string>
-  <key>StandardErrorPath</key><string>/PATH/TO/schoolhub/state/server.log</string>
+  <key>StandardOutPath</key><string>/Users/YOU/Library/Logs/schoolhub-server.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/Library/Logs/schoolhub-server.log</string>
 </dict>
 </plist>

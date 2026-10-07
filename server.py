@@ -49,12 +49,27 @@ SYNC_LOCK = threading.Lock()
 sync_state = {"running": False, "started_at": None, "finished_at": None, "ok": None, "output": ""}
 
 
+def sync_log():
+    """Where each sync the server runs (Sync now, the catch-up) adds its output: state/sync.log,
+    where the nightly sync's cron line can add its own (README)."""
+    return HUB / "state" / "sync.log"
+
+
 def run_sync():
+    started = datetime.now(timezone.utc).isoformat()
     try:
         p = subprocess.run([sys.executable, str(HUB / "sync.py")], capture_output=True, text=True, timeout=1800)
         ok, out = p.returncode == 0, (p.stdout + p.stderr).strip()
     except Exception as e:
         ok, out = False, str(e)
+    # Kept where the page's "Sync failed" points, since the output is otherwise only in memory.
+    try:
+        with sync_log().open("a") as f:
+            f.write(f"--- sync from the server, {started}: {'done' if ok else 'failed'}\n")
+            if out:
+                f.write(out + "\n")
+    except OSError:
+        pass
     with SYNC_LOCK:
         sync_state.update(running=False, finished_at=datetime.now(timezone.utc).isoformat(), ok=ok, output=out[-4000:])
 

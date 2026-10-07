@@ -234,6 +234,24 @@ console.log(JSON.stringify(out));
         self.assertEqual(self.out["public"], {"syncShown": False, "syncClick": False, "fabShown": True,
                                               "calls": ["GET api/tasks"]})
 
+    def test_a_failed_sync_points_to_the_sync_log(self):
+        # The server adds each sync's output to state/sync.log (server.py run_sync); the toast says so.
+        start, end = JS.index(SYNC_START), JS.index(SYNC_END)
+        script = f"""
+const els = {{'#syncBtn': {{hidden: true, disabled: false, textContent: 'Sync now', onclick: null}}, '#fab': {{hidden: true}}}};
+const $ = s => els[s];
+const getJson = path => Promise.resolve(path === 'api/tasks' ? {{tasks: {{}}}} : {{running: false}});
+const api = () => Promise.resolve({{}});
+const toasts = [];
+const toast = m => toasts.push(m), refreshTasks = () => {{}};
+const sessionStorage = {{getItem: () => JSON.stringify({{ok: false, output: 'Traceback: boom'}}), setItem(){{}}, removeItem(){{}}}};
+const PUBLIC = false;
+{JS[start:end]}
+enableServerFeatures();
+console.log(JSON.stringify(toasts));
+"""
+        self.assertEqual(run_node(script), ["Sync failed. See state/sync.log"])
+
 
 if __name__ == "__main__":
     unittest.main()
