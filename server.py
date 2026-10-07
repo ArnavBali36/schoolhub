@@ -122,11 +122,63 @@ def write_state(path, obj):
     tmp.replace(path)
 
 
+SEEDED_FILE = HUB / "state" / "cloud-seeded.json"  # which shared databases hold all of this Mac's
+SEEDED = {"marks": False, "tasks": False}           # marks and tasks: only then is the cloud trusted
+BACKUPS = HUB / "state" / "backups"
+KEEP_BACKUPS = 20
+
+
+def log(msg):
+    print(f"{datetime.now().isoformat(timespec='seconds')} {msg}", file=sys.stderr, flush=True)
+
+
+def ensure_seeded(name):
+    """Whether the shared database holds every mark or task this Mac had when it first connected.
+
+    Until it does, the server reads and serves its own files (a partial set read from the cloud
+    would replace them) and keeps trying the copy. Remembered per database in SEEDED_FILE, so the
+    copy runs once and never brings back what the phone deleted later."""
+    if not CLOUD:
+        return False
+    if SEEDED[name]:
+        return True
+    who = cloud.identity(CLOUD)
+    if read_state(SEEDED_FILE).get(who, {}).get(name):
+        SEEDED[name] = True
+        return True
+    try:
+        cloud.seed(CLOUD, name, read_state(FILES[name]))
+    except (OSError, RuntimeError) as e:
+        log(f"copying {name} to the shared database failed, keeping the local file: {e}")
+        return False
+    record = read_state(SEEDED_FILE)
+    record.setdefault(who, {})[name] = True
+    write_state(SEEDED_FILE, record)
+    SEEDED[name] = True
+    log(f"{name} copied to the shared database; it is now the one the server reads")
+    return True
+
+
+def keep_copy(name, data):
+    """Before the local file takes a set from the cloud that lacks some of its keys (deleted on the
+    phone, or a database gone wrong), a dated copy of it is kept in state/backups/."""
+    local = read_state(FILES[name])
+    if not set(local) - set(data):
+        return
+    BACKUPS.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    (BACKUPS / f"{name}-{stamp}.json").write_text(json.dumps(local, indent=1))
+    for old in sorted(BACKUPS.glob(f"{name}-*.json"))[:-KEEP_BACKUPS]:
+        old.unlink(missing_ok=True)
+
+
 def load(name):
-    """Marks or tasks: from the cloud database when connected (the phone can change them), else local."""
-    if CLOUD:
+    """Marks or tasks: from the cloud database once it holds everything this Mac had (the phone
+    can change them there), else the local file."""
+    if CLOUD and SEEDED[name]:
         try:
             data = CLOUD.get_all(name)
+            keep_copy(name, data)
             write_state(FILES[name], data)  # local copy for offline reads and the nightly sync
             return data
         except (OSError, RuntimeError):
@@ -328,12 +380,19 @@ def catch_up_loop():
             threading.Thread(target=run_sync, daemon=True).start()
 
 
+def seed_loop():
+    """Copies the local marks and tasks to the shared database, retrying every minute until both
+    are there."""
+    while not all(SEEDED.values()):
+        for name in FILES:
+            with LOCK:
+                ensure_seeded(name)
+        if not all(SEEDED.values()):
+            time.sleep(60)
+
+
 if __name__ == "__main__":
     if CLOUD:
-        for name, path in FILES.items():
-            try:
-                cloud.seed(CLOUD, name, read_state(path))
-            except (OSError, RuntimeError):
-                pass
+        threading.Thread(target=seed_loop, daemon=True).start()
     threading.Thread(target=catch_up_loop, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

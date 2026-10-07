@@ -199,11 +199,12 @@ class TursoTest(unittest.TestCase):
         put = self.fake.pipelines[0]["requests"][0]["stmt"]["args"]
         self.assertEqual([a["type"] for a in put], ["text", "text", "text", "integer"])
 
-    def test_seed_copies_into_an_empty_table_only(self):
+    def test_seed_copies_what_the_database_lacks(self):
         self.cloud.seed(self.db, "marks", {"a": {"m": 1}, "b": {"m": 2}})
         self.assertEqual(self.db.get_all("marks"), {"a": {"m": 1}, "b": {"m": 2}})
-        self.cloud.seed(self.db, "marks", {"c": {"m": 3}})  # already has marks: left alone
-        self.assertEqual(set(self.db.get_all("marks")), {"a", "b"})
+        # A key the database has is left as it is (the phone may have changed it); c is added.
+        self.cloud.seed(self.db, "marks", {"a": {"m": 9}, "c": {"m": 3}})
+        self.assertEqual(self.db.get_all("marks"), {"a": {"m": 1}, "b": {"m": 2}, "c": {"m": 3}})
         self.cloud.seed(self.db, "tasks", {"task:aaaaaaaa": {"name": "x"}})  # tasks are their own
         self.assertEqual(self.db.get_all("tasks"), {"task:aaaaaaaa": {"name": "x"}})
         calls = len(self.fake.pipelines)

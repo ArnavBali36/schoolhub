@@ -254,11 +254,36 @@ def connect():
     return Cloud(url, token) if url and token else None
 
 
-def seed(db, name, local):
-    """First connection: copy marks/tasks made before the database existed."""
-    if local and not db.get_all(name):
-        for field, obj in local.items():
-            db.put(name, field, obj)
+def identity(db):
+    """Which shared database this is, so the server remembers what it has copied where."""
+    return getattr(db, "endpoint", None) or getattr(db, "url", None) or type(db).__name__
+
+
+def seed(db, name, local, tries=3, pause=1.0):
+    """Copy the marks or tasks kept on this Mac into the shared database, until it holds every one.
+
+    Only keys the database lacks are written, so a key changed on the phone is left as it is; each
+    write is tried up to `tries` times. The database is read back at the end, and RuntimeError says
+    the copy is incomplete: the server then keeps using its own files rather than a partial set
+    (a partial set read back would replace them). Run until it succeeds once per database, never
+    after, or it would bring back what the phone has deleted since."""
+    if not local:
+        return
+    have = db.get_all(name)
+    for field, obj in local.items():
+        if field in have:
+            continue
+        for attempt in range(tries):
+            try:
+                db.put(name, field, obj)
+                break
+            except (OSError, RuntimeError):
+                if attempt == tries - 1:
+                    raise
+                time.sleep(pause * (attempt + 1))
+    missing = set(local) - set(db.get_all(name))
+    if missing:
+        raise RuntimeError(f"{len(missing)} of {len(local)} {name} did not reach the shared database")
 
 
 def describe(db):
