@@ -16,6 +16,9 @@ let REMOTE = false;
 // phone site) and no Sync now: LIVE stays false.
 let PUBLIC = false;
 let WRITE = null;                                   // where ✓ marks and tasks save: 'local' (your Mac) or 'cloud' (phone site)
+// Still asking where the page is (platform.json and api/marks, below): no read-only banner yet, so a
+// slow first answer does not show one on a page that can save.
+let PROBING = false;
 // publish.py marks the phone site's page; only there is the first path segment its secret.
 const PHONE = document.querySelector('meta[name="schoolhub-site"]')?.content === 'phone';
 const SITE_KEY = PHONE ? location.pathname.split('/').filter(Boolean)[0] || '' : '';
@@ -277,7 +280,7 @@ function stats(){
   const attention = all.filter(needsAttention).length;
   const soon = open.filter(a => eff(a) === 'soon').length;
   const week = open.filter(a => a.due_at && !past(a) && dayDiff(new Date(a.due_at)) <= 7).length;
-  const banner = LIVE || WRITE ? '' : LOCAL_FILES
+  const banner = LIVE || WRITE || PROBING ? '' : LOCAL_FILES
     ? `<div class="banner">To mark assignments done and open files in their apps, use <a href="http://localhost:8722">localhost:8722</a>.</div>`
     : `<div class="banner">Read-only view. Your files and the ✓ buttons live on your Mac; this page shows the last sync.</div>`;
   const none = D.generated_at ? '' : '<div class="banner">No assignments yet: your Mac sends them with its next sync.</div>';
@@ -600,6 +603,9 @@ async function reloadState(){
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadState(); });
 
+// Your Mac's server or a platform is asked below, before the first render, unless the page is the
+// phone site or a file on disk.
+PROBING = !PHONE && !LOCAL_FILES;
 render();
 // The last sync shows once it is known whether Sync now goes with it, so the two appear together.
 const showSyncbox = () => { $('#syncbox').hidden = false; };
@@ -624,6 +630,9 @@ if (PHONE) {
     LIVE = !PUBLIC;
     WRITE = 'local';
     enableServerFeatures();
+  }).catch(() => {}).finally(() => {
+    PROBING = false;
     render();
-  }).catch(() => {}).finally(showSyncbox);
+    showSyncbox();
+  });
 }

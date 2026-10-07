@@ -73,6 +73,13 @@ class SourceTest(unittest.TestCase):
         self.assertEqual(len(re.findall(r"^\s+PUBLIC = ", JS, re.M)), 1)
         self.assertEqual(len(re.findall(r"^\s+LIVE = ", JS, re.M)), 1)
 
+    def test_no_read_only_banner_while_the_page_asks_where_it_is(self):
+        # A slow first answer (a cold public site) once showed "Read-only view" on a page that saves.
+        self.assertIn("const banner = LIVE || WRITE || PROBING ? '' : LOCAL_FILES", JS)
+        self.assertIn("PROBING = !PHONE && !LOCAL_FILES;\nrender();", JS)
+        # Asked, answered or not: drawn again without it, so a page that cannot save still says so.
+        self.assertRegex(JS, r"\.catch\(\(\) => \{\}\)\.finally\(\(\) => \{\s*PROBING = false;\s*render\(\);\s*showSyncbox\(\);")
+
     def test_data_without_a_sync_time_says_so(self):
         # A hosted copy gives data with no generated_at until the Mac's first sync has reached it:
         # "Not synced yet" and a note, instead of a sync time from 1970.

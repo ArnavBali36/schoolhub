@@ -337,6 +337,14 @@ class ServerWithTursoTest(unittest.TestCase):
                     cls.tearDownClass()
                     raise RuntimeError("server.py did not start")
                 time.sleep(0.05)
+        # The first copy of marks and tasks to the database runs beside the serving (seed_loop); until
+        # it is done the server reads its own files, as it should, so the tests wait for it.
+        seeded = hub / "state" / "cloud-seeded.json"
+        while not any(v.get("marks") and v.get("tasks") for v in (json.loads(seeded.read_text()) if seeded.exists() else {}).values()):
+            if time.time() > deadline or cls.proc.poll() is not None:
+                cls.tearDownClass()
+                raise RuntimeError("server.py did not copy its marks and tasks to the database")
+            time.sleep(0.05)
 
     @classmethod
     def tearDownClass(cls):
