@@ -19,7 +19,9 @@ put them yourself, and writes a static page you open in your browser. Everything
   `name (updated 2026-09-12).ext` alongside instead).
 - **Tracks status** per assignment: To do, Due soon, Submitted, Graded, Missing, Offline.
 - **Mark as done** with ✓ for work the APIs can't see (paper hand-ins, Autolab). The next sync
-  double-checks each mark against Canvas/Gradescope and flags any it can't confirm.
+  double-checks each mark against Canvas/Gradescope. One it can't confirm still counts as done (your
+  ✓ is your word; a check-in or a paper hand-in leaves nothing to find), with a note on the item and
+  a one-time alert from that sync, in case the hand-in didn't go through.
 - **Add your own tasks** with the **+** button (or press **N**): a name, a course or "Personal", an
   optional due date and time, and notes. They get ✓, Undo, overdue warnings and due-soon alerts like
   everything else, and they show up on the phone view.

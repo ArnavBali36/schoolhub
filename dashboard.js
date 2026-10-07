@@ -188,18 +188,21 @@ function eff(a){
   if (a.status === 'todo' && a.due_at && new Date(a.due_at) - now < 48 * 36e5) return 'soon';
   return a.status;
 }
-const isDone = a => { const s = eff(a); return [...SOURCE_DONE, 'expired', 'marked'].includes(s) || (s === 'offline' && (!a.due_at || past(a))); };
-const needsAttention = a => ['missing','overdue','flagged','check'].includes(eff(a));
+// Your ✓ is your word: a mark the nightly check could not confirm ('flagged') still counts as done,
+// with a note on the item, rather than sitting in Needs attention. A check-in or a paper hand-in
+// leaves nothing on Canvas to find.
+const isDone = a => { const s = eff(a); return [...SOURCE_DONE, 'expired', 'marked', 'flagged'].includes(s) || (s === 'offline' && (!a.due_at || past(a))); };
+const needsAttention = a => ['missing','overdue','check'].includes(eff(a));
 const canMark = a => WRITE && !SOURCE_DONE.includes(a.status);
 
 function pillText(a, s){
   if (s === 'graded' && a.score != null) return num(a.score) + (a.points ? ' / ' + num(a.points) : '');
   if (s === 'graded' && a.grade) return a.grade;
   return {missing:'Missing', soon:'Due soon', todo:'To do', submitted:'Submitted', graded:'Graded', offline:'Offline',
-          excused:'Excused', expired:'Old', marked:'Done ✓', flagged:'Not found', check:'Confirm', overdue:'Overdue'}[s];
+          excused:'Excused', expired:'Old', marked:'Done ✓', flagged:'Done ✓', check:'Confirm', overdue:'Overdue'}[s];
 }
 const PILL_TIP = {
-  flagged: 'You marked this done, but the nightly check found no submission',
+  flagged: 'Marked done by you. The nightly check found no submission, which is fine if it was handed in another way',
   check: "SchoolHub can't see this course's submissions yet. If you turned it in, click ✓",
   marked: 'Marked done by you',
 };
@@ -381,7 +384,7 @@ function markNote(a, s){
   if (!m) return s === 'check'
     ? `<div class="note warn">SchoolHub can't see ${esc(a.platform)} submissions for this course (no Gradescope login yet), so it can't confirm this on its own. If you turned it in, mark it done.</div>`
     : '';
-  if (s === 'flagged') return `<div class="note warn">You marked this done ${ago(m.marked_at)}, but the nightly check found no submission on ${esc(a.platform)}. Double-check it went through.</div>`;
+  if (s === 'flagged') return `<div class="note warn">You marked this done ${ago(m.marked_at)}. ${esc(a.platform)} shows no submission, which is fine if it was handed in another way (in person, on paper, by email). If it wasn't, undo the mark and turn it in.</div>`;
   if (!a.verifiable) return `<div class="note">Marked done ${ago(m.marked_at)}. SchoolHub can't see ${esc(a.platform)} submissions, so this one is on your word.</div>`;
   if (a.marked_done === m.marked_at && a.mark_check === 'confirmed') return '<div class="note">Confirmed by the nightly check.</div>';
   return `<div class="note">Marked done ${ago(m.marked_at)}. The nightly sync will double-check ${esc(a.platform)} for your submission.</div>`;

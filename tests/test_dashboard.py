@@ -255,3 +255,33 @@ console.log(JSON.stringify(toasts));
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(NODE, "needs Node to run dashboard.js")
+class MarkTest(unittest.TestCase):
+    """A ✓ the nightly check could not confirm still counts as done, not as needing attention."""
+
+    def test_an_unconfirmed_mark_counts_as_done(self):
+        want = ("const SOURCE_DONE", "const past", "function eff", "const isDone", "const needsAttention")
+        lines = []
+        for name in want:
+            # A function runs to its closing brace at the start of a line; a const to the next line.
+            tail = r".*?^\}$" if name.startswith("function") else r".*?$"
+            m = re.search(r"^" + re.escape(name) + tail, JS, re.M | re.S)
+            self.assertIsNotNone(m, name)
+            lines.append(m.group(0))
+        script = "const now = new Date('2026-10-07T12:00:00Z');\n" + "\n".join(lines) + """
+const at = '2026-10-06T11:38:16Z';
+let marks = {checkin: {marked_at: at}, sent: {marked_at: at}};
+const items = {
+  checkin: {id: 'checkin', status: 'missing', due_at: '2026-10-05T03:59:59Z', marked_done: at, mark_check: 'not_found'},
+  sent: {id: 'sent', status: 'submitted', due_at: '2026-10-05T03:59:59Z', marked_done: at, mark_check: 'confirmed'},
+  late: {id: 'late', status: 'missing', due_at: '2026-10-05T03:59:59Z'},
+};
+console.log(JSON.stringify(Object.fromEntries(Object.entries(items).map(([k, a]) =>
+  [k, {state: eff(a), done: isDone(a), attention: needsAttention(a)}]))));
+"""
+        out = run_node(script)
+        self.assertEqual(out["checkin"], {"state": "flagged", "done": True, "attention": False})
+        self.assertEqual(out["sent"]["attention"], False)
+        self.assertEqual(out["late"], {"state": "missing", "done": False, "attention": True})
