@@ -11,6 +11,10 @@ let LIVE = false;                                   // true once server.py answe
 // Reached from another device through a platform (platform.json says "remote": true): files and
 // folders never open on the Mac's screen from here. Set together with LIVE.
 let REMOTE = false;
+// A public copy of a platform on the internet (platform.json says "public": true): it saves marks and
+// tasks but has none of your files and runs no syncs. Like REMOTE, with files by name only (as on the
+// phone site) and no Sync now: LIVE stays false.
+let PUBLIC = false;
 let WRITE = null;                                   // where ✓ marks and tasks save: 'local' (your Mac) or 'cloud' (phone site)
 // publish.py marks the phone site's page; only there is the first path segment its secret.
 const PHONE = document.querySelector('meta[name="schoolhub-site"]')?.content === 'phone';
@@ -65,7 +69,8 @@ const backend = {
 // Through the local server when live. On the Mac, PDFs, pictures and text open in a tab, everything
 // else in its Mac app (api/open), and folders in Finder. From another device (REMOTE) nothing opens
 // on the Mac's screen: what the browser shows opens in a tab, anything else downloads, and a folder
-// is only named ("On your Mac: …"). Opened from disk, file:// links; on the phone site, names only.
+// is only named ("On your Mac: …"). Opened from disk, file:// links; on the phone site, names only,
+// and on a public copy (PUBLIC) names only, with folders named as from another device.
 const VIEWABLE = /\.(pdf|png|jpe?g|gif|svg|txt|md)$/i;
 // Through the server the file's name sits in the path too (file/<name>?p=…), so a PDF's tab is
 // titled with it; the server only reads p. A backslash, which a forwarding server may refuse in a
@@ -100,10 +105,15 @@ function folderLink(p, cls){
   if (attrs) return `<a${cls ? ` class="${cls}"` : ''} ${attrs}>Open folder</a>`;
   return REMOTE ? `<span class="where">${esc(onMac(p))}</span>` : '';
 }
-// Whether platform.json's answer says the page was reached from another device. SchoolHub's own
-// server answers 204 (no platform: this Mac). Any other answer, or one that cannot be read, counts as
-// another device, so the page then offers only what works from anywhere.
-const isRemote = async r => r.status === 200 ? (await r.json())?.remote === true : r.status !== 204 && r.status !== 404;
+// Where platform.json's answer says the page is: reached from another device (remote), or a public
+// copy of the platform (public, which is remote too). SchoolHub's own server answers 204 (no platform:
+// this Mac). Any other answer, or one that cannot be read, counts as another device, so the page then
+// offers only what works from anywhere.
+async function platformMode(r){
+  if (r.status !== 200) return {remote: r.status !== 204 && r.status !== 404, public: false};
+  const p = await r.json(), isPublic = p?.public === true;
+  return {remote: p?.remote === true || isPublic, public: isPublic};
+}
 // ---- end of files and folders ----
 function siteName(url){
   if (!url) return '';
@@ -234,7 +244,8 @@ function upcomingView(vis){
   for (const k of ['Today','Tomorrow','Next 7 days','Later']) G[k].sort(byDue);
   const html = order.filter(k => G[k].length).map(k =>
     `<section class="group"><h2>${k} · ${G[k].length}</h2><div class="list">${G[k].map(row).join('')}</div></section>`).join('');
-  return html || '<p class="empty">Nothing to show. You’re all caught up 🎉</p>';
+  // Before a hosted copy's first sync there is nothing to be caught up on: the banner says why.
+  return html || (D.generated_at ? '<p class="empty">Nothing to show. You’re all caught up 🎉</p>' : '');
 }
 
 function coursesView(vis){
@@ -266,8 +277,9 @@ function stats(){
   const banner = LIVE || WRITE ? '' : LOCAL_FILES
     ? `<div class="banner">To mark assignments done and open files in their apps, use <a href="http://localhost:8722">localhost:8722</a>.</div>`
     : `<div class="banner">Read-only view. Your files and the ✓ buttons live on your Mac; this page shows the last sync.</div>`;
+  const none = D.generated_at ? '' : '<div class="banner">No assignments yet: your Mac sends them with its next sync.</div>';
   const errs = D.errors?.length ? `<div class="errors"><b>Last sync had ${D.errors.length} issue(s)</b><ul>${D.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>` : '';
-  return banner + errs + `<div class="stats">
+  return banner + none + errs + `<div class="stats">
     <div class="stat ${attention ? 'red' : ''}"><b>${attention}</b><span>Need attention</span></div>
     <div class="stat ${soon ? 'amber' : ''}"><b>${soon}</b><span>Due in the next 48h</span></div>
     <div class="stat"><b>${week}</b><span>Due in the next 7 days</span></div>
@@ -297,9 +309,10 @@ function refocus(within, keys){
 function render(){
   document.querySelectorAll('#views button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === state.view)));
   $('#showDone').checked = state.showDone;
-  const hrs = (now - new Date(D.generated_at)) / 36e5;
-  $('#sync').textContent = 'Synced ' + ago(D.generated_at);
-  $('#sync').title = new Date(D.generated_at).toLocaleString();
+  // A public copy gives data with no sync time before the Mac's first sync has reached it.
+  const hrs = D.generated_at ? (now - new Date(D.generated_at)) / 36e5 : Infinity;
+  $('#sync').textContent = D.generated_at ? 'Synced ' + ago(D.generated_at) : 'Not synced yet';
+  $('#sync').title = D.generated_at ? new Date(D.generated_at).toLocaleString() : '';
   $('#sync').classList.toggle('stale', hrs > 30);
   const vis = visible(), main = $('#main'), key = focusKey(main);
   main.innerHTML = stats() + (state.view === 'courses' ? coursesView(vis) : upcomingView(vis));
@@ -541,6 +554,7 @@ taskDialog.addEventListener('click', e => { if (e.target === taskDialog) taskDia
 $('#fab').onclick = () => openTaskForm();
 
 // ---- sync now ----
+// Never on a public copy: syncs run on the Mac, which has your Canvas login.
 const syncBtn = $('#syncBtn');
 function showSyncing(on){ syncBtn.disabled = on; syncBtn.textContent = on ? 'Syncing…' : 'Sync now'; }
 async function pollSync(){
@@ -551,9 +565,10 @@ async function pollSync(){
   location.reload();
 }
 function enableServerFeatures(){
-  syncBtn.hidden = false;
   $('#fab').hidden = false;
   getJson('api/tasks').then(r => refreshTasks(r.tasks)).catch(() => {});
+  if (PUBLIC) return;
+  syncBtn.hidden = false;
   syncBtn.onclick = () => api('api/sync', {}).then(() => { showSyncing(true); setTimeout(pollSync, 1500); })
     .catch(() => toast("Couldn't start a sync. Is the SchoolHub server running?"));
   getJson('api/sync').then(s => { if (s.running) { showSyncing(true); pollSync(); } }).catch(() => {});
@@ -565,6 +580,7 @@ function enableServerFeatures(){
     toast(done.ok ? `Sync finished${summary ? ' · ' + summary : ''}${issues ? ` · ${issues} alert(s)` : ''}` : 'Sync failed. See state/server.log');
   }
 }
+// ---- end of sync now ----
 
 // Pick up changes made on your other device when you come back to this tab.
 async function reloadState(){
@@ -596,12 +612,13 @@ if (PHONE) {
   }).catch(() => {});
 } else if (!LOCAL_FILES) {
   // Your Mac's server answers api/marks, at / on its own port or under a platform's prefix, and a
-  // platform says in platform.json whether the page was reached from another device.
-  const remote = fetch('platform.json', {cache: 'no-store'}).then(isRemote).catch(() => true);
-  Promise.all([getJson('api/marks'), remote]).then(([m, far]) => {
+  // platform says in platform.json whether the page was reached from another device or is public.
+  const where = fetch('platform.json', {cache: 'no-store'}).then(platformMode).catch(() => ({remote: true, public: false}));
+  Promise.all([getJson('api/marks'), where]).then(([m, at]) => {
     marks = m;
-    REMOTE = far;
-    LIVE = true;
+    REMOTE = at.remote;
+    PUBLIC = at.public;
+    LIVE = !PUBLIC;
     WRITE = 'local';
     enableServerFeatures();
     render();

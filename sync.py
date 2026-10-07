@@ -449,6 +449,73 @@ def load_user_state(name):
     return load_json(path, {})
 
 
+# Query parameters that open a file without a login: Canvas's file links carry a verifier, and a
+# signed storage link its signature. The shared copy leaves them out.
+ACCESS_PARAMS = {"verifier", "access_token", "token", "sig", "signature", "x-amz-signature",
+                 "x-amz-credential", "x-amz-security-token"}
+_URL = re.compile(r"""https?://[^\s"'<>]+""")
+
+
+def _without_access(url):
+    """A link without its access parameters, written as it was (an HTML attribute keeps &amp;)."""
+    amp = "&amp;" in url
+    raw = html.unescape(url) if amp else url
+    try:
+        parts = urllib.parse.urlsplit(raw)
+        query = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+    except ValueError:
+        return url
+    kept = [(k, v) for k, v in query if k.lower() not in ACCESS_PARAMS]
+    if len(kept) == len(query):
+        return url
+    out = urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(kept)))
+    return out.replace("&", "&amp;") if amp else out
+
+
+def public_copy(value, home=None):
+    """data.js's data as it may be shown to anyone: paths on this computer from ~ (no user name or
+    home folder), and links without the parameters that open a file without a login. Everything
+    else (assignments, grades, feedback, instructions) is kept."""
+    home = str(Path.home()) if home is None else home
+    users = re.compile(r"(?<![\w.:/-])/Users/[^/\s\"'<>]+")
+
+    def walk(v):
+        if isinstance(v, dict):
+            return {k: walk(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        if isinstance(v, str):
+            if home and home != "/" and home in v:
+                v = re.sub(r"(?<![\w.:/-])" + re.escape(home) + r"(?=/|$|[\s\"'<>])", "~", v)
+            v = users.sub("~", v)
+            if "://" in v:
+                v = _URL.sub(lambda m: _without_access(m.group(0)), v)
+            return v
+        return v
+
+    return walk(value)
+
+
+def share_data(data, now, errors):
+    """With the Turso database (state/cloud.env), save this sync's data.js there too (school_data), for
+    a hosted copy of the dashboard that reads the same database: the public copy (public_copy), since
+    that copy has no login. A failure is reported with the sync's other problems; it never fails the
+    sync, which has already written data.js. Without Turso nothing happens and nothing is reported,
+    as before: a cloud.env that cannot be read is server.py's business, not the sync's."""
+    try:
+        import cloud
+        db = cloud.connect()
+    except Exception:
+        return
+    if not isinstance(db, cloud.Turso):
+        return
+    try:
+        text = "window.SCHOOL_DATA = " + json.dumps(public_copy(data)) + ";\n"
+        db.save_data(text, int(now.timestamp() * 1000))
+    except Exception as e:
+        errors.append(f"Couldn't save data.js to the Turso database: {e}")
+
+
 # ---------- your own tasks (the dashboard's + button) ----------
 
 def add_tasks(courses, now):
@@ -632,9 +699,11 @@ def main():
     changes = detect_changes(courses, previous)
 
     data = {"generated_at": now.isoformat(), "errors": errors, "new_files": store.new, "courses": courses}
+    data_js = "window.SCHOOL_DATA = " + json.dumps(data) + ";\n"
     tmp = HUB / "data.js.tmp"
-    tmp.write_text("window.SCHOOL_DATA = " + json.dumps(data) + ";\n")
+    tmp.write_text(data_js)
     tmp.replace(DATA_JS)
+    share_data(data, now, errors)
 
     site = cfg.get("site") or {}
     if site.get("auto_deploy"):

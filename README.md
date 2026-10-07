@@ -131,6 +131,12 @@ and Sync now work as on the Mac. If `platform.json` gives any other answer than 
 and `api/reveal` itself for those requests: the page leaving them out is a convenience, not the
 protection.
 
+A platform that puts a public copy of the dashboard on the internet (saving marks and tasks to a
+shared database, such as Turso below) adds `"public": true`. The page then behaves as from another
+device, except that files are listed by name only, as on the phone view, and there is no Sync now:
+syncs run on your Mac. That server answers `data.js` and the `api/` routes for marks and tasks
+itself, and serves no files.
+
 ## Tests
 
 ```bash
@@ -139,7 +145,8 @@ protection.
 
 They use a throwaway folder with made-up data, never your `config.json`, `state/` or `data.js`.
 The checks of the dashboard's file and folder links run its own code under Node when `node` is
-installed, and are skipped otherwise.
+installed, and are skipped otherwise. The Turso checks run against a stand-in for its HTTP API
+(`tests/fake_turso.py`) over a throwaway SQLite file, never a real database.
 
 ## Nightly sync
 
@@ -195,6 +202,52 @@ tasks too. Your Mac and phone then share one copy of both; grades and files stay
 
 `vercel/api/state.js` only answers requests that carry the site's secret path segment. The database
 token stays on Vercel and in `state/cloud.env` (gitignored) and never reaches the browser.
+
+## Marks, tasks and data.js in Turso (optional)
+
+Instead of Upstash, SchoolHub can keep ✓ marks and your own tasks in a [Turso](https://turso.tech)
+database (hosted libSQL, free tier) that other apps share: say, a hosted copy of the dashboard that
+saves marks to the same place. Put its URL and a token in `state/cloud.env`, by hand or with
+`npx vercel env pull` from a Vercel project the database is connected to:
+
+```
+TURSO_DATABASE_URL="libsql://<database>-<org>.turso.io"
+TURSO_AUTH_TOKEN="<token>"
+```
+
+With both set, SchoolHub uses Turso (even if Upstash's variables are there too). Then:
+
+1. Restart `server.py`, which reads `state/cloud.env` only when it starts (with the launchd service:
+   `launchctl kickstart -k gui/$(id -u)/com.schoolhub.server`).
+2. Run `python3 cloud.py`. It says which database `state/cloud.env` names and counts the marks and
+   tasks in it, reading only. `server.py` quietly falls back to the local files whenever the
+   database does not answer, so this is how you see that the database is reachable. It reads the
+   file afresh, so it checks what the next start of `server.py` will use, not the one already
+   running: restart first.
+3. Run Sync now (or `python3 sync.py`) once, so the hosted copy has your assignments.
+
+- Marks and tasks are rows of `school_kv` (`name` is `marks` or `tasks`, `key` the assignment or task
+  id, `value_json` the object, `updated_at` in milliseconds). On first start `server.py` copies the
+  ones you already have into an empty table.
+- After every sync, a copy of the new `data.js` is saved as the one row of `school_data`, so the
+  hosted copy shows the same assignments. If that fails, the sync still finishes and lists it with
+  its other issues. The hosted copy shows no assignments until the first sync after you add these
+  lines (step 3).
+- The phone view above keeps saving to Upstash, which your Mac no longer reads: ✓ marks and tasks
+  made there stay there. Use the hosted copy that reads Turso instead, and set `site.auto_deploy`
+  to `false` if you no longer want the phone view republished after each sync.
+
+It talks to Turso's HTTP API (`/v2/pipeline`) with the standard library; the token stays in
+`state/cloud.env`. SchoolHub never creates or changes tables: on a database of your own, make them
+once with `turso db shell <database> < turso-schema.sql`; if another app owns the database and makes
+them with its own migrations, leave it to that app.
+
+What goes to `school_data` is made to be shown without a login (`public_copy` in `sync.py`): your
+assignments, grades, feedback and Canvas instructions as they are, but paths on your Mac written from
+`~` (no user name) and links without the parameters that open a file without signing in (Canvas's
+`verifier=`, a storage link's signature). Never the files themselves. Your own `data.js` keeps
+everything. Anyone who can read the database, or open a hosted copy without a login, can read what
+it holds.
 
 ## Where files land
 
