@@ -416,6 +416,9 @@ def sync_web(cfg, store, errors, now, previous):
     root = Path(cfg["school_root"]).expanduser()
     out = []
     for wcfg in cfg.get("web_courses", []):
+        # A course dropped or not wanted: "skip": true, as for Canvas and Gradescope courses.
+        if wcfg.get("skip"):
+            continue
         try:
             module = __import__(f"{wcfg['type']}_source")
             course = module.sync(wcfg, root, store, now)

@@ -52,7 +52,8 @@ Then edit `config.json`:
   Add `"skip": true` to hide a course.
 - `gradescope`: your Gradescope email and password (optional). If your school uses single sign-on,
   set a Gradescope password first via "Forgot password".
-- `web_courses`: course sites with a parser in this repo.
+- `web_courses`: course sites with a parser in this repo. Add `"skip": true` to hide one (a dropped
+  class); its Gradescope course, if it has one, needs `"skip": true` under `gradescope.courses` too.
 
 Run it:
 

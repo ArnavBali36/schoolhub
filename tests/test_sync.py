@@ -194,3 +194,21 @@ class ShareDataTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WebCoursesTest(unittest.TestCase):
+    """Course websites (web_courses): one marked "skip" is left out, as a skipped Canvas course is."""
+
+    def test_a_skipped_course_site_is_not_read(self):
+        read = []
+        fake = type(sys)("fake_source")
+        fake.sync = lambda wcfg, root, store, now: read.append(wcfg["short"]) or {"id": f"web:{wcfg['short']}"}
+        cfg = {"school_root": "/tmp", "web_courses": [
+            {"type": "fake", "short": "kept"},
+            {"type": "fake", "short": "dropped", "skip": True},
+        ]}
+        store = mock.Mock()
+        with mock.patch.dict(sys.modules, {"fake_source": fake}):
+            out = sync.sync_web(cfg, store, [], datetime.now(timezone.utc), {"courses": []})
+        self.assertEqual(read, ["kept"])
+        self.assertEqual([c["id"] for c in out], ["web:kept"])
