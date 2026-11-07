@@ -149,6 +149,9 @@ if (!D) {
 
 // Your own tasks, live from server.py. null means use the copy the last sync baked into data.js.
 let tasks = null;
+// Whether a task stays at the top: its own choice, or, for one saved before the choice existed,
+// having no date (as all undated tasks were then).
+const pinnedTask = t => typeof t.pinned === 'boolean' ? t.pinned : !t.due_at;
 let courses = [], all = [], byId = {};
 function taskItem(t){
   const due = t.due_at ? new Date(t.due_at) : null;
@@ -156,7 +159,7 @@ function taskItem(t){
     status: due && due < now ? 'overdue' : 'todo', score: null, grade: null, submitted_at: null, late: false,
     platform: 'My task', verifiable: false, url: null, folder: null, files: [], submitted_files: [],
     description_html: '', comments: [], notes: t.notes || '', is_task: true, course_id: t.course_id || 'personal',
-    created_at: t.created_at || ''};
+    created_at: t.created_at || '', pinned: pinnedTask(t)};
 }
 // A course's dot: the color set for it in config.json if any, else one of the theme's course colors.
 const courseColor = (c, i) => c.id === 'personal' ? 'var(--course-personal)'
@@ -223,10 +226,11 @@ function row(a){
 }
 
 const byDue = (x, y) => (x.due_at ? new Date(x.due_at) : Infinity) - (y.due_at ? new Date(y.due_at) : Infinity);
-// Your own tasks with no due date stay pinned to the top, in the order you added them.
-const undatedTask = a => a.is_task && !a.due_at;
-const listOrder = (x, y) => (undatedTask(y) - undatedTask(x)) || byDue(x, y)
-  || (undatedTask(x) ? String(x.created_at).localeCompare(String(y.created_at)) : 0);
+// Your own tasks you chose to keep at the top stay there, under My tasks, by date and then in the
+// order you added them; the rest go in the list by date like any other item.
+const pinnedItem = a => a.is_task && pinnedTask(a);
+const listOrder = (x, y) => (pinnedItem(y) - pinnedItem(x)) || byDue(x, y)
+  || (pinnedItem(x) ? String(x.created_at).localeCompare(String(y.created_at)) : 0);
 
 function visible(){
   const q = state.q.trim().toLowerCase();
@@ -238,7 +242,7 @@ function upcomingView(vis){
   const order = ['My tasks','Needs attention','Today','Tomorrow','Next 7 days','Later','No due date','Earlier'];
   const G = Object.fromEntries(order.map(k => [k, []]));
   for (const a of all.filter(vis)) {
-    if (undatedTask(a)) { G['My tasks'].push(a); continue; }
+    if (pinnedItem(a)) { G['My tasks'].push(a); continue; }
     if (needsAttention(a)) { G['Needs attention'].push(a); continue; }
     if (!a.due_at) { G['No due date'].push(a); continue; }
     const d = dayDiff(new Date(a.due_at));
@@ -520,6 +524,8 @@ function openTaskForm(id){
   $('#tDate').value = d ? `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` : '';
   $('#tTime').value = d && !t.all_day ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : '';
   $('#tNotes').value = t?.notes || '';
+  // A new task is kept at the top until you choose otherwise.
+  $('#tPinned').checked = t ? pinnedTask(t) : true;
   taskDialog.showModal();
   $('#tName').focus();
 }
@@ -530,7 +536,8 @@ async function saveTask(e){
   if (!name) return $('#tName').focus();
   const date = $('#tDate').value, time = $('#tTime').value;
   const body = {name, course_id: $('#tCourse').value, notes: $('#tNotes').value,
-    due_at: date ? new Date(`${date}T${time || '23:59'}`).toISOString() : null, all_day: !!date && !time};
+    due_at: date ? new Date(`${date}T${time || '23:59'}`).toISOString() : null, all_day: !!date && !time,
+    pinned: $('#tPinned').checked};
   if (editingTask) body.id = editingTask;
   try {
     const r = await backend.saveTask(body);

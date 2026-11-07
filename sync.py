@@ -539,6 +539,8 @@ def add_tasks(courses, now):
             "files": [], "submitted_files": [], "description_html": "", "comments": [],
             "notes": t.get("notes", ""), "is_task": True, "course_id": t.get("course_id") or "personal",
             "created_at": t.get("created_at", ""),
+            # Kept at the top, or in the list by date; one saved before the choice is pinned undated.
+            "pinned": bool(t["pinned"]) if "pinned" in t else not t.get("due_at"),
         })
     if personal["assignments"]:
         courses.append(personal)

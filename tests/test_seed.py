@@ -106,3 +106,17 @@ class SeedTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PinnedTaskTest(unittest.TestCase):
+    """A task is kept at the top (pinned) or goes in the list by its date, as chosen in its form."""
+
+    def test_the_choice_is_kept_either_way(self):
+        for pinned, due in [(True, "2026-11-10"), (False, None), (True, None), (False, "2026-11-10")]:
+            task, error = server.clean_task({"name": "Read", "due_at": due, "pinned": pinned}, None)
+            self.assertIsNone(error)
+            self.assertIs(task["pinned"], pinned)
+
+    def test_without_the_choice_an_undated_task_is_pinned_as_before(self):
+        self.assertIs(server.clean_task({"name": "Read"}, None)[0]["pinned"], True)
+        self.assertIs(server.clean_task({"name": "Read", "due_at": "2026-11-10"}, None)[0]["pinned"], False)

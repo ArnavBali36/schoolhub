@@ -80,6 +80,17 @@ class SourceTest(unittest.TestCase):
         # Asked, answered or not: drawn again without it, so a page that cannot save still says so.
         self.assertRegex(JS, r"\.catch\(\(\) => \{\}\)\.finally\(\(\) => \{\s*PROBING = false;\s*render\(\);\s*showSyncbox\(\);")
 
+    def test_a_task_is_kept_at_the_top_or_in_the_list_as_chosen(self):
+        html = (REPO / "dashboard.html").read_text(encoding="utf-8")
+        self.assertIn('<input id="tPinned" type="checkbox">', html)
+        # A new task starts pinned; an existing one shows its own choice.
+        self.assertIn("$('#tPinned').checked = t ? pinnedTask(t) : true;", JS)
+        self.assertIn("pinned: $('#tPinned').checked}", JS)
+        # Pinned ones go under My tasks whatever their date; the rest go in the list by date.
+        self.assertIn("if (pinnedItem(a)) { G['My tasks'].push(a); continue; }", JS)
+        # One saved before the choice existed: pinned when it has no date, as it was.
+        self.assertIn("const pinnedTask = t => typeof t.pinned === 'boolean' ? t.pinned : !t.due_at;", JS)
+
     def test_data_without_a_sync_time_says_so(self):
         # A hosted copy gives data with no generated_at until the Mac's first sync has reached it:
         # "Not synced yet" and a note, instead of a sync time from 1970.

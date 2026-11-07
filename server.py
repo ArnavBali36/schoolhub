@@ -219,6 +219,9 @@ def clean_task(body, existing):
         "course_id": str(body.get("course_id") or "personal")[:80],
         "due_at": due,
         "all_day": bool(due) and bool(body.get("all_day")),
+        # Kept at the top under "My tasks", or put in the list by its date like any other item. A
+        # task saved without the choice (before it existed) is pinned when it has no date, as then.
+        "pinned": bool(body["pinned"]) if "pinned" in body else not due,
         "notes": str(body.get("notes") or "").strip()[:5000],
         "created_at": (existing or {}).get("created_at") or body.get("created_at") or stamp,
         "updated_at": stamp,

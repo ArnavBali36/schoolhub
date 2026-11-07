@@ -85,6 +85,8 @@ module.exports = async (req, res) => {
         course_id: clip(body.course_id, 80) || 'personal',
         due_at: due,
         all_day: Boolean(due) && Boolean(body.all_day),
+        // Kept at the top, or in the list by date; without the choice, pinned when it has no date.
+        pinned: 'pinned' in body ? Boolean(body.pinned) : !due,
         notes: clip(body.notes, 5000),
         created_at: (existing && JSON.parse(existing).created_at) || body.created_at || now,
         updated_at: now,
