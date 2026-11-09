@@ -23,6 +23,12 @@ class BuildTest(unittest.TestCase):
         (hub / "vercel" / "api").mkdir(parents=True)
         for name in ("dashboard.html", "dashboard.js", "theme-init.js", "bar.js", "favicon.svg"):
             shutil.copy2(REPO / name, hub / name)
+        # The build checks the files it copies, not what is in them: a stand-in if the planner's
+        # script is not there yet.
+        if (REPO / "planner.js").exists():
+            shutil.copy2(REPO / "planner.js", hub / "planner.js")
+        else:
+            (hub / "planner.js").write_text("// planner.js\n")
         shutil.copy2(REPO / "vercel" / "api" / "state.js", hub / "vercel" / "api" / "state.js")
         (hub / "data.js").write_text('window.SCHOOL_DATA = {"courses": []};\n')
         self.saved = publish.HUB, publish.SITE, publish.CONFIG
@@ -36,11 +42,18 @@ class BuildTest(unittest.TestCase):
     def test_build_copies_the_page_and_its_scripts(self):
         publish.build({"site": {"secret": "s3cret"}})
         page = self.site / "s3cret"
-        for name in ("index.html", "dashboard.js", "theme-init.js", "bar.js", "data.js", "favicon.svg"):
+        for name in ("index.html", "dashboard.js", "planner.js", "theme-init.js", "bar.js", "data.js", "favicon.svg"):
             self.assertTrue((page / name).is_file(), name)
         self.assertEqual((page / "dashboard.js").read_bytes(), (REPO / "dashboard.js").read_bytes())
         self.assertTrue((self.site / "api" / "state.js").is_file())
         self.assertIn("noindex", json.loads((self.site / "vercel.json").read_text())["headers"][0]["headers"][0]["value"])
+
+    def test_the_planner_script_is_required_like_the_others(self):
+        # dashboard.html loads it on the phone site too (where the page hides the planner).
+        self.assertIn("planner.js", publish.PAGE_FILES)
+        (publish.HUB / "planner.js").unlink()
+        with self.assertRaises(FileNotFoundError):
+            publish.build({"site": {"secret": "s3cret"}})
 
     def test_only_the_phone_site_is_marked(self):
         publish.build({"site": {"secret": "s3cret"}})

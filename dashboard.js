@@ -1,6 +1,7 @@
 // SchoolHub's dashboard. Loaded by dashboard.html after data.js (the last sync), from a file rather
 // than inline so the page runs under a Content-Security-Policy of script-src 'self'. The app bar
-// (theme, app switch, the O key) is bar.js's, drawn before the first paint.
+// (theme, app switch, the O key) is bar.js's, drawn before the first paint, and the day planner is
+// planner.js's, loaded after this file (it uses window.SchoolHub, at the end).
 //
 // Every request to SchoolHub's own server uses a relative URL (api/marks, file?p=…), so the page
 // works at http://localhost:8722/ and under a path prefix such as /school/ on a platform that
@@ -29,8 +30,17 @@ const mem = {
   get(k, d){ try { const v = localStorage.getItem('sh:' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v){ try { localStorage.setItem('sh:' + k, JSON.stringify(v)); } catch {} },
 };
-const state = { view: mem.get('view', 'upcoming') === 'courses' ? 'courses' : 'upcoming', showDone: mem.get('showDone', false), course: mem.get('course', null), q: '' };
+const VIEWS = ['upcoming', 'courses', 'day'];
+const state = { view: VIEWS.includes(mem.get('view', 'upcoming')) ? mem.get('view', 'upcoming') : 'upcoming', showDone: mem.get('showDone', false), course: mem.get('course', null) };
 const now = new Date();
+// From 1100 px the planner has a column of its own beside the list; narrower, it is the Day view.
+const WIDE = matchMedia('(min-width: 1100px)');
+// Whether the page has the planner: 'unknown' until planner.js knows (it asks api/plan once the
+// page knows where it saves), then 'on' or 'off'. Never on the phone site or from disk.
+let plannerState = PHONE || LOCAL_FILES ? 'off' : 'unknown';
+// Day only where it is offered: a remembered Day shows Upcoming beside the planner's own column,
+// and wherever there is no planner.
+const shownView = () => state.view === 'day' && (WIDE.matches || plannerState === 'off') ? 'upcoming' : state.view;
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const typingIn = el => !!el && (['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName) || el.isContentEditable);
@@ -213,9 +223,12 @@ const PILL_TIP = {
   marked: 'Marked done by you',
 };
 
+// An open item can be dragged onto the planner (planner.js reads the drag), with a grip on hover.
+const GRIP = '<span class="grip" aria-hidden="true" title="Drag onto the planner"><svg viewBox="0 0 6 14" fill="currentColor"><circle cx="1" cy="1.5" r="1"/><circle cx="5" cy="1.5" r="1"/><circle cx="1" cy="7" r="1"/><circle cx="5" cy="7" r="1"/><circle cx="1" cy="12.5" r="1"/><circle cx="5" cy="12.5" r="1"/></svg></span>';
+const draggable = a => plannerState === 'on' && !isDone(a);
 function row(a){
-  const s = eff(a), nf = (a.files?.length || 0), m = !!marks[a.id];
-  return `<div class="row" data-id="${esc(a.id)}">
+  const s = eff(a), nf = (a.files?.length || 0), m = !!marks[a.id], drag = draggable(a);
+  return `<div class="row" data-id="${esc(a.id)}"${drag ? ' draggable="true"' : ''}>${drag ? GRIP : ''}
     <span class="chip">${dot(a.course)}${esc(a.course.short || a.course.name)}</span>
     <button type="button" class="name" data-drawer="${esc(a.id)}">${esc(a.name)}${nf ? `<small>📎 ${nf}</small>` : ''}${a.late ? '<small>late</small>' : ''}${a.due_changed_from ? '<small>📅 date changed</small>' : ''}</button>
     <span class="plat">${esc(a.platform)}</span>
@@ -233,9 +246,14 @@ const listOrder = (x, y) => (pinnedItem(y) - pinnedItem(x)) || byDue(x, y)
   || (pinnedItem(x) ? String(x.created_at).localeCompare(String(y.created_at)) : 0);
 
 function visible(){
-  const q = state.q.trim().toLowerCase();
-  return a => (!q || `${a.name} ${a.course.short} ${a.course.name} ${a.platform}`.toLowerCase().includes(q))
-    && (state.showDone || !isDone(a) || needsAttention(a));
+  return a => state.showDone || !isDone(a) || needsAttention(a);
+}
+// Show done, quietly at the end of a list: "Show 8 done" for the done items it leaves out of it,
+// "Hide done" once they show. Nothing when there are none to show.
+function doneToggle(items){
+  const hidden = items.filter(a => isDone(a) && !needsAttention(a)).length;
+  if (!state.showDone && !hidden) return '';
+  return `<button type="button" class="done-toggle" id="doneToggle">${state.showDone ? 'Hide done' : `Show ${hidden} done`}</button>`;
 }
 
 function upcomingView(vis){
@@ -255,7 +273,7 @@ function upcomingView(vis){
   const html = order.filter(k => G[k].length).map(k =>
     `<section class="group"><h2>${k} · ${G[k].length}</h2><div class="list">${G[k].map(row).join('')}</div></section>`).join('');
   // Before a hosted copy's first sync there is nothing to be caught up on: the banner says why.
-  return html || (D.generated_at ? '<p class="empty">Nothing to show. You’re all caught up 🎉</p>' : '');
+  return (html || (D.generated_at ? '<p class="empty">Nothing to show. You’re all caught up 🎉</p>' : '')) + doneToggle(all);
 }
 
 function coursesView(vis){
@@ -275,6 +293,7 @@ function coursesView(vis){
       ${cur.url ? `<a href="${esc(cur.url)}" target="_blank">Open ${siteName(cur.url)} ↗</a>` : ''}
       ${cur.folder ? folderLink(cur.folder) : ''}</div>
     ${list.length ? `<div class="list">${list.map(row).join('')}</div>` : '<p class="empty">No assignments to show.</p>'}
+    ${doneToggle(all.filter(a => a.course === cur))}
     ${mats ? `<div class="sub">Course materials</div><div class="mat">${mats}</div>` : ''}
   </div></div>`;
 }
@@ -317,16 +336,22 @@ function refocus(within, keys){
 }
 
 function render(){
-  document.querySelectorAll('#views button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === state.view)));
-  $('#showDone').checked = state.showDone;
+  const view = shownView();
+  document.querySelectorAll('#views button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
+  // Day is offered once the planner is known to be there (or while Day is the view on show, as
+  // bar.js drew it); dashboard.html's styles hide it where the planner has its own column.
+  $('#views [data-view="day"]').hidden = plannerState === 'off' || (plannerState === 'unknown' && view !== 'day');
+  $('.page').dataset.view = view;
+  $('.page').dataset.plan = plannerState;
   // A public copy gives data with no sync time before the Mac's first sync has reached it.
   const hrs = D.generated_at ? (now - new Date(D.generated_at)) / 36e5 : Infinity;
   $('#sync').textContent = D.generated_at ? 'Synced ' + ago(D.generated_at) : 'Not synced yet';
   $('#sync').title = D.generated_at ? new Date(D.generated_at).toLocaleString() : '';
   $('#sync').classList.toggle('stale', hrs > 30);
   const vis = visible(), main = $('#main'), key = focusKey(main);
-  main.innerHTML = stats() + (state.view === 'courses' ? coursesView(vis) : upcomingView(vis));
+  main.innerHTML = stats() + (view === 'courses' ? coursesView(vis) : upcomingView(vis));
   refocus(main, key);
+  emit('render');
 }
 
 // Instructions are written for a white page, often with colored text and highlights: shown as they
@@ -419,6 +444,7 @@ function openDrawer(id, fromKeyboard = false){
     <div class="actions">
       ${canMark(a) ? `<button type="button" class="btn ${m ? '' : 'primary'}" data-mark="${esc(a.id)}">${m ? 'Unmark done' : '✓ Mark as done'}</button>` : ''}
       ${a.is_task && WRITE ? `<button type="button" class="btn" data-edit-task="${esc(a.id)}">Edit</button><button type="button" class="btn" data-delete-task="${esc(a.id)}">Delete</button>` : ''}
+      ${plannerState === 'on' && !isDone(a) ? `<button type="button" class="btn" data-plan-it="${esc(a.id)}" title="Add it to the next deep work block today">Plan it</button>` : ''}
       ${a.url ? `<a class="btn" href="${esc(a.url)}" target="_blank">Open on ${siteName(a.url)} ↗</a>` : ''}
       ${a.gradescope_url ? `<a class="btn" href="${esc(a.gradescope_url)}" target="_blank">Open on Gradescope ↗</a>` : ''}
       ${a.folder && folderAttrs(a.folder) ? folderLink(a.folder, 'btn') : ''}
@@ -496,18 +522,20 @@ document.addEventListener('click', e => {
   if (op) { e.preventDefault(); if (REMOTE) return; return api('api/open', {path: op.dataset.open}).catch(() => toast("Couldn't open that file.")); }
   // A click the keyboard made (Enter or Space on a name) has no click count.
   const r = e.target.closest('.row'); if (r) return openDrawer(r.dataset.id, e.detail === 0);
+  if (e.target.closest('#doneToggle')) { state.showDone = !state.showDone; mem.set('showDone', state.showDone); return render(); }
   const c = e.target.closest('[data-course]'); if (c) { state.course = c.dataset.course; mem.set('course', state.course); render(); }
   const v = e.target.closest('#views button'); if (v) { state.view = v.dataset.view; mem.set('view', state.view); render(); }
 });
 $('#scrim').onclick = closeDrawer;
+// A modal dialog open (a task's, or the planner's) has Escape and the keys to itself. The planner's
+// details card beside a block is not modal: it leaves them to the page.
+const dialogOpen = () => [...document.querySelectorAll('dialog[open]')].some(d => d.matches(':modal'));
 document.addEventListener('keydown', e => {
   const typing = typingIn(document.activeElement);
-  if (e.key === 'Escape' && !taskDialog.open) closeDrawer();
-  if (e.key === '/' && !typing) { e.preventDefault(); $('#q').focus(); }
-  if (e.key === 'n' && WRITE && !typing && !taskDialog.open && !e.metaKey && !e.ctrlKey) { e.preventDefault(); openTaskForm(); }
+  if (e.key === 'Escape' && !dialogOpen()) closeDrawer();
+  if (e.key === 'n' && WRITE && !typing && !dialogOpen() && !e.metaKey && !e.ctrlKey) { e.preventDefault(); openTaskForm(); }
 });
-$('#q').addEventListener('input', e => { state.q = e.target.value; render(); });
-$('#showDone').addEventListener('change', e => { state.showDone = e.target.checked; mem.set('showDone', state.showDone); render(); });
+WIDE.addEventListener('change', () => render());
 // ---- your own tasks ----
 const taskDialog = $('#taskDialog');
 let editingTask = null;
@@ -607,8 +635,43 @@ async function reloadState(){
       refreshTasks((await getJson('api/tasks')).tasks);
     }
   } catch {}
+  emit('reload');
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadState(); });
+
+// ---- what planner.js uses ----
+// The day planner reads the list, opens the drawer and saves through this small namespace rather
+// than reaching into this file, and hears of changes through on(): 'render' after each drawing of
+// the list (marks, tasks, the view), 'reload' after reloadState, and 'ready' once the page knows
+// where it saves. 'ready' is kept: a handler added after it ran is called at once, since planner.js
+// may load after the first answer.
+const hooks = {render: [], reload: [], ready: []};
+let readied = false;
+function emit(name){
+  if (name === 'ready') readied = true;
+  for (const fn of hooks[name]) try { fn(); } catch (err) { console.error(err); }
+}
+window.SchoolHub = {
+  get items(){ return all; },
+  byId: id => byId[id],
+  get mode(){ return {WRITE, LIVE, REMOTE, PUBLIC, PHONE, LOCAL_FILES}; },
+  get view(){ return shownView(); },
+  get plannerState(){ return plannerState; },
+  // planner.js says whether the page has the planner ('on' or 'off'): the Day view, the rows' drag
+  // and the drawer's Plan it follow.
+  setPlanner(next){
+    if (next === plannerState) return;
+    plannerState = next;
+    refresh();
+  },
+  isDone, needsAttention, fmtDue, esc, dot, typingIn, toast, openDrawer, api,
+  drawerOpen: () => drawerId !== null,
+  on(name, fn){ hooks[name].push(fn); if (name === 'ready' && readied) fn(); },
+};
+// planner.js not there at all (a server that does not serve it): no planner, rather than a Day view
+// that never fills in.
+window.addEventListener('load', () => { if (!window.SchoolHub.plannerLoaded && plannerState === 'unknown') window.SchoolHub.setPlanner('off'); });
+// ---- end of what planner.js uses ----
 
 // Your Mac's server or a platform is asked below, before the first render, unless the page is the
 // phone site or a file on disk.
@@ -616,7 +679,7 @@ PROBING = !PHONE && !LOCAL_FILES;
 render();
 // The last sync shows once it is known whether Sync now goes with it, so the two appear together.
 const showSyncbox = () => { $('#syncbox').hidden = false; };
-if (PHONE || LOCAL_FILES) showSyncbox();
+if (PHONE || LOCAL_FILES) { showSyncbox(); emit('ready'); }
 if (PHONE) {
   // The phone site: the cloud database saves marks and tasks when it is connected; without it the
   // page stays a read-only view.
@@ -641,5 +704,6 @@ if (PHONE) {
     PROBING = false;
     render();
     showSyncbox();
+    emit('ready');
   });
 }

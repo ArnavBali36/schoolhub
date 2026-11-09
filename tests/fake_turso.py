@@ -62,13 +62,17 @@ def encode(v):
 
 
 class FakeTurso:
-    def __init__(self, token="fake-turso-token", schema=True):
+    def __init__(self, token="fake-turso-token", schema=True, without=()):
+        """schema=False makes no tables; without names tables of turso-schema.sql to leave out, as
+        in a database whose owner has not yet run the migration that makes them."""
         self.token = token
         self.tmp = tempfile.TemporaryDirectory()
         self.path = Path(self.tmp.name) / "turso.db"
         db = sqlite3.connect(self.path)
         if schema:
             db.executescript(SCHEMA.read_text())
+            for table in without:
+                db.execute(f"DROP TABLE {table}")
         db.close()
         self.pipelines = []      # every request body received, as JSON
         self.headers = []        # the headers of every request received, of any method

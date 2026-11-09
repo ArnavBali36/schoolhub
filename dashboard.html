@@ -78,11 +78,10 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline;tex
 .views button:focus-visible{outline-offset:-2px}
 /* The bar's end fills the rest of the row, so what appears in it later (the last sync) moves nothing. */
 .bar-end{display:flex;align-items:center;justify-content:flex-end;gap:4px;flex:1;min-width:0;margin-left:auto}
-/* Above the lists: search and Show done, which filter them, and the last sync. */
-.toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:10px 16px;margin-bottom:20px}
-.toolbar input[type=search]{flex:1 1 220px;max-width:320px;min-width:0}
 /* The last sync and Sync now: beside the theme button where the bar has room (bar.js moves it),
-   at the end of the toolbar on narrow screens. */
+   on a row of their own above the page on narrow screens. Empty, the row takes no room. */
+.syncrow{display:flex;justify-content:flex-end;min-height:30px;margin-bottom:16px}
+.syncrow:empty{display:none}
 .syncbox{display:flex;align-items:center;gap:10px;margin-left:auto;min-width:0}
 .sync{font-size:12.5px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}.sync.stale{color:var(--warn)}
 .bar-end .syncbox{gap:2px;margin:0 2px 0 0}
@@ -90,9 +89,6 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline;tex
 .bar-end #syncBtn{min-height:32px;padding:0 10px;border:0;background:none;box-shadow:none;color:var(--muted);font-size:14px}
 .bar-end #syncBtn:hover{color:var(--text);background:var(--surface-2)}
 .bar-end #syncBtn:disabled:hover{color:var(--muted);background:none}
-label.tog{color:var(--muted);font-size:13px;display:flex;gap:6px;align-items:center;cursor:pointer;user-select:none;white-space:nowrap}
-/* As tall as Sync now, so the row does not grow when the last sync appears beside it on a phone. */
-.toolbar label.tog{min-height:30px}
 .theme-btn{display:inline-grid;place-items:center;flex:none;width:32px;height:32px;padding:0;border:0;border-radius:var(--radius-sm);background:none;color:var(--muted);cursor:pointer;transition:background-color 120ms ease,color 120ms ease}
 .theme-btn:hover{color:var(--text);background:var(--surface-2)}
 .theme-btn svg{width:18px;height:18px}
@@ -117,7 +113,7 @@ label.tog{color:var(--muted);font-size:13px;display:flex;gap:6px;align-items:cen
 @media (max-width:360px){.app-switch .brand-mark{display:none}}
 
 /* Controls, as in QuantPrep. */
-input[type=search],dialog.task :is(input,select,textarea){padding:0 11px;height:36px;border:1px solid var(--border-input);border-radius:var(--radius-sm);background-color:var(--surface);color:var(--text);width:100%;transition:border-color 120ms ease,box-shadow 120ms ease}
+dialog.task :is(input,select,textarea){padding:0 11px;height:36px;border:1px solid var(--border-input);border-radius:var(--radius-sm);background-color:var(--surface);color:var(--text);width:100%;transition:border-color 120ms ease,box-shadow 120ms ease}
 :is(input,select,textarea):focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--ring)}
 input::placeholder,textarea::placeholder{color:var(--faint);opacity:1}
 input[type=checkbox]{accent-color:var(--accent)}
@@ -241,13 +237,45 @@ dialog.task select{appearance:none;padding-right:32px;cursor:pointer;
 dialog.task .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 dialog.task .buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
 
-/* Narrow windows and phones: the lists' rows take two lines. */
-@media (max-width:780px){
-  .fab{right:16px;bottom:calc(18px + env(safe-area-inset-bottom))}
-  dialog.task{width:100%;max-width:100%;margin:auto 0 0;border-radius:16px 16px 0 0;border-bottom:0}
-  dialog.task form{padding-bottom:calc(20px + env(safe-area-inset-bottom))}
-  dialog.task :is(input,select,textarea){font-size:16px}
-  .stats{grid-template-columns:1fr 1fr;gap:12px}.stat{padding:12px}.stat b{font-size:21px}.stat span{font-size:12px}
+/* The list and the day planner. From 1100 px they sit side by side under the bar, the planner sticky
+   on the right and scrolling inside itself; the page column widens to 1440 px for them while the bar
+   keeps the 1040 px column, so the app switch stays put. Narrower, the planner is the Day view,
+   alone. data-plan says whether the page has the planner at all (planner.js: not on the phone site,
+   from disk, or with a server too old to keep a plan), data-view which view is on show. While it is
+   still unknown the planner's column is kept, so the list does not jump sideways once it is on. */
+.left{min-width:0;container-type:inline-size}
+.planner{display:flex;flex-direction:column;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;container:planner / inline-size}
+.page:not([data-plan="on"],[data-plan="unknown"]) .planner{display:none}
+@media (min-width:1100px){
+  .page:is([data-plan="on"],[data-plan="unknown"]){max-width:calc(1440px + 2 * var(--gutter))}
+  .page:is([data-plan="on"],[data-plan="unknown"]) .cols{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:24px;align-items:start}
+  /* The room for the + button goes inside the list's column, so the columns reach the page's end
+     and the sticky planner never slides up with their bottom. */
+  .page:is([data-plan="on"],[data-plan="unknown"]){padding-bottom:16px}
+  .page:is([data-plan="on"],[data-plan="unknown"]) .left{padding-bottom:80px}
+  .planner{position:sticky;top:calc(var(--bar-height) + 32px);height:calc(100vh - var(--bar-height) - 48px);min-height:420px}
+  .views [data-view="day"]{display:none}
+  /* The + button (add a task) sits at the bottom of the list's column, clear of the planner, whose
+     day reaches the bottom of the window: right of it are the planner (2 parts of 5 of the column
+     less the 24 px gap), the gap and 16 px. */
+  .page:is([data-plan="on"],[data-plan="unknown"]) ~ .fab{
+    right:calc(max(var(--gutter), (100% - 1440px) / 2) + (100% - 2 * max(var(--gutter), (100% - 1440px) / 2) - 24px) * .4 + 40px)}
+}
+@media (max-width:1099px){
+  .page:not([data-view="day"]) .planner{display:none}
+  .page[data-view="day"] .left{display:none}
+  /* The Day view fills the window under the bar (and its 1 px border): the planner takes what the sync row leaves, so the
+     whole day fits in it (planner.js). */
+  .page[data-view="day"]{display:flex;flex-direction:column;height:calc(100vh - var(--bar-height) - 1px);height:calc(100dvh - var(--bar-height) - 1px);min-height:440px;padding-bottom:12px}
+  .page[data-view="day"] .cols{display:flex;flex-direction:column;flex:1;min-height:0}
+  .page[data-view="day"] .planner{flex:1;min-height:360px}
+  /* The Day view shows the planner alone, with its own + Block: the list's + button would only cover
+     the end of the day. */
+  .page[data-view="day"] ~ .fab{display:none}
+}
+/* The list's rows take two lines where its column is too narrow for a name to read on one: in a
+   narrow window, or beside the planner. The column's width decides, not the window's. */
+@container (max-width:880px){
   .row,.courses .row{grid-template-columns:minmax(0,1fr) auto 32px;grid-template-areas:"name pill check" "chip due check";
        row-gap:3px;column-gap:10px;padding:11px 14px}
   .row .name{grid-area:name;white-space:normal;line-height:1.3}
@@ -256,14 +284,225 @@ dialog.task .buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:4p
   .row .due{grid-area:due;align-self:end}
   .row .plat{display:none}
   .row .check{grid-area:check;width:32px;height:32px;align-self:center}
+}
+/* The four tiles stay in one row wherever the column fits them (beside the planner too). */
+@container (min-width:560px){.stats{grid-template-columns:repeat(4,minmax(0,1fr))}}
+/* By course: the course list goes above the course's own list once the two would squeeze it. */
+@container (max-width:900px){
   .courses{grid-template-columns:1fr}.clist{position:static;flex-direction:row;flex-wrap:wrap}
+}
+/* An open row can be dragged onto the planner: a grip shows on hover. */
+.row{position:relative}
+.grip{position:absolute;left:2px;top:50%;display:grid;place-items:center;width:12px;height:22px;margin-top:-11px;color:var(--faint);opacity:0;cursor:grab;transition:opacity 120ms ease}
+.grip svg{width:6px;height:14px}
+.row:hover .grip{opacity:1}
+.row.drag-src{opacity:.55}
+/* Show done / Hide done, quietly at the end of the list. */
+.done-toggle{display:inline-block;margin:-12px 0 0;padding:4px 2px;border:0;background:none;color:var(--muted);font-size:13px;cursor:pointer}
+.done-toggle:hover{color:var(--text);text-decoration:underline;text-underline-offset:2px}
+
+/* The planner: a header with the date, a strip for what has no time on it (one line, its chips
+   cut short and then scrolling sideways, so it never takes the day's room), and the timeline. The
+   whole day fits under the header: planner.js sets the hour's height (--hour) from the room there,
+   never under 22 px (only then does it scroll). Each kind of block has its own colors from the
+   theme, and its name written on it. */
+.ph{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:10px 12px 10px 8px;border-bottom:1px solid var(--border)}
+.ph-nav{display:flex;align-items:center;gap:2px;flex:1 1 auto;min-width:0}
+.ph-step{display:grid;place-items:center;flex:none;width:30px;height:30px;padding:0;border:0;border-radius:var(--radius-sm);background:none;color:var(--muted);font-size:20px;line-height:1;cursor:pointer;transition:background-color 120ms ease,color 120ms ease}
+.ph-step:hover{background:var(--surface-2);color:var(--text)}
+.ph-date{margin:0 4px;font-size:15px;font-weight:650;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ph-date .short{display:none}
+@container planner (max-width:460px){.ph-date .long{display:none}.ph-date .short{display:inline}}
+.ph-actions{display:flex;align-items:center;gap:6px;flex:none;margin-left:auto}
+.pstrip{display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--surface-2);overflow-x:auto;scrollbar-width:thin;overscroll-behavior-x:contain}
+.pchip{flex:0 1 auto;min-width:min(9em,100%);display:inline-flex;align-items:center;gap:6px;max-width:100%;min-height:26px;padding:2px 10px;border:1px solid var(--border-strong);border-radius:999px;background:var(--surface);color:var(--text);font-size:12.5px;line-height:1.3;cursor:pointer;transition:background-color 120ms ease}
+.pchip:hover{background:var(--surface-3)}
+.pchip > span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.pchip.done > span{color:var(--muted);text-decoration:line-through}
+.pchip b{font-weight:600;color:var(--accent)}
+.pscroll{position:relative;flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+.pmsg{margin:0;padding:40px 20px;text-align:center;color:var(--muted);font-size:14px}
+.pmsg .btn{margin-top:12px}
+/* Room for the first and last hour's labels; planner.js adds room at the bottom where the + button
+   would cover the last hour. */
+.ptime{position:relative;margin:7px 0}
+.phours{position:absolute;left:0;top:0;bottom:0;width:58px}
+.phour{position:absolute;right:10px;transform:translateY(-50%);font-size:11.5px;line-height:1;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+/* A line at each hour, a fainter one at each half hour. Vertical drags on empty time scroll on a
+   touch screen (planner.js makes blocks there on a long press), so only pan-y is left to the
+   browser. */
+.pgrid{position:relative;margin:0 12px 0 58px;border-bottom:1px solid var(--border);background:linear-gradient(var(--border) 1px,transparent 1px) 0 0/100% var(--hour,48px);
+       touch-action:pan-y;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;cursor:crosshair}
+.pgrid::before{content:"";position:absolute;inset:0;background:linear-gradient(var(--border) 1px,transparent 1px) 0 calc(var(--hour,48px) / 2)/100% var(--hour,48px);opacity:.55;pointer-events:none}
+.pgrid.dense::before{display:none}
+.pgrid.loading{opacity:.55;pointer-events:none}
+.pblock{position:absolute;padding:3px 6px 3px 8px;border-radius:6px;border-left:3px solid var(--pb-edge);background:var(--pb-fill);color:var(--text);box-shadow:0 0 0 1px var(--surface);
+        overflow:hidden;font-size:12.5px;line-height:1.35;cursor:grab}
+.k-meal{--pb-fill:var(--warn-soft);--pb-edge:var(--warn)}
+.k-deep{--pb-fill:var(--accent-soft);--pb-edge:var(--accent)}
+.k-social{--pb-fill:var(--good-soft);--pb-edge:var(--good)}
+.k-other{--pb-fill:var(--surface-3);--pb-edge:var(--border-strong)}
+/* The block's button lies under its text and opens its details; the text lets the pointer through,
+   except the items' checkboxes. */
+.pb-open{position:absolute;inset:0;width:100%;padding:0;border:0;border-radius:inherit;background:none;cursor:inherit}
+.pb-open:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.pb-body{position:relative;pointer-events:none;min-width:0}
+.pb-head{display:flex;align-items:baseline;gap:6px;min-width:0}
+.pb-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.pb-title i{font-style:normal;font-weight:500;color:var(--muted)}
+.pb-kind{margin-left:auto;flex:none;font-size:10.5px;font-weight:650;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.pb-time{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+/* Where the title and the time share a line, the title gives way first (planner.js shows the time
+   only where it fits beside the start of the title), and the time is cut only after that. */
+.pb-head .pb-title{flex:0 1000 auto;min-width:2.5em}
+.pb-head .pb-time{flex:0 1 auto;min-width:0}
+/* A block's kind as its initial, before the title, where its name does not fit on the line. */
+.pb-ki{flex:none;align-self:center;min-width:15px;padding:0 3px;border:1px solid var(--pb-edge);border-radius:4px;background:var(--surface);color:var(--text);font-size:9.5px;font-weight:700;line-height:13px;text-align:center}
+.pb-kind + .pb-n{margin-left:0}
+/* Short blocks: one line, "Lunch · Chipotle · 4–5 PM", cut with an ellipsis, and "+N" for items. */
+.pblock.sm{padding-top:2px;padding-bottom:2px;font-size:12px}
+.pblock.xs{padding:1px 5px 1px 7px;font-size:11px;line-height:16px}
+.pblock:is(.xs,.sm) .pb-head{align-items:center}
+.pb-n{flex:none;margin-left:auto;padding:0 5px;border-radius:999px;background:var(--surface);color:var(--muted);font-size:10.5px;font-weight:650;line-height:15px}
+/* A column too narrow for words: the kind's initial, and its colour (the name is in the label). */
+.pblock.nar{padding:0;text-align:center}
+.pb-ini{display:block;font-size:12px;font-weight:700;line-height:18px}
+/* A block running past the hours shown is cut at their edge, which shows as a dashed line. */
+.pblock.cut-top{border-top:2px dashed var(--pb-edge);border-top-left-radius:0;border-top-right-radius:0}
+.pblock.cut-bottom{border-bottom:2px dashed var(--pb-edge);border-bottom-left-radius:0;border-bottom-right-radius:0}
+.pb-items{position:relative;list-style:none;margin:3px 0 0;padding:0;pointer-events:none}
+.pb-item{display:flex;align-items:center;gap:6px;max-width:100%;height:21px;width:fit-content;pointer-events:auto;cursor:pointer}
+.pb-item input{flex:none;width:13px;height:13px;margin:0;cursor:pointer}
+.pb-item span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.pb-item.done span{color:var(--muted);text-decoration:line-through}
+.pb-item small{flex:none;color:var(--good);font-weight:600}
+.pb-more{position:relative;color:var(--muted);font-size:11.5px;pointer-events:none}
+.pb-rs{position:absolute;left:0;right:0;z-index:2;height:7px;cursor:ns-resize}
+.pb-rs.top{top:0}.pb-rs.bottom{bottom:0}
+.pb-rs::after{content:"";position:absolute;left:50%;width:18px;height:3px;margin-left:-9px;border-radius:2px;background:var(--pb-edge);opacity:0;transition:opacity 120ms ease}
+.pb-rs.top::after{top:2px}.pb-rs.bottom::after{bottom:2px}
+.pblock:hover .pb-rs::after{opacity:.8}
+.pblock:is(.xs,.nar) .pb-rs{height:4px}.pblock:is(.xs,.nar) .pb-rs::after{display:none}
+.pblock.dragging,.pblock.armed{z-index:4;box-shadow:var(--shadow-md);cursor:grabbing}
+.pblock.ghost{z-index:4;opacity:.9;pointer-events:none;outline:1.5px dashed var(--pb-edge);outline-offset:-1.5px}
+.pblock.shown{z-index:3;outline:2px solid var(--accent);outline-offset:1px}
+.pblock.drop-hit{z-index:3;outline:2px solid var(--accent);outline-offset:1px}
+/* Flags sit in a lane of their own on the right (--lane, set by planner.js), showing the time; the
+   name shows too while one is pointed at or focused, over the blocks. */
+.pflag-wrap{position:absolute;right:2px;z-index:3;max-width:calc(var(--lane, 92px) - 4px);transform:translateY(-50%)}
+.pflag-wrap:is(:hover,:focus-within){z-index:5;max-width:min(64%,320px)}
+.pflag{display:flex;align-items:center;gap:5px;max-width:100%;height:22px;padding:0 7px 0 6px;border:1px solid var(--border-strong);border-radius:999px;background:var(--surface-raised);color:var(--text);box-shadow:var(--shadow-sm);font-size:11.5px;cursor:pointer}
+.pflag > span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.pflag b{font-weight:500;font-variant-numeric:tabular-nums}
+.pflag .pf-name{display:none}
+.pflag-wrap:is(:hover,:focus-within) .pf-name{display:inline}
+.pflag.done span{color:var(--muted);text-decoration:line-through}
+.pflag:hover{background:var(--surface-2)}
+.pnow{position:absolute;left:-5px;right:0;z-index:3;height:0;border-top:2px solid var(--bad);pointer-events:none}
+.pnow::before{content:"";position:absolute;left:0;top:-6px;width:10px;height:10px;border-radius:50%;background:var(--bad)}
+/* A block's details: a card beside the block (planner.js places it), or a sheet at the bottom of a
+   narrow screen. */
+dialog.pdetail{position:fixed;inset:auto;left:8px;top:8px;z-index:12;margin:0;width:min(340px,calc(100vw - 16px));max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px);overflow:auto;
+  padding:16px 18px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-raised);color:var(--text);box-shadow:var(--shadow-lg);overscroll-behavior:contain}
+dialog.pdetail:focus{outline:none}
+dialog.pdetail.sheet{inset:auto 0 0 0;width:100%;max-width:100%;max-height:85vh;max-height:85dvh;border-radius:16px 16px 0 0;border-bottom:0;
+  padding-bottom:calc(16px + env(safe-area-inset-bottom))}
+dialog.pdetail::backdrop{background:var(--scrim)}
+/* Dark: the card sits on the page's surface rather than the raised one, so its overdue status and
+   links (--bad, --accent) keep 4.5:1. */
+:root[data-theme="dark"] dialog.pdetail{background:var(--surface)}
+dialog.pdetail .close{top:10px;right:10px}
+.pd-kind{display:flex;align-items:center;gap:7px;margin-right:40px;font-size:11.5px;font-weight:650;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.pd-kind i{width:12px;height:12px;border-radius:3px;background:var(--pb-fill);border-left:3px solid var(--pb-edge);box-shadow:inset 0 0 0 1px var(--border)}
+#pdTitle{margin:6px 40px 6px 0;font-size:17px;font-weight:650;letter-spacing:-.01em;line-height:1.3;overflow-wrap:anywhere}
+.pd-line{margin:2px 0;font-size:13.5px;color:var(--muted);overflow-wrap:anywhere}
+.pd-time{color:var(--text);font-variant-numeric:tabular-nums}
+.pd-sec{margin:14px 0 8px;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.pd-items{display:grid;gap:10px;margin:0;padding:0;list-style:none}
+.pd-check{display:flex;align-items:flex-start;gap:8px;font-size:14px;line-height:1.35;cursor:pointer}
+.pd-check input{flex:none;width:16px;height:16px;margin:1px 0 0;cursor:pointer}
+.pd-text{overflow-wrap:anywhere;min-width:0}
+.pd-item.done .pd-text{color:var(--muted);text-decoration:line-through}
+.pd-work{display:flex;flex-wrap:wrap;align-items:center;gap:3px 8px;margin:3px 0 0 24px;font-size:12.5px;color:var(--muted)}
+.pd-work .linkish{font-size:12.5px}
+.pd-st{font-weight:600}.pd-st.good{color:var(--good)}.pd-st.bad{color:var(--bad)}.pd-st.warn{color:var(--warn)}
+.pd-none{margin:0;font-size:13px;color:var(--muted)}
+.pd-buttons{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px}
+.pd-buttons .grow{flex:1}
+
+/* The block editor and the weekly form, built like the task dialog. */
+dialog.task input[type=checkbox],dialog.task input[type=radio]{width:16px;height:16px;margin:0;padding:0}
+dialog.task fieldset{display:grid;gap:8px;margin:0;padding:0 0 0 24px;border:0}
+dialog.task fieldset legend{padding:0;margin-bottom:6px;font-size:13px;color:var(--muted)}
+dialog.task .hint{margin:0;font-size:12.5px;color:var(--muted)}
+dialog.task .buttons .grow{flex:1}
+.kind-fixed{display:grid;gap:6px;margin:0;font-size:13px;font-weight:520;color:var(--muted)}
+.kind-fixed b{font-size:14.5px;font-weight:400;line-height:36px;color:var(--text)}
+.form-err{margin:0;color:var(--bad);font-size:13px}
+.b-changed{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin:0;padding:8px 10px;border-radius:var(--radius-sm);background:var(--surface-2);font-size:13px;color:var(--muted)}
+.linkish{padding:0;border:0;background:none;color:var(--accent);font:inherit;font-weight:560;cursor:pointer}
+.linkish:hover{text-decoration:underline;text-underline-offset:2px}
+.btn.danger{color:var(--bad)}
+.b-section{display:grid;gap:8px}
+.b-section-h{font-size:13px;font-weight:520;color:var(--muted)}
+.b-items{display:grid;gap:4px;margin:0;padding:0;list-style:none}
+.b-item{display:flex;align-items:center;gap:8px;min-height:34px;padding:2px 4px 2px 10px;border-radius:var(--radius-sm);background:var(--surface-2)}
+dialog.task .b-item label.pin-check{flex:1;min-width:0;font-weight:400;font-size:14px}
+.b-item .txt{min-width:0;overflow-wrap:anywhere}
+.b-item .txt small{margin-left:6px;font-size:12px;color:var(--muted)}
+.b-item .txt .b-done{color:var(--good);font-weight:600}
+.b-item.done .txt > span{color:var(--muted);text-decoration:line-through}
+.b-rm{display:grid;place-items:center;flex:none;width:28px;height:28px;padding:0;border:0;border-radius:var(--radius-sm);background:none;color:var(--muted);font-size:18px;line-height:1;cursor:pointer}
+.b-rm:hover{background:var(--surface-3);color:var(--text)}
+.b-none{font-size:13px;color:var(--muted)}
+.b-add{display:flex;gap:8px;align-items:center}
+.b-add input{flex:1;min-width:0}
+.b-picker{max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:var(--radius-sm)}
+.b-pick{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border:0;border-top:1px solid var(--border);background:none;color:var(--text);text-align:left;cursor:pointer;font-size:13.5px}
+.b-pick:first-child{border-top:0}
+.b-pick:hover{background:var(--surface-2)}
+.b-pick .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:520}
+.b-pick .dd{flex:none;color:var(--muted);font-size:12px;white-space:nowrap}
+dialog.task.week{width:min(980px,calc(100% - 32px))}
+.wk-head,.wk-row{display:grid;grid-template-columns:92px repeat(3,minmax(0,1fr));gap:12px;align-items:start}
+.wk-head{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
+.wk-row{padding-top:10px;border-top:1px solid var(--border)}
+.wk-day{padding-top:8px;font-size:14px;font-weight:600}
+.wk-meal{display:grid;gap:6px;min-width:0}
+.wk-meal-name{display:none;font-size:12.5px;color:var(--muted);font-weight:520}
+.wk-line{display:flex;align-items:center;gap:6px;min-width:0}
+dialog.task .wk-line input[type=time]{flex:1;min-width:0;padding:0 6px}
+dialog.task .wk-line .wk-place{flex:1;min-width:0}
+dialog.task label.wk-off{display:flex;align-items:center;gap:6px;flex:none;font-size:13px;color:var(--text);font-weight:400;cursor:pointer}
+.wk-meal.off :is(.wk-place,input[type=time]){opacity:.5}
+.wk-blocks{display:grid;gap:4px;margin:0;padding:0;list-style:none;font-size:14px}
+.wk-blocks li{display:flex;align-items:center;gap:10px;min-height:34px;padding:2px 4px 2px 10px;border-radius:var(--radius-sm);background:var(--surface-2)}
+.wk-blocks li span{flex:1;min-width:0}
+.wk-blocks li.b-none{background:none;padding-left:0}
+.wk-blocks li.removed span{color:var(--muted);text-decoration:line-through}
+dialog.task .wk-hours{display:flex;flex-wrap:wrap;gap:10px 16px}
+dialog.task .wk-hours label{flex:1 1 160px}
+@media (max-width:860px){
+  .wk-head{display:none}
+  .wk-row{grid-template-columns:1fr;gap:10px}
+  .wk-day{padding-top:0}
+  .wk-meal-name{display:block}
+}
+
+/* Narrow windows and phones. */
+@media (max-width:780px){
+  .fab{right:16px;bottom:calc(18px + env(safe-area-inset-bottom))}
+  dialog.task,dialog.task.week{width:100%;max-width:100%;margin:auto 0 0;border-radius:16px 16px 0 0;border-bottom:0}
+  dialog.task form{padding-bottom:calc(20px + env(safe-area-inset-bottom))}
+  dialog.task :is(input,select,textarea){font-size:16px}
+  .stats{grid-template-columns:1fr 1fr;gap:12px}.stat{padding:12px}.stat b{font-size:21px}.stat span{font-size:12px}
   aside{width:100%;padding:18px 16px calc(50px + env(safe-area-inset-bottom))}
   aside h3{font-size:18px}
   .close{width:34px;height:34px}
   .toast{left:12px;right:12px;transform:none;max-width:none;bottom:calc(86px + env(safe-area-inset-bottom))}
 }
 /* A phone: QuantPrep's two-row bar, the title (or the app switch) and the theme above, the views
-   below, then search on a row of its own. */
+   below. */
 @media (max-width:640px){
   /* Two rows of 32 px, 4 px apart, with 8 px above and 6 px below, as in QuantPrep. */
   :root{--gutter:16px;--bar-height:82px}
@@ -274,23 +513,26 @@ dialog.task .buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:4p
   /* The first view's text sits under the title, as QuantPrep's nav does. */
   .views{grid-area:nav;margin:0 calc(-1 * var(--gutter));padding:0 calc(var(--gutter) - 10px)}
   .page{padding-top:24px}
-  .toolbar{margin-bottom:16px}
-  .toolbar input[type=search]{flex:1 0 100%;max-width:none;font-size:16px}
+  /* A phone's Day view gives the day every pixel it can. */
+  .page[data-view="day"]{padding-top:14px;padding-bottom:8px}
+  .page[data-view="day"] .syncrow{margin-bottom:10px}
+  .ph{padding-top:7px;padding-bottom:7px}
+  .pstrip{padding-top:6px;padding-bottom:6px}
 }
 </style>
 </head>
 <body>
 <header class="topbar"><div class="bar">
   <div class="brand-slot" id="brand"><h1 class="brand">SchoolHub</h1></div>
-  <nav class="views" id="views" aria-label="Views"><button type="button" data-view="upcoming">Upcoming</button><button type="button" data-view="courses">By course</button></nav>
+  <nav class="views" id="views" aria-label="Views"><button type="button" data-view="upcoming">Upcoming</button><button type="button" data-view="courses">By course</button><button type="button" data-view="day" hidden>Day</button></nav>
   <div class="bar-end"><div class="syncbox" id="syncbox" hidden><span id="sync" class="sync"></span><button type="button" class="btn small" id="syncBtn" hidden>Sync now</button></div><button type="button" class="theme-btn" id="themeBtn" aria-label="Theme"></button></div>
 </div></header>
 <main class="page">
-  <div class="toolbar">
-    <input type="search" id="q" placeholder="Search assignments…" aria-label="Search assignments">
-    <label class="tog"><input type="checkbox" id="showDone"> Show done</label>
+  <div class="syncrow" id="syncrow"></div>
+  <div class="cols">
+    <div class="left"><div id="main"></div></div>
+    <section class="planner" id="planner" aria-label="Day planner"></section>
   </div>
-  <div id="main"></div>
 </main>
 <div id="scrim" class="scrim" hidden></div>
 <aside id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" tabindex="-1" hidden></aside>
@@ -309,8 +551,65 @@ dialog.task .buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:4p
     <div class="buttons"><button type="button" class="btn" id="taskCancel">Cancel</button><button type="submit" class="btn primary">Save</button></div>
   </form>
 </dialog>
+<!-- The planner's block editor and weekly form (planner.js fills them in). -->
+<dialog class="task" id="blockDialog" aria-labelledby="bHeading">
+  <form id="blockForm" autocomplete="off" novalidate>
+    <h3 id="bHeading">New block</h3>
+    <label id="bKindField">Kind<select id="bKind"><option value="deep">Deep work</option><option value="social">Socialize</option><option value="other">Block</option></select></label>
+    <p class="kind-fixed" id="bKindFixed" hidden>Kind<b>Meal</b></p>
+    <label id="bTitleField">Title<input id="bTitle" maxlength="120" placeholder="Deep work"></label>
+    <div class="two">
+      <label>Start<input id="bStart" type="time" step="300" required></label>
+      <label>End<input id="bEnd" type="time" step="300" required></label>
+    </div>
+    <p class="b-changed" id="bChanged" hidden><span id="bChangedText">Changed for today only.</span><button type="button" class="linkish" id="bUseWeek">Use this time every Sunday</button></p>
+    <label class="pin-check" id="bRepeatField"><input id="bRepeat" type="checkbox"> <span id="bRepeatText">Repeat every Sunday</span></label>
+    <fieldset id="bUnrepeat" hidden>
+      <legend id="bUnrepeatText">It repeats every Sunday. Instead:</legend>
+      <label class="pin-check"><input type="radio" name="bUnrep" value="skip" checked> <span id="bSkipText">Only skip it today</span></label>
+      <label class="pin-check"><input type="radio" name="bUnrep" value="remove"> <span id="bRemoveText">Remove it from every Sunday</span></label>
+    </fieldset>
+    <div class="b-section" id="bPlaceField">
+      <label>Where to eat<input id="bPlace" maxlength="120" placeholder="Set a place"></label>
+      <p class="hint"><span id="bPlaceHint">For this day only.</span> <button type="button" class="linkish" id="bPlaceWeek">Change it for every Sunday</button></p>
+    </div>
+    <div class="b-section">
+      <div class="b-section-h" id="bItemsHead">Things to get done</div>
+      <ul class="b-items" id="bItems" aria-labelledby="bItemsHead"></ul>
+      <div class="b-add">
+        <input id="bNewItem" maxlength="200" placeholder="Add a to-do" aria-label="Add a to-do, then press Enter">
+        <button type="button" class="btn small" id="bPick" aria-expanded="false" aria-controls="bPicker">Add from my list</button>
+      </div>
+      <div class="b-picker" id="bPicker" role="group" aria-label="Open assignments and tasks, by due date" hidden></div>
+    </div>
+    <p class="form-err" id="bErr" role="alert" hidden></p>
+    <div class="buttons"><button type="button" class="btn danger" id="bDelete">Delete</button><span class="grow"></span><button type="button" class="btn" id="bCancel">Cancel</button><button type="submit" class="btn primary">Save</button></div>
+  </form>
+</dialog>
+<dialog class="task week" id="weekDialog" aria-labelledby="wHeading">
+  <form id="weekForm" autocomplete="off" novalidate>
+    <h3 id="wHeading">Every week</h3>
+    <p class="hint">Places and times here repeat every week. Changes on one day in the calendar stay on that day.</p>
+    <div class="wk-head" aria-hidden="true"><span></span><span>Breakfast</span><span>Lunch</span><span>Dinner</span></div>
+    <div id="wDays"></div>
+    <div class="b-section">
+      <div class="b-section-h" id="wBlocksHead">Repeating blocks</div>
+      <ul class="wk-blocks" id="wBlocks" aria-labelledby="wBlocksHead"></ul>
+    </div>
+    <div class="wk-hours">
+      <label>Day starts at<select id="wStart"></select></label>
+      <label>Day ends at<select id="wEnd"></select></label>
+    </div>
+    <p class="form-err" id="wErr" role="alert" hidden></p>
+    <div class="buttons"><button type="button" class="btn" id="wCancel">Cancel</button><button type="submit" class="btn primary">Save</button></div>
+  </form>
+</dialog>
+
+<!-- A block's details (planner.js fills it in and places it). -->
+<dialog class="pdetail" id="planDetail" aria-labelledby="pdTitle"></dialog>
 
 <script src="data.js"></script>
 <script src="dashboard.js"></script>
+<script src="planner.js"></script>
 </body>
 </html>

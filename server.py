@@ -2,7 +2,8 @@
 """SchoolHub local server: http://localhost:8722
 
 Serves the dashboard and your class files, saves "mark as done" clicks to state/marks.json
-(which the nightly sync double-checks), and stores your own tasks in state/tasks.json. Listens on 127.0.0.1 only.
+(which the nightly sync double-checks), stores your own tasks in state/tasks.json and the day planner in
+state/plan.json. Listens on 127.0.0.1 only.
 """
 import json
 import mimetypes
@@ -13,23 +14,26 @@ import sys
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
 import cloud
+import plan
 
 HUB = Path(__file__).resolve().parent
 MARKS = HUB / "state" / "marks.json"
 TASKS = HUB / "state" / "tasks.json"
+PLAN = HUB / "state" / "plan.json"  # the day planner, one key per object (docs/planner.md)
 TASK_ID = re.compile(r"^task:[a-z0-9]{8,32}$")
-FILES = {"marks": MARKS, "tasks": TASKS}
+FILES = {"marks": MARKS, "tasks": TASKS, "plan": PLAN}
 CLOUD = cloud.connect()  # shared with the phone view when state/cloud.env exists
 PORT = int(os.environ.get("SCHOOLHUB_PORT") or 8722)  # another port for a test copy beside the real one
 ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 PAGES = {"/": "dashboard.html", "/dashboard.html": "dashboard.html", "/dashboard.js": "dashboard.js",
-         "/theme-init.js": "theme-init.js", "/bar.js": "bar.js", "/data.js": "data.js", "/favicon.svg": "favicon.svg"}
+         "/theme-init.js": "theme-init.js", "/bar.js": "bar.js", "/data.js": "data.js", "/favicon.svg": "favicon.svg",
+         "/planner.js": "planner.js"}
 PAGE_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".svg": "image/svg+xml"}
 # The dashboard runs only its own scripts (it has none inline), and shows pictures in assignment
 # instructions from Canvas over https. A platform that forwards to this server gives it the same policy.
@@ -123,7 +127,7 @@ def write_state(path, obj):
 
 
 SEEDED_FILE = HUB / "state" / "cloud-seeded.json"  # which shared databases hold all of this Mac's
-SEEDED = {"marks": False, "tasks": False}           # marks and tasks: only then is the cloud trusted
+SEEDED = {"marks": False, "tasks": False, "plan": False}  # marks, tasks and plan: only then is the cloud trusted
 BACKUPS = HUB / "state" / "backups"
 KEEP_BACKUPS = 20
 
@@ -133,7 +137,8 @@ def log(msg):
 
 
 def ensure_seeded(name):
-    """Whether the shared database holds every mark or task this Mac had when it first connected.
+    """Whether the shared database holds every mark, task or plan key this Mac had when it first
+    connected. Each name is copied and remembered on its own.
 
     Until it does, the server reads and serves its own files (a partial set read from the cloud
     would replace them) and keeps trying the copy. Remembered per database in SEEDED_FILE, so the
@@ -173,7 +178,7 @@ def keep_copy(name, data):
 
 
 def load(name):
-    """Marks or tasks: from the cloud database once it holds everything this Mac had (the phone
+    """Marks, tasks or the plan: from the cloud database once it holds everything this Mac had (the phone
     can change them there), else the local file."""
     if CLOUD and SEEDED[name]:
         try:
@@ -277,6 +282,14 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/marks":
             with LOCK:
                 return self._json(load("marks"))
+        if url.path == "/api/plan":
+            # Dates on this computer's clock, as the page shows them.
+            try:
+                start, end = plan.plan_range(parse_qs(url.query, keep_blank_values=True), date.today())
+            except plan.Refused as e:
+                return self._send(400, str(e).encode())
+            with LOCK:
+                return self._json(plan.assemble(load("plan"), start, end))
         # /file?p=<path>, or /file/<name>?p=<path>: the name is only for the browser (a PDF tab
         # shows it as its title); the file is always the one p names.
         if url.path == "/file" or url.path.startswith("/file/"):
@@ -349,6 +362,25 @@ class Handler(BaseHTTPRequestHandler):
                 tasks = load("tasks")
             return self._json({"removed": removed, "tasks": tasks})
 
+        if path == "/api/plan":
+            # A whole value replaces the key's; null deletes it, which brings back the defaults. A
+            # body without "value" is refused rather than read as null, so a slip never deletes.
+            if "value" not in body:
+                return self._send(400, b"missing value")
+            key = body.get("key")
+            value, error = plan.clean_plan(key, body["value"])
+            if error:
+                return self._send(400, error.encode())
+            with LOCK:
+                try:
+                    if value is None:
+                        remove("plan", key)
+                    else:
+                        put("plan", key, value)
+                except (OSError, RuntimeError):
+                    return self._send(502, b"couldn't reach the cloud database")
+            return self._json({"key": key, "value": value})
+
         if path == "/api/sync":
             with SYNC_LOCK:
                 if not sync_state["running"]:
@@ -384,8 +416,9 @@ def catch_up_loop():
 
 
 def seed_loop():
-    """Copies the local marks and tasks to the shared database, retrying every minute until both
-    are there."""
+    """Copies the local marks, tasks and plan to the shared database, retrying every minute until all
+    three are there. Each is tried on its own, so one that keeps failing (the plan's table not made
+    yet on Turso, say) never holds up the others."""
     while not all(SEEDED.values()):
         for name in FILES:
             with LOCK:

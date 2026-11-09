@@ -68,6 +68,7 @@ open dashboard.html
 
 - the ✓ **mark as done** buttons (saved to `state/marks.json`, checked by the next sync)
 - the **+** button for your own tasks (saved to `state/tasks.json`)
+- the day planner beside the list (saved to `state/plan.json`; see below)
 - **Sync now**, next to the time of the last sync (in the header, or above the lists on a phone);
   each sync the server runs adds its output to `state/sync.log`, which is where "Sync failed" points
 - files opening in their real apps, and folders in Finder
@@ -93,9 +94,30 @@ service then fails with `EX_CONFIG`).
 To run a second copy beside it (say, a test folder), give it another port:
 `SCHOOLHUB_PORT=8733 .venv/bin/python server.py`.
 
-**After updating SchoolHub** (`git pull`), restart the server: it reads its list of page files when
-it starts, so an old one serves the new page without its scripts and the dashboard stays blank. If
+**After updating SchoolHub** (`git pull`), restart the server: it reads its list of page files (and
+its own code, such as `plan.py`) when it starts, so an old one serves the new page without its scripts and the dashboard stays blank. If
 it runs at login: `launchctl kickstart -k gui/$(id -u)/com.schoolhub.server`.
+
+## The day planner
+
+Beside the list (or under **Day** on a narrow screen) is a calendar of the day by the hour, 5 AM to
+midnight by default. It holds the three meals, each with where you eat it, and blocks of your own:
+**Deep work**, **Socialize** or a plain **Block**. Each block lists the things to get done in it:
+assignments and tasks dragged in from the list, or to-dos you type. A meal's place and time and a
+block marked to repeat are set once per weekday in the weekly form (**Week…**), so set Sunday's lunch
+place once and every Sunday shows it; a change made on one day stays on that day. The whole design is
+in [docs/planner.md](docs/planner.md).
+
+It is saved through `GET /api/plan?from=&to=` and `POST /api/plan`, one key per object (`settings`,
+`week:sun` … `week:sat`, `day:YYYY-MM-DD`). Every save is checked by `plan.py`, which refuses what
+breaks a rule with the reason; `tests/plan_vectors.json` holds the cases, and the public site's copy
+of the server checks against the same file. Without a shared database the plan lives in
+`state/plan.json`. With Turso it is the table `school_plan` (key, value, time of the change), made by
+QuantPrep's migration `0008_school_plan.sql` or, on a database of your own, by `turso-schema.sql`;
+until that table exists, saving the plan fails with "couldn't reach the cloud database" while marks
+and tasks carry on. With Upstash it is the hash `schoolhub:plan`, but the old phone view does not
+show the planner. On first start with a database, a `state/plan.json` you already have is copied up
+once, as marks and tasks are.
 
 ## Light and dark
 
@@ -239,6 +261,9 @@ With both set, SchoolHub uses Turso (even if Upstash's variables are there too).
 - Marks and tasks are rows of `school_kv` (`name` is `marks` or `tasks`, `key` the assignment or task
   id, `value_json` the object, `updated_at` in milliseconds). On first start `server.py` copies the
   ones you already have into an empty table.
+- The day planner's keys are rows of `school_plan` (`key`, `value_json`, `updated_at`), a table of
+  its own because `school_kv` only allows marks and tasks. On a database you made before the planner,
+  add it with the `school_plan` statement from `turso-schema.sql`.
 - After every sync, a copy of the new `data.js` is saved as the one row of `school_data`, so the
   hosted copy shows the same assignments. If that fails, the sync still finishes and lists it with
   its other issues. The hosted copy shows no assignments until the first sync after you add these

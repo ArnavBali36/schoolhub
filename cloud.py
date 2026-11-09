@@ -1,10 +1,12 @@
-"""Optional shared database for your ✓ marks and your own tasks, so the phone view can change them too.
+"""Optional shared database for your ✓ marks, your own tasks and the day planner, so the phone view can
+change them too.
 
 Two backends, both spoken over HTTP with the standard library, chosen by what state/cloud.env holds:
 
 - Turso (hosted libSQL), when it has TURSO_DATABASE_URL and TURSO_AUTH_TOKEN. Marks and tasks are
-  rows of the school_kv table, and each sync also saves data.js in school_data (turso-schema.sql),
-  so a hosted copy of the dashboard that reads the same database shows the same thing.
+  rows of the school_kv table, the planner's keys rows of school_plan, and each sync also saves
+  data.js in school_data (turso-schema.sql), so a hosted copy of the dashboard that reads the same
+  database shows the same thing.
 - Upstash Redis over its REST API (free tier), the same store the Vercel function in
   vercel/api/state.js talks to. `npx vercel env pull` writes its credentials.
 
@@ -28,7 +30,10 @@ except ImportError:
 
 HUB = Path(__file__).resolve().parent
 ENV_FILE = HUB / "state" / "cloud.env"
-KEYS = {"marks": "schoolhub:marks", "tasks": "schoolhub:tasks"}
+KEYS = {"marks": "schoolhub:marks", "tasks": "schoolhub:tasks", "plan": "schoolhub:plan"}
+# The names kept in Turso's school_kv. The plan has a table of its own (school_plan): school_kv's
+# CHECK allows only these two, and rebuilding the table that holds the live marks is not worth it.
+KV_NAMES = ("marks", "tasks")
 
 
 def _read_env():
@@ -44,7 +49,7 @@ def _read_env():
 
 
 class Cloud:
-    """Upstash Redis: marks and tasks as two hashes, one field per mark or task."""
+    """Upstash Redis: marks, tasks and the plan as three hashes, one field per mark, task or plan key."""
 
     def __init__(self, url, token):
         self.url = url.rstrip("/")
@@ -148,7 +153,7 @@ TURSO_TIMEOUT = 15
 
 def _kv(name):
     """school_kv's name for marks or tasks; anything else is a KeyError, as with Upstash."""
-    if name not in KEYS:
+    if name not in KV_NAMES:
         raise KeyError(name)
     return name
 
@@ -159,8 +164,9 @@ def _now_ms():
 
 class Turso:
     """Turso (hosted libSQL): marks and tasks as rows of school_kv (name 'marks' or 'tasks', key the
-    assignment or task id, value_json the object, updated_at in milliseconds), and the latest sync's
-    data.js as the one row of school_data. The tables are made by turso-schema.sql or by the app that
+    assignment or task id, value_json the object, updated_at in milliseconds), the planner's keys as
+    rows of school_plan (key, value_json, updated_at), and the latest sync's data.js as the one row
+    of school_data. The tables are made by turso-schema.sql or by the app that
     owns the database; SchoolHub never creates or changes them.
 
     Every call is one POST to /v2/pipeline: its statements, then close. Errors are RuntimeError (the
@@ -203,8 +209,11 @@ class Turso:
     def get_all(self, name):
         # Oldest change first, as the local files keep them; a hosted copy reading the same table
         # answers in this order too, so both views list them alike.
-        rows, = self.pipeline(("SELECT key, value_json FROM school_kv WHERE name = ? ORDER BY updated_at, key",
-                               (_kv(name),)))
+        if name == "plan":
+            rows, = self.pipeline(("SELECT key, value_json FROM school_plan ORDER BY updated_at, key", ()))
+        else:
+            rows, = self.pipeline(("SELECT key, value_json FROM school_kv WHERE name = ? ORDER BY updated_at, key",
+                                   (_kv(name),)))
         # Never half an answer: the server keeps what this returns as its local copy.
         if any(len(row) != 2 or not isinstance(row[0], str) for row in rows):
             raise RuntimeError("Turso's answer could not be read")
@@ -217,11 +226,17 @@ class Turso:
         return out
 
     def put(self, name, field, obj):
+        if name == "plan":
+            return self.pipeline(("INSERT INTO school_plan (key, value_json, updated_at) VALUES (?, ?, ?) "
+                                  "ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json, "
+                                  "updated_at = excluded.updated_at", (field, json.dumps(obj), _now_ms())))
         self.pipeline(("INSERT INTO school_kv (name, key, value_json, updated_at) VALUES (?, ?, ?, ?) "
                        "ON CONFLICT (name, key) DO UPDATE SET value_json = excluded.value_json, "
                        "updated_at = excluded.updated_at", (_kv(name), field, json.dumps(obj), _now_ms())))
 
     def remove(self, name, field):
+        if name == "plan":
+            return self.pipeline(("DELETE FROM school_plan WHERE key = ?", (field,)))
         self.pipeline(("DELETE FROM school_kv WHERE name = ? AND key = ?", (_kv(name), field)))
 
     def save_data(self, data_js, synced_at):
@@ -260,7 +275,7 @@ def identity(db):
 
 
 def seed(db, name, local, tries=3, pause=1.0):
-    """Copy the marks or tasks kept on this Mac into the shared database, until it holds every one.
+    """Copy the marks, tasks or plan keys kept on this Mac into the shared database, until it holds every one.
 
     Only keys the database lacks are written, so a key changed on the phone is left as it is; each
     write is tried up to `tries` times. The database is read back at the end, and RuntimeError says

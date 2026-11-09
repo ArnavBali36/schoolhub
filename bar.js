@@ -81,24 +81,34 @@
 
   // ---- the view on show ----
   // dashboard.js keeps these in step; marked here too so the current view is lit from the start.
+  // Day (the planner alone) is a view only below 1100 px, where the planner has no column of its
+  // own, and never on the phone site or from disk, which have no planner: there a remembered Day
+  // shows Upcoming. Its button stays hidden until dashboard.js knows the planner is there, unless
+  // Day is the view on show.
+  const dayOffered = !PHONE && !LOCAL_FILES && !(typeof matchMedia === 'function' && matchMedia('(min-width: 1100px)').matches);
   let view = 'upcoming';
-  try { view = JSON.parse(localStorage.getItem('sh:view')) === 'courses' ? 'courses' : 'upcoming'; } catch {}
+  try {
+    const kept = JSON.parse(localStorage.getItem('sh:view'));
+    view = kept === 'courses' ? 'courses' : kept === 'day' && dayOffered ? 'day' : 'upcoming';
+  } catch {}
   whenParsed(() => {
-    for (const b of document.querySelectorAll('#views button[data-view]'))
+    for (const b of document.querySelectorAll('#views button[data-view]')) {
       if (!b.hasAttribute('aria-pressed')) b.setAttribute('aria-pressed', String(b.dataset.view === view));
+      if (b.dataset.view === 'day' && view === 'day') b.hidden = false;
+    }
     return !!$('#views + *');  // the views are complete once the parser is past them
   });
 
   // ---- the sync status ----
-  // Beside the theme button where the bar has room, as QuantPrep keeps Asked there; above the lists
-  // on narrow screens. One element, moved.
+  // Beside the theme button where the bar has room, as QuantPrep keeps Asked there; on a row of its
+  // own above the page on narrow screens. One element, moved.
   const wideBar = typeof matchMedia === 'function' ? matchMedia('(min-width: 781px)') : null;
-  // dashboard.html has it in the bar; it moves once the toolbar has been read.
+  // dashboard.html has it in the bar; it moves once the row has been read.
   function placeSync(){
-    const box = $('#syncbox'), end = $('.bar-end'), toolbar = $('.toolbar');
-    if (!box || !end || !toolbar) return false;
+    const box = $('#syncbox'), end = $('.bar-end'), row = $('#syncrow');
+    if (!box || !end || !row) return false;
     if (wideBar?.matches) { if (box.parentNode !== end) end.prepend(box); }
-    else if (box.parentNode !== toolbar) toolbar.append(box);
+    else if (box.parentNode !== row) row.append(box);
     return true;
   }
   wideBar?.addEventListener?.('change', placeSync);

@@ -29,6 +29,8 @@ NO_CLOUD = "import sys, types; sys.modules['cloud'] = types.SimpleNamespace(conn
 sys.modules["cloud"] = types.SimpleNamespace(connect=lambda: None, seed=lambda *a: None)
 
 PAGE_FILES = ("dashboard.html", "dashboard.js", "theme-init.js", "bar.js", "favicon.svg")
+# The day planner's script (docs/planner.md), loaded after dashboard.js; checked once the page has it.
+PLANNER = REPO / "planner.js"
 FAKE_DATA = 'window.SCHOOL_DATA = {"generated_at": "2026-01-01T00:00:00+00:00", "errors": [], "new_files": [], "courses": []};\n'
 
 
@@ -44,6 +46,8 @@ def make_hub(root):
     hub.mkdir()
     for name in PAGE_FILES:
         shutil.copy2(REPO / name, hub / name)
+    if PLANNER.exists():
+        shutil.copy2(PLANNER, hub / "planner.js")
     (hub / "data.js").write_text(FAKE_DATA)
     (hub / "config.json").write_text(json.dumps({"school_root": str(root), "canvas_token": "not-a-real-token"}))
     (hub / "state").mkdir()
@@ -63,7 +67,8 @@ class ServerTest(unittest.TestCase):
         # Point the server at the throwaway folder.
         server.HUB = hub
         server.MARKS, server.TASKS = hub / "state" / "marks.json", hub / "state" / "tasks.json"
-        server.FILES = {"marks": server.MARKS, "tasks": server.TASKS}
+        server.PLAN = hub / "state" / "plan.json"
+        server.FILES = {"marks": server.MARKS, "tasks": server.TASKS, "plan": server.PLAN}
         server.CLOUD = None
         course = cls.root / "Some Course"
         course.mkdir()
@@ -115,9 +120,12 @@ class ServerTest(unittest.TestCase):
         log.unlink()
 
     def test_pages_served(self):
-        for path, ctype in [("/", "text/html"), ("/dashboard.html", "text/html"), ("/dashboard.js", "text/javascript"),
-                            ("/theme-init.js", "text/javascript"), ("/bar.js", "text/javascript"),
-                            ("/data.js", "text/javascript"), ("/favicon.svg", "image/svg+xml")]:
+        pages = [("/", "text/html"), ("/dashboard.html", "text/html"), ("/dashboard.js", "text/javascript"),
+                 ("/theme-init.js", "text/javascript"), ("/bar.js", "text/javascript"),
+                 ("/data.js", "text/javascript"), ("/favicon.svg", "image/svg+xml")]
+        if PLANNER.exists():
+            pages.append(("/planner.js", "text/javascript"))
+        for path, ctype in pages:
             with self.subTest(path=path):
                 status, got, body = self.request("GET", path)
                 self.assertEqual(status, 200)
@@ -265,7 +273,8 @@ class PageTest(unittest.TestCase):
         parser = Scripts()
         html = (REPO / "dashboard.html").read_text(encoding="utf-8")
         parser.feed(html)
-        self.assertEqual(parser.scripts, ["theme-init.js", "bar.js", "data.js", "dashboard.js"])
+        self.assertEqual(parser.scripts, ["theme-init.js", "bar.js", "data.js", "dashboard.js"]
+                         + (["planner.js"] if PLANNER.exists() else []))
         self.assertEqual(parser.handlers, [])
         # The theme and the bar are drawn before the first paint: both scripts are in <head>.
         head = html[:html.index("</head>")]
@@ -280,6 +289,10 @@ class PageTest(unittest.TestCase):
         self.assertEqual(absolute, {"/api/state/"})
         for path in ("api/mark", "api/task", "api/task/delete", "api/marks", "api/tasks", "api/sync", "api/open", "file/"):
             self.assertIn(f"'{path}", js)
+        if PLANNER.exists():
+            planner = PLANNER.read_text(encoding="utf-8")
+            self.assertEqual(set(re.findall(r"""['"`](/(?:api|file|data\.js|platform\.json)[^'"`]*)['"`]""", planner)), set())
+            self.assertRegex(planner, r"""['"`]api/plan""")
         bar = (REPO / "bar.js").read_text(encoding="utf-8")
         self.assertIn("fetch('platform.json'", bar)
         self.assertEqual(set(re.findall(r"""['"`](/(?:api|file|platform\.json)[^'"`]*)['"`]""", bar)), set())

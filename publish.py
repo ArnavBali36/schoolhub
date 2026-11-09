@@ -40,8 +40,9 @@ VERCEL_JSON = {
 }
 
 
-# The page's scripts and icon, next to it on the phone site as on the local server.
-PAGE_FILES = ("theme-init.js", "bar.js", "dashboard.js", "data.js", "favicon.svg")
+# The page's scripts and icon, next to it on the phone site as on the local server. planner.js goes
+# too, since dashboard.html loads it, though the page hides the planner there (its store has no plan).
+PAGE_FILES = ("theme-init.js", "bar.js", "dashboard.js", "planner.js", "data.js", "favicon.svg")
 # Tells the page's scripts it is the phone site, the only place the first path segment is the secret.
 # It goes first in <head>, so bar.js, which runs in <head>, reads it.
 PHONE_MARK = '<meta name="schoolhub-site" content="phone">'

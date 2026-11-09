@@ -21,3 +21,13 @@ CREATE TABLE school_data (
   data_js     TEXT NOT NULL,
   synced_at   INTEGER NOT NULL
 ) STRICT;
+
+-- The day planner (docs/planner.md), one row per key: 'settings', 'week:<weekday>' or
+-- 'day:<YYYY-MM-DD>', value_json the cleaned value, updated_at in milliseconds. A table of its own
+-- because school_kv's CHECK allows only marks and tasks. QuantPrep makes the same table in its
+-- migration 0008_school_plan.sql.
+CREATE TABLE school_plan (
+  key         TEXT PRIMARY KEY,
+  value_json  TEXT NOT NULL,
+  updated_at  INTEGER NOT NULL
+) STRICT;

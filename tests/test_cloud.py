@@ -72,6 +72,47 @@ class EnvTest(unittest.TestCase):
         self.assertIsInstance(db, self.cloud.Cloud)
 
 
+class UpstashTest(unittest.TestCase):
+    """The Upstash calls, recorded instead of sent."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cloud = load_cloud(Path(self.tmp.name) / "cloud.env")
+        self.db = self.cloud.Cloud("https://x.upstash.io", "t")
+        self.sent, self.hashes = [], {}
+
+        def run(*command):
+            self.sent.append(command)
+            kind, key, *rest = command
+            h = self.hashes.setdefault(key, {})
+            if kind == "HSET":
+                h[rest[0]] = rest[1]
+            elif kind == "HDEL":
+                h.pop(rest[0], None)
+            elif kind == "HGETALL":
+                return [x for pair in h.items() for x in pair]
+        self.db.run = run
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_the_plan_is_the_hash_schoolhub_plan(self):
+        self.assertEqual(self.cloud.KEYS["plan"], "schoolhub:plan")
+        self.db.put("plan", "week:sun", {"blocks": []})
+        self.db.put("marks", "canvas:1", {"m": 1})
+        self.assertEqual(self.db.get_all("plan"), {"week:sun": {"blocks": []}})
+        self.assertEqual(self.sent[0], ("HSET", "schoolhub:plan", "week:sun", '{"blocks": []}'))
+        self.db.remove("plan", "week:sun")
+        self.assertEqual(self.sent[-1], ("HDEL", "schoolhub:plan", "week:sun"))
+        self.assertEqual(self.db.get_all("plan"), {})
+        self.assertEqual(self.db.get_all("marks"), {"canvas:1": {"m": 1}})
+
+    def test_seed_copies_the_plan(self):
+        self.db.put("plan", "settings", {"day_start": 6, "day_end": 23})
+        self.cloud.seed(self.db, "plan", {"settings": {"day_start": 5, "day_end": 24}, "week:mon": {"blocks": []}})
+        self.assertEqual(self.db.get_all("plan"), {"settings": {"day_start": 6, "day_end": 23}, "week:mon": {"blocks": []}})
+
+
 class PipelineUrlTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -112,7 +153,7 @@ class PipelineUrlTest(unittest.TestCase):
     def test_a_bad_url_fails_every_call_without_a_request(self):
         db = self.cloud.Turso("http://school-me.turso.io", "tok")
         for call in (lambda: db.get_all("marks"), lambda: db.put("marks", "a", {}), lambda: db.remove("tasks", "t"),
-                     lambda: db.save_data("x", 1)):
+                     lambda: db.get_all("plan"), lambda: db.put("plan", "settings", {}), lambda: db.save_data("x", 1)):
             with self.assertRaisesRegex(RuntimeError, "TURSO_DATABASE_URL"):
                 call()
 
@@ -176,6 +217,46 @@ class TursoTest(unittest.TestCase):
             with self.assertRaises(KeyError):
                 call()
         self.assertEqual(self.fake.pipelines, [])
+
+    def test_the_plan_lives_in_school_plan(self):
+        week = {"meals": {}, "blocks": [{"id": "r8c1d2e3f4", "type": "deep", "title": "Deep work",
+                                         "start": "09:00", "end": "11:00"}]}
+        before = int(time.time() * 1000)
+        self.db.put("plan", "week:sun", week)
+        self.db.put("plan", "day:2026-11-08", {"meals": {}})
+        self.db.put("marks", "week:sun", {"a mark": "of the same key"})
+        self.assertEqual(self.db.get_all("plan"), {"week:sun": week, "day:2026-11-08": {"meals": {}}})
+        rows = self.fake.query("SELECT key, value_json, updated_at, typeof(updated_at) FROM school_plan ORDER BY key")
+        self.assertEqual([(k, json.loads(v)) for k, v, _, _ in rows], [("day:2026-11-08", {"meals": {}}), ("week:sun", week)])
+        for _, _, updated, kind in rows:
+            self.assertEqual(kind, "integer")
+            self.assertGreaterEqual(updated, before)
+        # school_kv keeps only marks and tasks; the plan never goes there.
+        self.assertEqual([r[:2] for r in self.rows()], [("marks", "week:sun")])
+        self.db.put("plan", "week:sun", {"meals": {}, "blocks": []})
+        self.assertEqual(self.db.get_all("plan")["week:sun"], {"meals": {}, "blocks": []})
+        self.db.remove("plan", "week:sun")
+        self.assertEqual(self.db.get_all("plan"), {"day:2026-11-08": {"meals": {}}})
+        self.assertEqual(self.db.get_all("marks"), {"week:sun": {"a mark": "of the same key"}})
+        # school_kv's CHECK still refuses the name.
+        with self.assertRaises(Exception):
+            self.fake.query("INSERT INTO school_kv VALUES ('plan', 'settings', '{}', 1)")
+
+    def test_seed_copies_the_plan(self):
+        self.db.put("plan", "settings", {"day_start": 6, "day_end": 23})
+        self.cloud.seed(self.db, "plan", {"settings": {"day_start": 5, "day_end": 24}, "week:mon": {"blocks": []}})
+        self.assertEqual(self.db.get_all("plan"), {"settings": {"day_start": 6, "day_end": 23}, "week:mon": {"blocks": []}})
+
+    def test_without_the_plan_table_the_plan_fails_and_the_rest_works(self):
+        # A database whose owner has not yet run QuantPrep's migration 0008.
+        with FakeTurso(without=("school_plan",)) as old:
+            db = self.cloud.Turso(old.url, old.token)
+            for call in (lambda: db.get_all("plan"), lambda: db.put("plan", "settings", {}),
+                         lambda: db.remove("plan", "settings"), lambda: self.cloud.seed(db, "plan", {"settings": {}})):
+                self.assertFails(call, says="no such table: school_plan")
+            self.cloud.seed(db, "plan", {})  # nothing to copy: no request, no failure
+            db.put("marks", "a", {"m": 1})
+            self.assertEqual(db.get_all("marks"), {"a": {"m": 1}})
 
     def test_a_row_that_is_not_json_is_skipped(self):
         self.fake.query("INSERT INTO school_kv VALUES ('marks', 'bad', '{not json', 1)")
@@ -301,15 +382,19 @@ class TursoTest(unittest.TestCase):
             self.assertEqual(elsewhere.headers, [])
 
 
-@unittest.skipUnless(STRICT_OK, "this Python's SQLite is older than 3.37 (no STRICT tables)")
-class ServerWithTursoTest(unittest.TestCase):
+class ServerRun:
     """server.py itself, run from a throwaway SchoolHub folder whose state/cloud.env names the fake."""
 
-    PAGE_FILES = ("server.py", "cloud.py", "dashboard.html", "dashboard.js", "theme-init.js", "bar.js", "favicon.svg")
+    PAGE_FILES = ("server.py", "cloud.py", "plan.py", "dashboard.html", "dashboard.js", "theme-init.js", "bar.js",
+                  "favicon.svg")
+    WITHOUT = ()               # tables of turso-schema.sql the fake database lacks
+    SEEDED = ("marks", "tasks", "plan")  # what the server must have copied up before the tests start
+    LOCAL_PLAN = {"week:sun": {"meals": {"lunch": {"start": "16:00", "end": "17:00", "place": "Chipotle", "off": False}},
+                               "blocks": []}}
 
     @classmethod
     def setUpClass(cls):
-        cls.fake = FakeTurso()
+        cls.fake = FakeTurso(without=cls.WITHOUT)
         cls.tmp = tempfile.TemporaryDirectory()
         root = Path(cls.tmp.name).resolve()
         hub = root / "SchoolHub"
@@ -321,6 +406,7 @@ class ServerWithTursoTest(unittest.TestCase):
         # Made before the database was connected: copied up when the server starts.
         (hub / "state" / "marks.json").write_text(json.dumps({"canvas:9": {"marked_at": "2026-10-01T00:00:00+00:00"}}))
         (hub / "state" / "tasks.json").write_text(json.dumps({}))
+        (hub / "state" / "plan.json").write_text(json.dumps(cls.LOCAL_PLAN))
         (hub / "state" / "cloud.env").write_text(f'TURSO_DATABASE_URL="{cls.fake.url}"\nTURSO_AUTH_TOKEN="{cls.fake.token}"\n')
         cls.hub = hub
         cls.port = free_port()
@@ -337,13 +423,14 @@ class ServerWithTursoTest(unittest.TestCase):
                     cls.tearDownClass()
                     raise RuntimeError("server.py did not start")
                 time.sleep(0.05)
-        # The first copy of marks and tasks to the database runs beside the serving (seed_loop); until
-        # it is done the server reads its own files, as it should, so the tests wait for it.
+        # The first copy to the database runs beside the serving (seed_loop); until it is done the
+        # server reads its own files, as it should, so the tests wait for it.
         seeded = hub / "state" / "cloud-seeded.json"
-        while not any(v.get("marks") and v.get("tasks") for v in (json.loads(seeded.read_text()) if seeded.exists() else {}).values()):
+        while not any(all(v.get(name) for name in cls.SEEDED)
+                      for v in (json.loads(seeded.read_text()) if seeded.exists() else {}).values()):
             if time.time() > deadline or cls.proc.poll() is not None:
                 cls.tearDownClass()
-                raise RuntimeError("server.py did not copy its marks and tasks to the database")
+                raise RuntimeError(f"server.py did not copy its {', '.join(cls.SEEDED)} to the database")
             time.sleep(0.05)
 
     @classmethod
@@ -371,6 +458,12 @@ class ServerWithTursoTest(unittest.TestCase):
     def kv(self, name):
         return {k: json.loads(v) for k, v in self.fake.query("SELECT key, value_json FROM school_kv WHERE name = ?", name)}
 
+    def plan_rows(self):
+        return {k: json.loads(v) for k, v in self.fake.query("SELECT key, value_json FROM school_plan")}
+
+
+@unittest.skipUnless(STRICT_OK, "this Python's SQLite is older than 3.37 (no STRICT tables)")
+class ServerWithTursoTest(ServerRun, unittest.TestCase):
     def test_marks_made_before_are_copied_up_at_start(self):
         self.assertIn("canvas:9", self.kv("marks"))
 
@@ -403,6 +496,54 @@ class ServerWithTursoTest(unittest.TestCase):
         finally:
             self.fake.token = token
         self.assertNotIn("canvas:3", self.kv("marks"))
+
+
+    def test_the_plan_made_before_is_copied_up_at_start(self):
+        self.assertEqual(self.plan_rows()["week:sun"], self.LOCAL_PLAN["week:sun"])
+
+    def test_the_plan_lives_in_school_plan(self):
+        block = {"id": "b1a2b3c4d5", "type": "deep", "title": "Problem set", "start": "13:00", "end": "15:00",
+                 "items": [{"id": "i0a1b2c3d4", "kind": "own", "text": "Q1-3", "done": False}]}
+        status, out = self.request("POST", "/api/plan", {"key": "day:2026-11-08", "value": {"blocks": [block]}})
+        self.assertEqual((status, out), (200, {"key": "day:2026-11-08", "value": {"blocks": [block]}}))
+        self.assertEqual(self.plan_rows()["day:2026-11-08"], {"blocks": [block]})
+        self.assertNotIn("day:2026-11-08", self.kv("marks") | self.kv("tasks"))
+        # Reads come from the database: a change made on the public site shows here.
+        self.fake.query("INSERT INTO school_plan VALUES ('day:2026-11-09', ?, 1)", json.dumps({"meals": {"lunch": {"off": True}}}))
+        status, got = self.request("GET", "/api/plan?from=2026-11-08&to=2026-11-09")
+        self.assertEqual(status, 200)
+        self.assertEqual(got["days"], {"2026-11-08": {"blocks": [block]}, "2026-11-09": {"meals": {"lunch": {"off": True}}}})
+        self.assertEqual(got["week"]["sun"]["meals"]["lunch"]["place"], "Chipotle")
+        self.assertEqual(self.request("POST", "/api/plan", {"key": "day:2026-11-08", "value": None})[0], 200)
+        self.assertNotIn("day:2026-11-08", self.plan_rows())
+        # The local copy follows.
+        self.assertIn("day:2026-11-09", json.loads((self.hub / "state" / "plan.json").read_text()))
+
+
+@unittest.skipUnless(STRICT_OK, "this Python's SQLite is older than 3.37 (no STRICT tables)")
+class ServerWithoutPlanTableTest(ServerRun, unittest.TestCase):
+    """A database whose owner has not yet run QuantPrep's migration 0008: marks and tasks carry on,
+    and the plan fails as any cloud failure does, without stopping the server."""
+
+    WITHOUT = ("school_plan",)
+    SEEDED = ("marks", "tasks")
+
+    def test_marks_are_copied_up_and_saved_all_the_same(self):
+        self.assertIn("canvas:9", self.kv("marks"))
+        self.assertEqual(self.request("POST", "/api/mark", {"id": "canvas:1", "done": True})[0], 200)
+        self.assertIn("canvas:1", self.kv("marks"))
+        record = json.loads((self.hub / "state" / "cloud-seeded.json").read_text())
+        self.assertFalse(any(v.get("plan") for v in record.values()))
+
+    def test_the_plan_says_it_failed_and_reads_the_local_file(self):
+        status, body = self.request("POST", "/api/plan", {"key": "settings", "value": {"day_start": 6}})
+        self.assertEqual((status, body), (502, b"couldn't reach the cloud database"))
+        status, got = self.request("GET", "/api/plan")
+        self.assertEqual(status, 200)
+        self.assertEqual(got["week"]["sun"]["meals"]["lunch"]["place"], "Chipotle")
+        self.assertEqual(got["settings"], {"day_start": 5, "day_end": 24})
+        # Still answering.
+        self.assertEqual(self.request("GET", "/api/marks")[0], 200)
 
 
 if __name__ == "__main__":
