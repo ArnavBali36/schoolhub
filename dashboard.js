@@ -304,6 +304,8 @@ function stats(){
   const attention = all.filter(needsAttention).length;
   const soon = open.filter(a => eff(a) === 'soon').length;
   const week = open.filter(a => a.due_at && !past(a) && dayDiff(new Date(a.due_at)) <= 7).length;
+  // The Mac app (desktop/School.swift) shows what needs you on its Dock icon: these two tiles' sum.
+  try { window.webkit?.messageHandlers?.schoolhub?.postMessage({badge: attention + soon}); } catch {}
   const banner = LIVE || WRITE || PROBING ? '' : LOCAL_FILES
     ? `<div class="banner">To mark assignments done and open files in their apps, use <a href="http://localhost:8722">localhost:8722</a>.</div>`
     : `<div class="banner">Read-only view. Your files and the ✓ buttons live on your Mac; this page shows the last sync.</div>`;
