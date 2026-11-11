@@ -12,40 +12,72 @@
 /* Light, dark and red: <html data-theme="light|dark|red"> picks the palette (theme-init.js before the first
    paint, bar.js after). The tokens are QuantPrep's, so the two apps look like one platform. */
 :root{
-  --bg:#f3f4f6;--surface:#ffffff;--surface-2:#f7f8fa;--surface-3:#eceef2;--surface-raised:#ffffff;
-  --border:#dfe2e8;--border-strong:#c9ced7;--border-input:#868c98;
+  --bg:#f2f3f7;--surface:#ffffff;--surface-2:#f7f8fa;--surface-3:#eceef2;--surface-raised:#ffffff;
+  --border:#dcdfe6;--border-strong:#c9ced7;--border-input:#838995;
   --text:#111318;--muted:#535966;--faint:#646a76;
   --accent:#2f5bd3;--accent-hover:#2850be;--accent-soft:#e9effd;--on-accent:#ffffff;--ring:rgb(47 91 211 / .22);
   --good:#17764a;--good-soft:#e4f3eb;--bad:#b3362a;--bad-soft:#fbe9e6;--warn:#9a5806;--warn-soft:#fcf0df;
-  --shadow-sm:0 1px 2px rgb(16 24 40 / .05);
-  --shadow:0 1px 3px rgb(16 24 40 / .06),0 1px 2px rgb(16 24 40 / .04);
-  --shadow-md:0 4px 12px rgb(16 24 40 / .08),0 1px 3px rgb(16 24 40 / .06);
-  --shadow-lg:0 10px 30px rgb(16 24 40 / .1),0 2px 6px rgb(16 24 40 / .06);
-  --scrim:rgb(16 24 40 / .32);
+  /* Depth (docs/13): panes sit on a hairline and a soft two-layer shadow; what floats goes higher. */
+  --shadow-sm:0 1px 2px rgb(15 23 42 / .06);
+  --shadow:0 1px 2px rgb(15 23 42 / .04),0 4px 14px -6px rgb(15 23 42 / .1);
+  --shadow-md:0 2px 4px rgb(15 23 42 / .05),0 10px 24px -8px rgb(15 23 42 / .16);
+  --shadow-lg:0 4px 10px rgb(15 23 42 / .06),0 24px 56px -12px rgb(15 23 42 / .24);
+  --scrim:rgb(15 23 42 / .24);
+  --shine:inset 0 1px 0 rgb(255 255 255 / .6);--inset:inset 0 1px 1.5px rgb(15 23 42 / .06);--input-inset:inset 0 1px 2px rgb(15 23 42 / .04);
+  --btn-shadow:0 1px 2px rgb(15 23 42 / .06),0 0 0 .5px rgb(15 23 42 / .04);
+  --knob-shadow:0 1px 3px rgb(15 23 42 / .12),0 0 0 .5px rgb(15 23 42 / .08);
+  /* The page's faint tint at the top, fills for hover and the current item, and the buttons. */
+  --wash-1:rgb(47 91 211 / .07);--wash-2:rgb(122 92 214 / .045);
+  --hover-fill:rgb(15 23 42 / .05);--current-fill:rgb(15 23 42 / .08);
+  --btn-bg:var(--surface);--btn-bg-hover:var(--surface-2);
+  /* A button on glass or an inset steps up from it, so it still reads as a button (as in QuantPrep). */
+  --btn-bg-inset:var(--surface);--btn-bg-inset-hover:var(--surface-3);
+  --sheen:linear-gradient(180deg,rgb(255 255 255 / .1),rgb(255 255 255 / 0) 55%);--sheen-edge:rgb(255 255 255 / .16);
+  /* Glass, near-opaque, only on what floats or what the page scrolls under (docs/13 section 3):
+     regular for the bar, thick for what is read (the drawer, block details, dialog bars). */
+  --glass:rgb(255 255 255 / .74);--glass-thick:rgb(255 255 255 / .9);--glass-edge:rgb(15 23 42 / .08);
+  --glass-rim:inset 0 1px 0 rgb(255 255 255 / .7);--glass-blur:saturate(180%) blur(20px);--glass-blur-thick:saturate(180%) blur(32px);
+  /* The Mac app's title strip: the bar's glass over --bg, opaque. */
+  --titlebar:#fcfcfd;
   /* Course dots, in the hues SchoolHub always gave them (blue, red, green, purple, orange, cyan, pink,
      yellow, brown, plum). Each keeps 3:1 on --bg and every surface, any two stay apart (OKLab
      difference above 8), and every course name is written next to its dot, so color is never the
      only cue. Your own tasks are grey. */
   --course-1:#2f6fdf;--course-2:#cf3f36;--course-3:#23895c;--course-4:#8f55cc;--course-5:#c2650a;
   --course-6:#0f8299;--course-7:#c23c7c;--course-8:#8a8400;--course-9:#8a5a2e;--course-10:#8b4b88;--course-personal:#646a76;
-  --radius:12px;--radius-sm:8px;
+  --radius-xs:6px;--radius-sm:10px;--radius:16px;--radius-md:18px;--radius-lg:22px;
   /* The page column and the app bar match QuantPrep's, so the app switch stays put between apps. */
   --content:1040px;--gutter:24px;--bar-height:56px;
   --font-text:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
   --font-num:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  --font-rounded:ui-rounded,"SF Pro Rounded",-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;
+  /* Motion: short and eased, and off under prefers-reduced-motion. */
+  --ease-out:cubic-bezier(.22,1,.36,1);--ease-sheet:cubic-bezier(.32,.72,0,1);--ease-spring:cubic-bezier(.34,1.56,.64,1);
+  --dur-1:140ms;--dur-2:220ms;--dur-3:340ms;
   color-scheme:light;
 }
 :root[data-theme="dark"]{
-  --bg:#0b0d11;--surface:#14171d;--surface-2:#1e232b;--surface-3:#252a33;--surface-raised:#323946;
-  --border:#282d37;--border-strong:#373e4a;--border-input:#666e7c;
+  --bg:#0b0c10;--surface:#15171c;--surface-2:#1d2027;--surface-3:#262a32;--surface-raised:#323946;
+  --border:#282b33;--border-strong:#373b45;--border-input:#68707e;
   --text:#e8eaee;--muted:#a3a9b5;--faint:#8c93a0;
   --accent:#7c9cff;--accent-hover:#93adff;--accent-soft:#1b2440;--on-accent:#0b0d11;--ring:rgb(124 156 255 / .3);
   --good:#4cc38a;--good-soft:#13291f;--bad:#f07a68;--bad-soft:#2d1714;--warn:#e3a24c;--warn-soft:#2b2010;
   --shadow-sm:0 1px 2px rgb(0 0 0 / .5);
-  --shadow:0 1px 2px rgb(0 0 0 / .45),0 0 0 1px rgb(255 255 255 / .03);
-  --shadow-md:0 6px 16px rgb(0 0 0 / .5),0 0 0 1px rgb(255 255 255 / .04);
-  --shadow-lg:0 12px 32px rgb(0 0 0 / .55),0 0 0 1px rgb(255 255 255 / .04);
+  --shadow:0 1px 2px rgb(0 0 0 / .4),0 6px 18px -8px rgb(0 0 0 / .6);
+  --shadow-md:0 2px 6px rgb(0 0 0 / .45),0 14px 32px -10px rgb(0 0 0 / .7);
+  --shadow-lg:0 6px 16px rgb(0 0 0 / .45),0 30px 70px -14px rgb(0 0 0 / .8);
   --scrim:rgb(0 0 0 / .55);
+  --shine:inset 0 1px 0 rgb(255 255 255 / .045);--inset:inset 0 1px 2px rgb(0 0 0 / .35);--input-inset:inset 0 1px 2px rgb(0 0 0 / .3);
+  --btn-shadow:inset 0 1px 0 rgb(255 255 255 / .06),0 1px 2px rgb(0 0 0 / .5);
+  --knob-shadow:0 1px 3px rgb(0 0 0 / .5),inset 0 1px 0 rgb(255 255 255 / .08);
+  --wash-1:rgb(124 156 255 / .09);--wash-2:rgb(160 120 255 / .05);
+  --hover-fill:rgb(255 255 255 / .05);--current-fill:rgb(255 255 255 / .09);
+  --btn-bg:var(--surface-2);--btn-bg-hover:var(--surface-3);
+  --btn-bg-inset:var(--surface-3);--btn-bg-inset-hover:var(--surface-raised);
+  --sheen:linear-gradient(180deg,rgb(255 255 255 / .12),rgb(255 255 255 / 0) 55%);--sheen-edge:rgb(255 255 255 / .22);
+  --glass:rgb(26 28 34 / .78);--glass-thick:rgb(26 28 34 / .9);--glass-edge:rgb(255 255 255 / .09);
+  --glass-rim:inset 0 1px 0 rgb(255 255 255 / .07);
+  --titlebar:#17181e;
   --course-1:#5b8ef7;--course-2:#f0706a;--course-3:#3fbf80;--course-4:#b18cf2;--course-5:#ec9440;
   --course-6:#2bb5cc;--course-7:#e874a8;--course-8:#c4bc2a;--course-9:#b9875a;--course-10:#d7a2d5;--course-personal:#8c93a0;
   color-scheme:dark;
@@ -65,6 +97,19 @@
   --shadow-md:0 6px 16px rgb(0 0 0 / .6),0 0 0 1px rgb(255 40 0 / .07);
   --shadow-lg:0 12px 32px rgb(0 0 0 / .65),0 0 0 1px rgb(255 40 0 / .07);
   --scrim:rgb(0 0 0 / .6);
+  /* Depth, fills and glass from red alone: no white or grey is mixed in, and the glass is blurred
+     (which only averages the page's reds) but never saturated. The toast is solid. */
+  --shine:inset 0 1px 0 rgb(255 72 0 / .06);--inset:inset 0 1px 2px rgb(0 0 0 / .5);--input-inset:inset 0 1px 2px rgb(0 0 0 / .4);
+  --btn-shadow:inset 0 1px 0 rgb(255 72 0 / .08),0 1px 2px rgb(0 0 0 / .6);
+  --knob-shadow:0 1px 3px rgb(0 0 0 / .6),inset 0 1px 0 rgb(255 72 0 / .1);
+  --wash-1:rgb(255 40 0 / .06);--wash-2:rgb(255 72 0 / .03);
+  --hover-fill:rgb(255 40 0 / .08);--current-fill:rgb(255 40 0 / .14);
+  --btn-bg:var(--surface-2);--btn-bg-hover:var(--surface-3);
+  --btn-bg-inset:var(--surface-3);--btn-bg-inset-hover:var(--surface-raised);
+  --sheen:none;--sheen-edge:rgb(255 72 0 / 0);
+  --glass:rgb(22 1 0 / .9);--glass-thick:rgb(22 1 0 / .94);--glass-edge:rgb(255 40 0 / .18);
+  --glass-rim:inset 0 1px 0 rgb(255 72 0 / .08);--glass-blur:blur(18px);--glass-blur-thick:blur(28px);
+  --titlebar:#150100;
   --course-1:#ff2400;--course-2:#ff5000;--course-3:#ff7800;--course-4:#e03400;--course-5:#ff9a00;
   --course-6:#d42400;--course-7:#ff6400;--course-8:#e84a00;--course-9:#ffae00;--course-10:#c83c00;--course-personal:#c03800;
   color-scheme:dark;
@@ -92,9 +137,19 @@
 :root[data-theme="red"] input:is([type=checkbox],[type=radio]):disabled{opacity:.5}
 /* A course's color set in config.json may be any hue: Night keeps to its own course reds. */
 :root[data-theme="red"] .dot{background:var(--dot-theme)}
+/* Glass turns opaque --surface where the browser cannot blur, where the system asks for less
+   transparency, and where the Mac app says so (it sets .reduce-transparency, as WebKit does not
+   report the setting). */
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){:root,:root[data-theme]{--glass:var(--surface);--glass-thick:var(--surface)}}
+@media (prefers-reduced-transparency:reduce){:root,:root[data-theme]{--glass:var(--surface);--glass-thick:var(--surface);--glass-blur:none;--glass-blur-thick:none}}
+:root.reduce-transparency,:root.reduce-transparency[data-theme]{--glass:var(--surface);--glass-thick:var(--surface);--glass-blur:none;--glass-blur-thick:none}
 *{box-sizing:border-box}
-html{scroll-padding-top:calc(var(--bar-height) + 16px)}
+/* Room for the bar above and the + button below a link or field the page scrolls to or focuses. */
+html{scroll-padding-top:calc(var(--bar-height) + 16px);scroll-padding-bottom:calc(96px + env(safe-area-inset-bottom))}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--font-text);-webkit-font-smoothing:antialiased}
+/* A faint tint of the accent at the top of the page, on a fixed layer that never repaints on scroll. */
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(1100px 520px at 8% -8%,var(--wash-1),transparent 70%),radial-gradient(900px 480px at 100% -6%,var(--wash-2),transparent 70%)}
 button,input,select,textarea{font:inherit;color:inherit}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline;text-underline-offset:2px}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -105,18 +160,19 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline;tex
 .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 [hidden]{display:none!important}
 
-/* The app bar, laid out like QuantPrep's so the two read as one product: solid on --surface with a
-   bottom border, the same height, the title (or the app switch) at the left, SchoolHub's two views
-   as its nav, and the theme button at the right end of the page column. */
-.topbar{position:sticky;top:0;z-index:5;background:var(--surface);border-bottom:1px solid var(--border)}
+/* The app bar, laid out like QuantPrep's so the two read as one product: glass the page scrolls
+   under, with a hairline below, the same height, the title (or the app switch) at the left,
+   SchoolHub's two views as its nav, and the theme button at the right end of the page column. */
+.topbar{position:sticky;top:0;z-index:5;background:var(--glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);border-bottom:1px solid var(--glass-edge)}
 .bar{display:flex;align-items:center;gap:20px;max-width:calc(var(--content) + 2 * var(--gutter));height:var(--bar-height);margin:0 auto;padding:0 var(--gutter)}
 .brand-slot{display:flex;align-items:center;flex:none;min-width:0}
 .brand{margin:0;font-size:15px;line-height:32px;font-weight:650;letter-spacing:-.01em;color:var(--text);white-space:nowrap}
-/* The views, styled as QuantPrep's nav: the one on show sits on a soft pill. */
+/* The views, styled as QuantPrep's nav: capsules, the one on show on a soft fill (same weight, so
+   nothing shifts). */
 .views{display:flex;align-items:center;gap:2px;flex:none;min-width:0}
-.views button{display:inline-flex;align-items:center;height:32px;padding:0 10px;border:0;border-radius:var(--radius-sm);background:none;color:var(--muted);cursor:pointer;font-size:14px;font-weight:520;white-space:nowrap;transition:background-color 120ms ease,color 120ms ease}
-.views button:hover{color:var(--text);background:var(--surface-2)}
-.views button[aria-pressed="true"]{color:var(--text);background:var(--surface-3)}
+.views button{display:inline-flex;align-items:center;height:32px;padding:0 12px;border:0;border-radius:16px;background:none;color:var(--muted);cursor:pointer;font-size:14px;font-weight:520;white-space:nowrap;transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out)}
+.views button:hover{color:var(--text);background:var(--hover-fill)}
+.views button[aria-pressed="true"]{color:var(--text);background:var(--current-fill)}
 .views button:focus-visible{outline-offset:-2px}
 /* The bar's end fills the rest of the row, so what appears in it later (the last sync) moves nothing. */
 .bar-end{display:flex;align-items:center;justify-content:flex-end;gap:4px;flex:1;min-width:0;margin-left:auto}
@@ -128,11 +184,11 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline;tex
 .sync{font-size:12.5px;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}.sync.stale{color:var(--warn)}
 .bar-end .syncbox{gap:2px;margin:0 2px 0 0}
 .bar-end .sync{padding:0 8px}
-.bar-end #syncBtn{min-height:32px;padding:0 10px;border:0;background:none;box-shadow:none;color:var(--muted);font-size:14px}
-.bar-end #syncBtn:hover{color:var(--text);background:var(--surface-2)}
+.bar-end #syncBtn{min-height:32px;padding:0 10px;border:0;border-radius:16px;background:none;box-shadow:none;color:var(--muted);font-size:14px}
+.bar-end #syncBtn:hover{color:var(--text);background:var(--hover-fill)}
 .bar-end #syncBtn:disabled:hover{color:var(--muted);background:none}
-.theme-btn{display:inline-grid;place-items:center;flex:none;width:32px;height:32px;padding:0;border:0;border-radius:var(--radius-sm);background:none;color:var(--muted);cursor:pointer;transition:background-color 120ms ease,color 120ms ease}
-.theme-btn:hover{color:var(--text);background:var(--surface-2)}
+.theme-btn{display:inline-grid;place-items:center;flex:none;width:32px;height:32px;padding:0;border:0;border-radius:16px;background:none;color:var(--muted);cursor:pointer;transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out)}
+.theme-btn:hover{color:var(--text);background:var(--hover-fill)}
 .theme-btn svg{width:18px;height:18px}
 
 /* The app switch, when the page is part of a platform: the platform's mark, then QuantPrep | School
@@ -141,13 +197,15 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline;tex
 .brand-mark{width:22px;height:22px;flex:none}
 .brand-mark rect{fill:var(--accent)}
 .brand-mark path{fill:none;stroke:var(--on-accent)}
-.app-seg{display:inline-flex;gap:2px;padding:3px;border-radius:10px;background:var(--surface-3)}
-.app-seg a{display:inline-flex;align-items:center;height:26px;padding:0 11px;border-radius:7px;color:var(--muted);font-size:14px;font-weight:520;white-space:nowrap;transition:background-color 120ms ease,color 120ms ease}
+/* The track is opaque, as QuantPrep's: on a translucent fill over the bar's glass, the other app's
+   muted name could drop under 4.5:1 above an accent button scrolling under the bar. */
+.app-seg{display:inline-flex;gap:2px;padding:3px;border-radius:16px;background:var(--surface-3);box-shadow:var(--inset)}
+.app-seg a{display:inline-flex;align-items:center;height:26px;padding:0 13px;border-radius:13px;color:var(--muted);font-size:14px;font-weight:520;white-space:nowrap;transition:background-color var(--dur-2) var(--ease-out),color var(--dur-2) var(--ease-out),box-shadow var(--dur-2) var(--ease-out)}
 .app-seg a:hover{color:var(--text);text-decoration:none}
 .app-seg a:focus-visible{outline-offset:0}
-.app-seg a[aria-current]{background:var(--surface-raised);color:var(--text);box-shadow:var(--shadow-sm),0 0 0 1px var(--border)}
+.app-seg a[aria-current]{background:var(--surface-raised);color:var(--text);box-shadow:var(--knob-shadow)}
 /* A hairline between the switch (which app) and the views (where in it), as in QuantPrep. */
-.app-switch::after{content:"";flex:none;width:1px;height:20px;margin:0 -4px 0 6px;background:var(--border-strong)}
+.app-switch::after{content:"";flex:none;width:1px;height:20px;margin:0 -4px 0 6px;background:var(--border)}
 /* QuantPrep's widths: between a phone and 960 px its nav needs the room, so the switch leaves out
    the mark and narrows; below 361 px it leaves out the mark. The same here, so the switch sits in
    the same place in both apps. */
@@ -155,21 +213,24 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline;tex
 @media (max-width:360px){.app-switch .brand-mark{display:none}}
 
 /* Controls, as in QuantPrep. */
-dialog.task :is(input,select,textarea){padding:0 11px;height:36px;border:1px solid var(--border-input);border-radius:var(--radius-sm);background-color:var(--surface);color:var(--text);width:100%;transition:border-color 120ms ease,box-shadow 120ms ease}
+dialog.task :is(input,select,textarea){padding:0 11px;height:36px;border:1px solid var(--border-input);border-radius:var(--radius-sm);background-color:var(--surface);color:var(--text);box-shadow:var(--input-inset);width:100%;transition:border-color 120ms ease,box-shadow 120ms ease}
 :is(input,select,textarea):focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--ring)}
+dialog.task :is(input,select,textarea):focus-visible{box-shadow:var(--input-inset),0 0 0 3px var(--ring)}
 input::placeholder,textarea::placeholder{color:var(--faint);opacity:1}
 input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:7px 14px;border-radius:var(--radius-sm);border:1px solid var(--border-strong);background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm);cursor:pointer;font-size:14px;font-weight:520;line-height:1.3;white-space:nowrap;transition:background-color 120ms ease,border-color 120ms ease}
-.btn:hover{background:var(--surface-2);text-decoration:none}
-.btn:active{background:var(--surface-3)}
-.btn.small{min-height:30px;padding:4px 10px;font-size:13px}
-.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-.btn.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
-.btn:disabled{opacity:.55;cursor:default}
-.btn:disabled:hover{background:var(--surface)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:7px 16px;border-radius:18px;border:1px solid var(--border);background:var(--btn-bg);color:var(--text);box-shadow:var(--btn-shadow);cursor:pointer;font-size:14px;font-weight:560;line-height:1.3;white-space:nowrap;transition:background-color var(--dur-1) var(--ease-out),box-shadow var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out)}
+.btn:hover{background:var(--btn-bg-hover);text-decoration:none}
+.btn:active{background:var(--btn-bg-hover);transform:scale(.97)}
+.btn.small{min-height:30px;padding:4px 12px;border-radius:15px;font-size:13px}
+.btn.primary{background:var(--sheen),var(--accent);border-color:var(--accent);color:var(--on-accent);
+  box-shadow:inset 0 1px 0 var(--sheen-edge),0 1px 2px color-mix(in srgb,var(--accent) 40%,transparent),0 4px 12px -4px color-mix(in srgb,var(--accent) 55%,transparent)}
+.btn.primary:hover,.btn.primary:active{background:var(--sheen),var(--accent-hover);border-color:var(--accent-hover)}
+.btn:disabled{opacity:.55;cursor:default;transform:none}
+.btn:disabled:hover{background:var(--btn-bg)}
+.btn.primary:disabled:hover{background:var(--sheen),var(--accent)}
 
 /* The page column, QuantPrep's, with room at the bottom for the + button. */
-.page{display:block;max-width:calc(var(--content) + 2 * var(--gutter));margin:0 auto;padding:32px var(--gutter) 96px}
+.page{display:block;max-width:calc(var(--content) + 2 * var(--gutter));margin:0 auto;padding:36px var(--gutter) 96px}
 .banner{background:var(--surface-2);color:var(--muted);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:18px;font-size:13.5px}
 .banner a{font-weight:600}
 .errors{background:var(--warn-soft);color:var(--warn);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:18px;font-size:13.5px}
@@ -177,52 +238,58 @@ input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 
 /* Stats, lists and the course materials sit on panes. */
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:24px}
-.stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px 18px}
-.stat b{display:block;font:500 24px/1.3 var(--font-num);font-variant-numeric:tabular-nums}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shine),var(--shadow);padding:14px 18px}
+.stat b{display:block;font:600 28px/1.2 var(--font-rounded);letter-spacing:-.01em;font-variant-numeric:tabular-nums}
 .stat span{color:var(--muted);font-size:12.5px}
 .stat.red b{color:var(--bad)}.stat.amber b{color:var(--warn)}
 .group{margin-bottom:24px}
 .group h2,.sub{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 8px;font-weight:600}
-.list{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
-.row{display:grid;grid-template-columns:120px minmax(0,1fr) auto 150px 104px 28px;gap:14px;align-items:center;padding:10px 18px;border-top:1px solid var(--border);cursor:pointer;font-size:14px;line-height:1.45;transition:background-color 120ms ease}
-.row:first-child{border-top:0}.row:hover{background:var(--surface-2)}
+.list{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shine),var(--shadow);overflow:hidden}
+.row{display:grid;grid-template-columns:120px minmax(0,1fr) auto 150px 104px 28px;gap:14px;align-items:center;padding:10px 18px;border-top:1px solid var(--border);cursor:pointer;font-size:14px;line-height:1.45;transition:background-color var(--dur-1) var(--ease-out)}
+.row:first-child{border-top:0}.row:hover{background:var(--hover-fill)}
 .chip{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--dot)}
 /* The name is a button, so the drawer opens from the keyboard too; it reads as text. */
 .name{display:block;min-width:0;padding:0;border:0;background:none;color:inherit;font:inherit;font-weight:560;text-align:left;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .name small{color:var(--muted);font-weight:400;margin-left:8px}
-.plat{font-size:11.5px;color:var(--muted);border:1px solid var(--border-strong);border-radius:6px;padding:0 7px;line-height:18px;white-space:nowrap}
+.plat{font-size:11.5px;color:var(--muted);border:1px solid var(--border-strong);border-radius:999px;padding:0 8px;line-height:18px;white-space:nowrap}
 .due{font-size:12.5px;color:var(--muted);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
-/* Status pills, soft like QuantPrep's state tags. */
-.pill{font-size:12px;font-weight:540;line-height:18px;padding:1px 8px;border-radius:999px;border:1px solid transparent;white-space:nowrap;text-align:center;font-variant-numeric:tabular-nums}
+/* Status pills, soft like QuantPrep's state tags, with a hairline of their own colour. */
+.pill{box-shadow:inset 0 0 0 1px color-mix(in srgb,currentColor 14%,transparent);font-size:12px;font-weight:580;line-height:18px;padding:1px 8px;border-radius:999px;border:1px solid transparent;white-space:nowrap;text-align:center;font-variant-numeric:tabular-nums}
 .s-missing,.s-overdue{background:var(--bad-soft);color:var(--bad)}.s-soon,.s-flagged,.s-check{background:var(--warn-soft);color:var(--warn)}
 .s-todo{background:var(--surface-3);color:var(--text)}.s-submitted{background:var(--accent-soft);color:var(--accent)}
 .s-graded,.s-marked{background:var(--good-soft);color:var(--good)}.s-offline,.s-excused,.s-expired{background:var(--surface-3);color:var(--muted)}
-.check{width:26px;height:26px;border-radius:50%;border:1.5px solid var(--border-input);background:var(--surface);color:transparent;cursor:pointer;display:grid;place-items:center;font-size:13px;font-weight:700;padding:0;transition:all .15s}
+.check{width:26px;height:26px;border-radius:50%;border:1.5px solid var(--border-input);background:var(--surface);color:transparent;cursor:pointer;display:grid;place-items:center;font-size:13px;font-weight:700;padding:0;transition:background-color var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),transform var(--dur-2) var(--ease-spring)}
 .check:hover{border-color:var(--good);color:var(--good)}
-.check.on{background:var(--good);border-color:var(--good);color:var(--surface)}
+.check:active{transform:scale(.92)}
+.check.on{background:var(--good);border-color:var(--good);color:var(--surface);transform:scale(1.04)}
 .courses{display:grid;grid-template-columns:220px minmax(0,1fr);gap:20px}
 /* A course's own list leaves out the course column: every row is that course. */
 .courses .row{grid-template-columns:minmax(0,1fr) auto 150px 104px 28px}
 .courses .row .chip{display:none}
-.clist{display:flex;flex-direction:column;gap:2px;position:sticky;top:calc(var(--bar-height) + 17px);align-self:start;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
-.clist button{text-align:left;border:0;background:none;color:var(--muted);font-size:14px;font-weight:520;padding:7px 10px;border-radius:var(--radius-sm);cursor:pointer;display:flex;gap:8px;align-items:center;transition:background-color 120ms ease,color 120ms ease}
-.clist button:hover{background:var(--surface-2);color:var(--text)}
-.clist button.on{background:var(--surface-3);color:var(--text)}
+.clist{display:flex;flex-direction:column;gap:2px;position:sticky;top:calc(var(--bar-height) + 17px);align-self:start;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shine),var(--shadow)}
+.clist button{text-align:left;border:0;background:none;color:var(--muted);font-size:14px;font-weight:520;padding:7px 10px;border-radius:var(--radius-sm);cursor:pointer;display:flex;gap:8px;align-items:center;transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out)}
+.clist button:hover{background:var(--hover-fill);color:var(--text)}
+.clist button.on{background:var(--current-fill);color:var(--text)}
 .clist .n{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 .chead{display:flex;align-items:baseline;gap:14px;margin-bottom:14px;flex-wrap:wrap}
-.chead h2{margin:0;font-size:20px;font-weight:650;letter-spacing:-.015em}
+.chead h2{margin:0;font-size:22px;font-weight:700;letter-spacing:-.02em}
 .sub{margin-top:26px}
-.mat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);padding:4px 18px;font-size:14px}
+.mat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shine),var(--shadow);padding:4px 18px;font-size:14px}
 details.mod{border-top:1px solid var(--border);padding:9px 0}details.mod:first-child{border-top:0}
 details.mod summary{cursor:pointer;font-weight:560}
 details.mod ul{margin:6px 0 2px;padding-left:20px}details.mod li{margin:3px 0}
 
-/* The drawer and the task dialog. */
+/* The drawer and the task dialog. The drawer is a sheet of thick glass floating 10 px from the
+   window's edges; it slides in from the right. */
 .scrim{position:fixed;inset:0;background:var(--scrim);z-index:9}
-aside{position:fixed;top:0;right:0;bottom:0;width:min(580px,100%);background:var(--surface);z-index:10;border-left:1px solid var(--border);overflow:auto;padding:22px 24px 60px;box-shadow:var(--shadow-lg)}
+aside{position:fixed;top:10px;right:10px;bottom:10px;width:min(580px,calc(100% - 20px));z-index:10;border:1px solid var(--glass-edge);border-radius:var(--radius-lg);overflow:auto;padding:22px 24px 60px;
+  background:var(--glass-thick);-webkit-backdrop-filter:var(--glass-blur-thick);backdrop-filter:var(--glass-blur-thick);box-shadow:var(--glass-rim),var(--shadow-lg);
+  animation:sh-drawer-in var(--dur-3) var(--ease-sheet)}
+@keyframes sh-drawer-in{from{opacity:0;transform:translateX(24px)}}
 aside:focus{outline:none}
-aside h3{margin:6px 40px 8px 0;font-size:20px;font-weight:650;letter-spacing:-.015em}
+aside{--btn-bg:var(--btn-bg-inset);--btn-bg-hover:var(--btn-bg-inset-hover)}
+aside h3{margin:6px 40px 8px 0;font-size:22px;font-weight:700;letter-spacing:-.02em}
 aside .meta{color:var(--muted);font-size:13px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
 aside h4{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:22px 0 6px;font-weight:600}
 .note{font-size:13px;color:var(--muted);margin-top:10px}.note.warn{color:var(--warn)}
@@ -252,22 +319,40 @@ a.dl::after{content:"\2193";content:"\2193" / "";display:inline-block;margin-lef
 .doc .hl-green{background:var(--good-soft)}.doc .hl-blue{background:var(--accent-soft)}.doc .hl-red{background:var(--bad-soft)}
 .doc :is(.hl-yellow,.hl-green,.hl-blue,.hl-red,mark){border-radius:3px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 .doc .tc-yellow{color:var(--warn)}.doc .tc-green{color:var(--good)}.doc .tc-blue{color:var(--accent)}.doc .tc-red{color:var(--bad)}
-.close{position:absolute;top:14px;right:16px;display:grid;place-items:center;border:0;background:var(--surface-2);color:var(--muted);border-radius:var(--radius-sm);width:32px;height:32px;padding:0;font-size:20px;line-height:1;cursor:pointer;transition:background-color 120ms ease,color 120ms ease}
-.close:hover{background:var(--surface-3);color:var(--text)}
-.empty{color:var(--muted);padding:40px;text-align:center}
-.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--text);color:var(--bg);border-radius:var(--radius);padding:10px 10px 10px 16px;display:flex;gap:14px;align-items:center;z-index:20;box-shadow:var(--shadow-lg);font-size:13.5px;max-width:calc(100% - 32px);overflow:hidden}
-.toast button{border:0;background:var(--bg);color:var(--text);font-weight:650;border-radius:var(--radius-sm);padding:5px 14px;cursor:pointer}
+.close{position:absolute;top:14px;right:16px;display:grid;place-items:center;border:0;background:var(--hover-fill);color:var(--muted);border-radius:50%;width:32px;height:32px;padding:0;font-size:20px;line-height:1;cursor:pointer;transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out)}
+.close:hover{background:var(--current-fill);color:var(--text)}
+.empty{color:var(--muted);padding:56px 24px;font-size:15px;text-align:center}
+/* The toast: an inverted capsule of glass; solid in Night and wherever transparency is reduced.
+   Centred at its own width (up to 680 px), so a long name wraps only past that; its corners stay a
+   capsule's on one line and round off a box's when it wraps. */
+.toast{position:fixed;left:0;right:0;bottom:24px;width:max-content;max-width:min(680px,calc(100% - 32px));margin:0 auto;background:color-mix(in srgb,var(--text) 90%,transparent);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);color:var(--bg);border-radius:24px;padding:8px 8px 8px 18px;display:flex;gap:14px;align-items:center;z-index:20;box-shadow:var(--shadow-lg);font-size:13.5px;overflow:hidden}
+.toast button{flex:none;border:0;background:var(--bg);color:var(--text);font-weight:650;border-radius:999px;padding:5px 14px;cursor:pointer}
+/* The focus ring in the page's own background, which stands out on the inverted toast. */
+.toast button:focus-visible{outline-color:var(--bg)}
+:root[data-theme="red"] .toast,:root.reduce-transparency .toast{background:var(--text);-webkit-backdrop-filter:none;backdrop-filter:none}
+/* Above the + button wherever that shows, so the two never overlap. */
+@media (min-width:781px){.page:not([data-view="day"]) ~ .fab:not([hidden]) ~ .toast{bottom:96px}}
+@media (prefers-reduced-transparency:reduce){.toast{background:var(--text)}}
 .toast .timer{position:absolute;left:0;bottom:0;height:3px;background:var(--accent);animation:shrink linear forwards}
 @keyframes shrink{from{width:100%}to{width:0}}
-.fab{position:fixed;right:28px;bottom:28px;width:54px;height:54px;border-radius:50%;border:0;background:var(--accent);color:var(--on-accent);
+.fab{position:fixed;right:28px;bottom:28px;width:54px;height:54px;border-radius:50%;border:0;background:var(--sheen),var(--accent);color:var(--on-accent);
      font:300 30px/1 var(--font-text);display:grid;place-items:center;cursor:pointer;z-index:8;
-     box-shadow:var(--shadow-lg);transition:transform .15s,background-color 120ms ease}
-.fab:hover{transform:scale(1.06);background:var(--accent-hover)}
-dialog.task{border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);padding:0;
-            width:min(460px,calc(100% - 32px));box-shadow:var(--shadow-lg)}
-dialog.task::backdrop{background:var(--scrim)}
-dialog.task form{padding:22px;display:grid;gap:14px}
-dialog.task h3{margin:0;font-size:18px;font-weight:650;letter-spacing:-.01em}
+     box-shadow:inset 0 1px 0 var(--sheen-edge),0 2px 6px color-mix(in srgb,var(--accent) 35%,transparent),0 12px 28px -8px color-mix(in srgb,var(--accent) 60%,transparent);
+     transition:transform var(--dur-2) var(--ease-spring)}
+.fab:hover{transform:scale(1.06);background:var(--sheen),var(--accent-hover)}
+.fab:active{transform:scale(.96)}
+dialog.task{border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);color:var(--text);padding:0;
+            width:min(460px,calc(100% - 32px));box-shadow:var(--shine),var(--shadow-lg)}
+dialog.task[open]{animation:sh-dialog-in var(--dur-3) var(--ease-sheet)}
+@keyframes sh-dialog-in{from{opacity:0;transform:translateY(8px) scale(.98)}}
+dialog.task::backdrop{background:var(--scrim);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+:root.reduce-transparency dialog.task::backdrop{-webkit-backdrop-filter:none;backdrop-filter:none}
+@media (prefers-reduced-transparency:reduce){:root dialog.task::backdrop{-webkit-backdrop-filter:none;backdrop-filter:none}}
+/* A field the keyboard moves to never lands under the sticky buttons (or the weekly form's title). */
+dialog.task{scroll-padding-bottom:96px}
+dialog.task.week{scroll-padding-top:76px}
+dialog.task form{padding:24px;display:grid;gap:16px}
+dialog.task h3{margin:0;font-size:20px;font-weight:700;letter-spacing:-.018em}
 dialog.task label{display:grid;gap:6px;font-size:13px;font-weight:520;color:var(--muted)}
 dialog.task label.pin-check{grid-template-columns:auto 1fr;align-items:center;column-gap:8px;color:var(--text)}
 dialog.task label.pin-check input{width:16px;height:16px;margin:0}
@@ -278,7 +363,12 @@ dialog.task select{appearance:none;padding-right:32px;cursor:pointer;
   background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
   background-position:calc(100% - 17px) 50%,calc(100% - 12px) 50%;background-size:5px 5px;background-repeat:no-repeat}
 dialog.task .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-dialog.task .buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+/* Every dialog's buttons stay in reach on a bar of glass at its bottom; the weekly form's title
+   stays at its top. The margins take the form's padding back, so both meet the dialog's edges. */
+dialog.task .buttons{display:flex;justify-content:flex-end;gap:8px;position:sticky;bottom:0;z-index:2;margin:4px -24px -24px;padding:14px 24px 20px;border-top:1px solid var(--glass-edge);
+  background:var(--glass-thick);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur)}
+dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;padding:22px 24px 12px;border-bottom:1px solid var(--glass-edge);
+  background:var(--glass-thick);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur)}
 
 /* The list and the day planner. From 1100 px they sit side by side under the bar, the planner sticky
    on the right and scrolling inside itself; the page column widens to 1440 px for them while the bar
@@ -287,7 +377,7 @@ dialog.task .buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:4p
    from disk, or with a server too old to keep a plan), data-view which view is on show. While it is
    still unknown the planner's column is kept, so the list does not jump sideways once it is on. */
 .left{min-width:0;container-type:inline-size}
-.planner{display:flex;flex-direction:column;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;container:planner / inline-size}
+.planner{display:flex;flex-direction:column;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shine),var(--shadow);overflow:hidden;container:planner / inline-size}
 .page:not([data-plan="on"],[data-plan="unknown"]) .planner{display:none}
 @media (min-width:1100px){
   .page:is([data-plan="on"],[data-plan="unknown"]){max-width:calc(1440px + 2 * var(--gutter))}
@@ -351,9 +441,9 @@ dialog.task .buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:4p
    theme, and its name written on it. */
 .ph{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:10px 12px 10px 8px;border-bottom:1px solid var(--border)}
 .ph-nav{display:flex;align-items:center;gap:2px;flex:1 1 auto;min-width:0}
-.ph-step{display:grid;place-items:center;flex:none;width:30px;height:30px;padding:0;border:0;border-radius:var(--radius-sm);background:none;color:var(--muted);font-size:20px;line-height:1;cursor:pointer;transition:background-color 120ms ease,color 120ms ease}
-.ph-step:hover{background:var(--surface-2);color:var(--text)}
-.ph-date{margin:0 4px;font-size:15px;font-weight:650;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ph-step{display:grid;place-items:center;flex:none;width:30px;height:30px;padding:0;border:0;border-radius:15px;background:none;color:var(--muted);font-size:20px;line-height:1;cursor:pointer;transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out)}
+.ph-step:hover{background:var(--hover-fill);color:var(--text)}
+.ph-date{margin:0 4px;font-size:17px;font-weight:700;letter-spacing:-.015em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .ph-date .short{display:none}
 @container planner (max-width:460px){.ph-date .long{display:none}.ph-date .short{display:inline}}
 .ph-actions{display:flex;align-items:center;gap:6px;flex:none;margin-left:auto}
@@ -379,8 +469,9 @@ dialog.task .buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:4p
 .pgrid::before{content:"";position:absolute;inset:0;background:linear-gradient(var(--border) 1px,transparent 1px) 0 calc(var(--hour,48px) / 2)/100% var(--hour,48px);opacity:.55;pointer-events:none}
 .pgrid.dense::before{display:none}
 .pgrid.loading{opacity:.55;pointer-events:none}
-.pblock{position:absolute;padding:3px 6px 3px 8px;border-radius:6px;border-left:3px solid var(--pb-edge);background:var(--pb-fill);color:var(--text);box-shadow:0 0 0 1px var(--surface);
-        overflow:hidden;font-size:12.5px;line-height:1.35;cursor:grab}
+.pblock{position:absolute;padding:3px 6px 3px 8px;border-radius:8px;border-left:3px solid var(--pb-edge);background:var(--pb-fill);color:var(--text);box-shadow:0 0 0 1px var(--surface),inset 0 0 0 .5px color-mix(in srgb,var(--pb-edge) 30%,transparent);
+        overflow:hidden;font-size:12.5px;line-height:1.35;cursor:grab;transition:box-shadow var(--dur-1) var(--ease-out)}
+.pblock:hover{box-shadow:0 0 0 1px var(--surface),inset 0 0 0 .5px color-mix(in srgb,var(--pb-edge) 45%,transparent),var(--shadow-sm)}
 .k-meal{--pb-fill:var(--warn-soft);--pb-edge:var(--warn)}
 .k-deep{--pb-fill:var(--accent-soft);--pb-edge:var(--accent)}
 .k-social{--pb-fill:var(--good-soft);--pb-edge:var(--good)}
@@ -442,18 +533,22 @@ dialog.task .buttons{display:flex;justify-content:flex-end;gap:8px;margin-top:4p
 .pflag.done span{color:var(--muted);text-decoration:line-through}
 .pflag:hover{background:var(--surface-2)}
 .pnow{position:absolute;left:-5px;right:0;z-index:3;height:0;border-top:2px solid var(--bad);pointer-events:none}
-.pnow::before{content:"";position:absolute;left:0;top:-6px;width:10px;height:10px;border-radius:50%;background:var(--bad)}
+.pnow::before{content:"";position:absolute;left:0;top:-6px;width:10px;height:10px;border-radius:50%;background:var(--bad);box-shadow:0 0 0 2px var(--surface)}
 /* A block's details: a card beside the block (planner.js places it), or a sheet at the bottom of a
    narrow screen. */
 dialog.pdetail{position:fixed;inset:auto;left:8px;top:8px;z-index:12;margin:0;width:min(340px,calc(100vw - 16px));max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px);overflow:auto;
-  padding:16px 18px 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface-raised);color:var(--text);box-shadow:var(--shadow-lg);overscroll-behavior:contain}
+  padding:16px 18px 14px;border:1px solid var(--glass-edge);border-radius:var(--radius-md);background:var(--glass-thick);-webkit-backdrop-filter:var(--glass-blur-thick);backdrop-filter:var(--glass-blur-thick);color:var(--text);box-shadow:var(--glass-rim),var(--shadow-lg);overscroll-behavior:contain}
+dialog.pdetail[open]{animation:sh-pop-in var(--dur-2) var(--ease-out)}
+@keyframes sh-pop-in{from{opacity:0;transform:scale(.96)}}
 dialog.pdetail:focus{outline:none}
 dialog.pdetail.sheet{inset:auto 0 0 0;width:100%;max-width:100%;max-height:85vh;max-height:85dvh;border-radius:16px 16px 0 0;border-bottom:0;
   padding-bottom:calc(16px + env(safe-area-inset-bottom))}
+dialog.pdetail.sheet{border-radius:var(--radius-lg) var(--radius-lg) 0 0}
 dialog.pdetail::backdrop{background:var(--scrim)}
 /* Dark: the card sits on the page's surface rather than the raised one, so its overdue status and
    links (--bad, --accent) keep 4.5:1. */
 :root:is([data-theme="dark"],[data-theme="red"]) dialog.pdetail{background:var(--surface)}
+:root:is([data-theme="dark"],[data-theme="red"]) dialog.pdetail{-webkit-backdrop-filter:none;backdrop-filter:none}
 dialog.pdetail .close{top:10px;right:10px}
 .pd-kind{display:flex;align-items:center;gap:7px;margin-right:40px;font-size:11.5px;font-weight:650;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
 .pd-kind i{width:12px;height:12px;border-radius:3px;background:var(--pb-fill);border-left:3px solid var(--pb-edge);box-shadow:inset 0 0 0 1px var(--border)}
@@ -535,14 +630,18 @@ dialog.task .wk-hours label{flex:1 1 160px}
 /* Narrow windows and phones. */
 @media (max-width:780px){
   .fab{right:16px;bottom:calc(18px + env(safe-area-inset-bottom))}
-  dialog.task,dialog.task.week{width:100%;max-width:100%;margin:auto 0 0;border-radius:16px 16px 0 0;border-bottom:0}
+  dialog.task,dialog.task.week{width:100%;max-width:100%;margin:auto 0 0;border-radius:var(--radius-lg) var(--radius-lg) 0 0;border-bottom:0}
   dialog.task form{padding-bottom:calc(20px + env(safe-area-inset-bottom))}
+  dialog.task .buttons{margin-bottom:calc(-20px - env(safe-area-inset-bottom));padding-bottom:calc(14px + env(safe-area-inset-bottom))}
+  dialog.task{scroll-padding-bottom:calc(96px + env(safe-area-inset-bottom))}
   dialog.task :is(input,select,textarea){font-size:16px}
   .stats{grid-template-columns:1fr 1fr;gap:12px}.stat{padding:12px}.stat b{font-size:21px}.stat span{font-size:12px}
-  aside{width:100%;padding:18px 16px calc(50px + env(safe-area-inset-bottom))}
+  /* Filling the screen, the drawer is an opaque sheet: nothing beside it would show the glass. */
+  aside{inset:0;width:100%;border:0;border-radius:0;padding:18px 16px calc(50px + env(safe-area-inset-bottom));
+        background:var(--surface);-webkit-backdrop-filter:none;backdrop-filter:none}
   aside h3{font-size:18px}
   .close{width:34px;height:34px}
-  .toast{left:12px;right:12px;transform:none;max-width:none;bottom:calc(86px + env(safe-area-inset-bottom))}
+  .toast{left:12px;right:12px;width:auto;max-width:none;margin:0;border-radius:var(--radius-md);bottom:calc(86px + env(safe-area-inset-bottom))}
 }
 /* A phone: QuantPrep's two-row bar, the title (or the app switch) and the theme above, the views
    below. */
@@ -554,13 +653,19 @@ dialog.task .wk-hours label{flex:1 1 160px}
   .brand-slot{grid-area:brand}.bar-end{grid-area:end}
   .app-switch::after{display:none}
   /* The first view's text sits under the title, as QuantPrep's nav does. */
-  .views{grid-area:nav;margin:0 calc(-1 * var(--gutter));padding:0 calc(var(--gutter) - 10px)}
+  .views{grid-area:nav;margin:0 calc(-1 * var(--gutter));padding:0 calc(var(--gutter) - 12px)}
   .page{padding-top:24px}
   /* A phone's Day view gives the day every pixel it can. */
   .page[data-view="day"]{padding-top:14px;padding-bottom:8px}
   .page[data-view="day"] .syncrow{margin-bottom:10px}
   .ph{padding-top:7px;padding-bottom:7px}
   .pstrip{padding-top:6px;padding-bottom:6px}
+}
+/* Nothing moves for those who ask for less motion. */
+@media (prefers-reduced-motion:reduce){
+  aside,dialog.task[open],dialog.pdetail[open]{animation:none}
+  .btn,.fab,.check,.pblock,.app-seg a,.views button,.theme-btn,.close,.ph-step,.row,.clist button{transition:none}
+  .btn:active,.fab:hover,.fab:active,.check:active,.check.on{transform:none}
 }
 </style>
 </head>
