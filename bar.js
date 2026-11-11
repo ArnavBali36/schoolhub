@@ -23,17 +23,27 @@
   document.addEventListener('DOMContentLoaded', () => { runFills(); fills.length = 0; observer.disconnect(); });
 
   // ---- light and dark ----
-  // One setting with QuantPrep: localStorage qp.theme, System, Light or Dark. System follows the
-  // operating system while the page is open, and a choice made in another tab applies here at once.
+  // One setting with QuantPrep: localStorage qp.theme, System, Light, Dark or Night. System follows
+  // the operating system while the page is open, and a choice made in another tab applies here at
+  // once. Night is School's own: the system's colors, except from 9 PM to midnight, when every color
+  // on the page is a shade of red with no blue in it, so the screen keeps no one awake. QuantPrep,
+  // which does not know Night, shows System for it.
   const THEME_KEY = 'qp.theme';
-  const THEME_CHOICES = ['system', 'light', 'dark'];
-  const THEME_LABEL = {system: 'System', light: 'Light', dark: 'Dark'};
+  const THEME_CHOICES = ['system', 'light', 'dark', 'night'];
+  const THEME_LABEL = {system: 'System', light: 'Light', dark: 'Dark', night: 'Night', red: 'Red'};
+  const NIGHT_FROM = 21, NIGHT_TO = 24;  // hours of the day, local time
+  const nightNow = () => { const h = new Date().getHours(); return h >= NIGHT_FROM && h < NIGHT_TO; };
   // A screen for System, a sun for Light, a moon for Dark: QuantPrep's icons.
   const THEME_ICON = {
     system: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
     light: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>',
     dark: '<path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/>',
+    // The moon with a Z: Dark, and asleep.
+    night: '<path d="M18 15.5A7 7 0 0 1 8.5 6 7 7 0 1 0 18 15.5z"/><path d="M15 3h5l-5 5.5h5"/>',
   };
+  // The tab's icon at night: SchoolHub's tick on red, with no blue.
+  const ICON_DAY = 'favicon.svg';
+  const ICON_RED = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#5c1000"/><path d="M9 16.5l4.5 4.5L23 11.5" fill="none" stroke="#ff4800" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>');
   const darkQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
   const READ_FAILED = {};
   const readTheme = () => { try { return localStorage.getItem(THEME_KEY); } catch { return READ_FAILED; } };
@@ -46,7 +56,13 @@
     unsavedTheme = null;
     return THEME_CHOICES.includes(v) ? v : 'system';
   }
-  const resolveTheme = choice => choice === 'system' ? (darkQuery?.matches ? 'dark' : 'light') : choice;
+  const systemTheme = () => darkQuery?.matches ? 'dark' : 'light';
+  const resolveTheme = choice =>
+    choice === 'night' ? (nightNow() ? 'red' : systemTheme()) : choice === 'system' ? systemTheme() : choice;
+  const choiceText = (choice, theme) =>
+    choice === 'system' ? `System (${THEME_LABEL[theme].toLowerCase()})`
+      : choice === 'night' ? (theme === 'red' ? 'Night (red until 12 AM)' : `Night (${THEME_LABEL[theme].toLowerCase()}, red from 9 PM to 12 AM)`)
+      : THEME_LABEL[choice];
   const nextTheme = choice => THEME_CHOICES[(THEME_CHOICES.indexOf(choice) + 1) % THEME_CHOICES.length];
   function applyTheme(choice = themeChoice()){
     const theme = resolveTheme(choice), root = document.documentElement;
@@ -57,10 +73,13 @@
       root.getBoundingClientRect();
       root.removeAttribute('data-theme-switching');
     }
+    const icon = $('link[rel="icon"]');
+    const href = theme === 'red' ? ICON_RED : ICON_DAY;
+    if (icon && icon.getAttribute('href') !== href) icon.setAttribute('href', href);
     const btn = $('#themeBtn');
     if (!btn) return false;
     // "Theme: System (dark). Switch to Light": the choice, the palette it gives, and the next one.
-    const label = `Theme: ${choice === 'system' ? `System (${THEME_LABEL[theme].toLowerCase()})` : THEME_LABEL[choice]}. Switch to ${THEME_LABEL[nextTheme(choice)]}`;
+    const label = `Theme: ${choiceText(choice, theme)}. Switch to ${THEME_LABEL[nextTheme(choice)]}`;
     btn.title = label;
     btn.setAttribute('aria-label', label);
     if (btn.dataset.choice !== choice) {
@@ -78,6 +97,11 @@
   darkQuery?.addEventListener?.('change', () => applyTheme());
   window.addEventListener('storage', e => { if (e.key === THEME_KEY || e.key === null) applyTheme(); });
   whenParsed(() => applyTheme());
+  // Night turns red at 9 PM and back at midnight while the page stays open: checked every half
+  // minute, and at once when the page comes back from the background or the computer wakes.
+  setInterval(() => { if (themeChoice() === 'night') applyTheme(); }, 30000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) applyTheme(); });
+  window.addEventListener('focus', () => applyTheme());
 
   // ---- the view on show ----
   // dashboard.js keeps these in step; marked here too so the current view is lit from the start.

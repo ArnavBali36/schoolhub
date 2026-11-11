@@ -9,7 +9,7 @@
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <title>SchoolHub</title>
 <style>
-/* Light and dark: <html data-theme="light|dark"> picks the palette (theme-init.js before the first
+/* Light, dark and red: <html data-theme="light|dark|red"> picks the palette (theme-init.js before the first
    paint, bar.js after). The tokens are QuantPrep's, so the two apps look like one platform. */
 :root{
   --bg:#f3f4f6;--surface:#ffffff;--surface-2:#f7f8fa;--surface-3:#eceef2;--surface-raised:#ffffff;
@@ -50,6 +50,48 @@
   --course-6:#2bb5cc;--course-7:#e874a8;--course-8:#c4bc2a;--course-9:#b9875a;--course-10:#d7a2d5;--course-personal:#8c93a0;
   color-scheme:dark;
 }
+/* Night, from 9 PM to midnight (bar.js): every color a shade of red, with no blue in any of them,
+   so the screen gives off no blue light. Text keeps at least 4.5:1 on every surface and fill, and
+   input edges 3:1, as in the other themes; kinds and statuses are written out, so the shades of red
+   never carry meaning alone. Pictures go through the same red (the #redshift filter below). */
+:root[data-theme="red"]{
+  --bg:#0b0000;--surface:#160100;--surface-2:#1f0200;--surface-3:#290300;--surface-raised:#340500;
+  --border:#3d0700;--border-strong:#7a1800;--border-input:#b83000;
+  --text:#ff4800;--muted:#ff3000;--faint:#ff2800;
+  --accent:#ff3a00;--accent-hover:#ff4a00;--accent-soft:#360800;--on-accent:#0b0000;--ring:rgb(255 58 0 / .35);
+  --good:#ff6400;--good-soft:#260c00;--bad:#ff2000;--bad-soft:#3a0000;--warn:#ff5200;--warn-soft:#2f1000;
+  --shadow-sm:0 1px 2px rgb(0 0 0 / .6);
+  --shadow:0 1px 2px rgb(0 0 0 / .55),0 0 0 1px rgb(255 40 0 / .06);
+  --shadow-md:0 6px 16px rgb(0 0 0 / .6),0 0 0 1px rgb(255 40 0 / .07);
+  --shadow-lg:0 12px 32px rgb(0 0 0 / .65),0 0 0 1px rgb(255 40 0 / .07);
+  --scrim:rgb(0 0 0 / .6);
+  --course-1:#ff2400;--course-2:#ff5000;--course-3:#ff7800;--course-4:#e03400;--course-5:#ff9a00;
+  --course-6:#d42400;--course-7:#ff6400;--course-8:#e84a00;--course-9:#ffae00;--course-10:#c83c00;--course-personal:#c03800;
+  color-scheme:dark;
+  scrollbar-color:var(--border-strong) var(--bg);
+}
+:root[data-theme="red"] :is(img,video,canvas,iframe,object,embed,picture,.emo,.doc svg){filter:url(#redshift)}
+/* The same red, written out in full for what the browser draws inside a control's own shadow tree
+   (the date and time fields' calendar and clock), where url(#redshift) does not reach. */
+:root[data-theme="red"] ::-webkit-calendar-picker-indicator{filter:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='r' color-interpolation-filters='sRGB'%3E%3CfeColorMatrix type='matrix' values='0.2126 0.7152 0.0722 0 0 0.04 0.13 0.01 0 0 0 0 0 0 0 0 0 0 1 0'/%3E%3C/filter%3E%3C/svg%3E#r")}
+/* The field of a date or time being typed in is marked in the browser's highlight, which is blue. */
+/* Form fields go through #redkeep: blue is added to red and dropped, green halved. An emoji typed in a
+   field (a block's title, a task's name), which cannot be wrapped like the page's, comes out in reds
+   and oranges with no blue; the part of a date or time being typed in, marked in the browser's blue
+   highlight (an author's ::-webkit-datetime-edit-*-field:focus is never matched), becomes a bright
+   red-orange box with dark text. The field's own reds stay nearly as they are (text 5.3:1). */
+:root[data-theme="red"] :is(input:not([type=checkbox],[type=radio]),textarea,select){filter:url(#redkeep)}
+/* Ticks and radio buttons: the browser's own are grey when off, so Night draws them in its reds. */
+:root[data-theme="red"] input:is([type=checkbox],[type=radio]){appearance:none;-webkit-appearance:none;display:inline-grid;place-content:center;border:1.5px solid var(--border-input);border-radius:3px;background:var(--surface)}
+:where(:root[data-theme="red"] input:is([type=checkbox],[type=radio])){width:13px;height:13px}  /* each place's own size wins */
+:root[data-theme="red"] input[type=radio]{border-radius:50%}
+:root[data-theme="red"] input:is([type=checkbox],[type=radio]):checked{background:var(--accent);border-color:var(--accent)}
+:root[data-theme="red"] input[type=checkbox]:checked::before{content:"";width:8px;height:4px;margin-top:-2px;border:solid var(--on-accent);border-width:0 0 2px 2px;transform:rotate(-45deg)}
+:root[data-theme="red"] input[type=radio]:checked::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--on-accent)}
+:root[data-theme="red"] input:is([type=checkbox],[type=radio]):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+:root[data-theme="red"] input:is([type=checkbox],[type=radio]):disabled{opacity:.5}
+/* A course's color set in config.json may be any hue: Night keeps to its own course reds. */
+:root[data-theme="red"] .dot{background:var(--dot-theme)}
 *{box-sizing:border-box}
 html{scroll-padding-top:calc(var(--bar-height) + 16px)}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--font-text);-webkit-font-smoothing:antialiased}
@@ -116,7 +158,7 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline;tex
 dialog.task :is(input,select,textarea){padding:0 11px;height:36px;border:1px solid var(--border-input);border-radius:var(--radius-sm);background-color:var(--surface);color:var(--text);width:100%;transition:border-color 120ms ease,box-shadow 120ms ease}
 :is(input,select,textarea):focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--ring)}
 input::placeholder,textarea::placeholder{color:var(--faint);opacity:1}
-input[type=checkbox]{accent-color:var(--accent)}
+input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:7px 14px;border-radius:var(--radius-sm);border:1px solid var(--border-strong);background:var(--surface);color:var(--text);box-shadow:var(--shadow-sm);cursor:pointer;font-size:14px;font-weight:520;line-height:1.3;white-space:nowrap;transition:background-color 120ms ease,border-color 120ms ease}
 .btn:hover{background:var(--surface-2);text-decoration:none}
 .btn:active{background:var(--surface-3)}
@@ -145,7 +187,7 @@ input[type=checkbox]{accent-color:var(--accent)}
 .row{display:grid;grid-template-columns:120px minmax(0,1fr) auto 150px 104px 28px;gap:14px;align-items:center;padding:10px 18px;border-top:1px solid var(--border);cursor:pointer;font-size:14px;line-height:1.45;transition:background-color 120ms ease}
 .row:first-child{border-top:0}.row:hover{background:var(--surface-2)}
 .chip{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--dot)}
 /* The name is a button, so the drawer opens from the keyboard too; it reads as text. */
 .name{display:block;min-width:0;padding:0;border:0;background:none;color:inherit;font:inherit;font-weight:560;text-align:left;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .name small{color:var(--muted);font-weight:400;margin-left:8px}
@@ -202,6 +244,7 @@ a.dl::after{content:"\2193";content:"\2193" / "";display:inline-block;margin-lef
 .doc a{word-break:break-word}
 .doc table{display:block;overflow-x:auto;border-collapse:collapse;margin:10px 0}
 .doc td,.doc th{border:1px solid var(--border);padding:6px 9px;text-align:left}
+.doc hr{border:0;border-top:1px solid var(--border-strong);margin:14px 0}
 .doc pre{overflow-x:auto;background:var(--surface-2);padding:10px;border-radius:var(--radius-sm)}
 .doc iframe,.doc video{max-width:100%}
 /* Colored text and highlights in instructions, in the theme's colors (dashboard.js themeColors). */
@@ -410,7 +453,7 @@ dialog.pdetail.sheet{inset:auto 0 0 0;width:100%;max-width:100%;max-height:85vh;
 dialog.pdetail::backdrop{background:var(--scrim)}
 /* Dark: the card sits on the page's surface rather than the raised one, so its overdue status and
    links (--bad, --accent) keep 4.5:1. */
-:root[data-theme="dark"] dialog.pdetail{background:var(--surface)}
+:root:is([data-theme="dark"],[data-theme="red"]) dialog.pdetail{background:var(--surface)}
 dialog.pdetail .close{top:10px;right:10px}
 .pd-kind{display:flex;align-items:center;gap:7px;margin-right:40px;font-size:11.5px;font-weight:650;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
 .pd-kind i{width:12px;height:12px;border-radius:3px;background:var(--pb-fill);border-left:3px solid var(--pb-edge);box-shadow:inset 0 0 0 1px var(--border)}
@@ -522,6 +565,9 @@ dialog.task .wk-hours label{flex:1 1 160px}
 </style>
 </head>
 <body>
+<!-- Night's red for pictures: their brightness as red, with a little green and no blue. #redkeep, for
+     date and time fields, keeps reds as they are and turns the browser's blue highlight red. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><filter id="redshift" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0.2126 0.7152 0.0722 0 0  0.04 0.13 0.01 0 0  0 0 0 0 0  0 0 0 1 0"/></filter><filter id="redkeep" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="1 0 1 0 0  0 0.5 0 0 0  0 0 0 0 0  0 0 0 1 0"/></filter></svg>
 <header class="topbar"><div class="bar">
   <div class="brand-slot" id="brand"><h1 class="brand">SchoolHub</h1></div>
   <nav class="views" id="views" aria-label="Views"><button type="button" data-view="upcoming">Upcoming</button><button type="button" data-view="courses">By course</button><button type="button" data-view="day" hidden>Day</button></nav>

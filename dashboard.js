@@ -172,14 +172,15 @@ function taskItem(t){
     created_at: t.created_at || '', pinned: pinnedTask(t)};
 }
 // A course's dot: the color set for it in config.json if any, else one of the theme's course colors.
-const courseColor = (c, i) => c.id === 'personal' ? 'var(--course-personal)'
-  : c.color || `var(--course-${i % COURSE_COLORS + 1})`;
+// The theme's own is kept too (slot): Night's red uses it in place of a set color, which may be blue.
+const courseSlot = (c, i) => c.id === 'personal' ? 'var(--course-personal)' : `var(--course-${i % COURSE_COLORS + 1})`;
+const courseColor = (c, i) => c.id === 'personal' ? courseSlot(c) : c.color || courseSlot(c, i);
 function rebuild(){
   let base = D.courses;
   if (tasks) base = base.filter(c => c.id !== 'personal').map(c => ({...c, assignments: c.assignments.filter(a => !a.is_task)}));
-  courses = base.map((c, i) => ({...c, color: courseColor(c, i), assignments: [...c.assignments]}));
+  courses = base.map((c, i) => ({...c, color: courseColor(c, i), slot: courseSlot(c, i), assignments: [...c.assignments]}));
   if (tasks) {
-    const personal = {id: 'personal', source: 'personal', name: 'Personal tasks', short: 'Personal', color: courseColor({id: 'personal'}),
+    const personal = {id: 'personal', source: 'personal', name: 'Personal tasks', short: 'Personal', color: courseColor({id: 'personal'}), slot: courseSlot({id: 'personal'}),
                       assignments: [], materials: []};
     for (const t of Object.values(tasks)) (courses.find(c => c.id === t.course_id) || personal).assignments.push(taskItem(t));
     if (personal.assignments.length) courses.push(personal);
@@ -188,7 +189,7 @@ function rebuild(){
   byId = Object.fromEntries(all.map(a => [a.id, a]));
 }
 rebuild();
-const dot = c => `<i class="dot" style="background:${esc(c.color)}"></i>`;
+const dot = c => `<i class="dot" style="--dot:${esc(c.color)};--dot-theme:${esc(c.slot || c.color)}"></i>`;
 
 // Marks as of the last sync; replaced by the live copy from server.py when available.
 let marks = Object.fromEntries(all.filter(a => a.marked_done).map(a => [a.id, {marked_at: a.marked_done}]));
@@ -350,8 +351,51 @@ function render(){
   $('#sync').classList.toggle('stale', hrs > 30);
   const vis = visible(), main = $('#main'), key = focusKey(main);
   main.innerHTML = stats() + (view === 'courses' ? coursesView(vis) : upcomingView(vis));
+  markEmoji(main);
   refocus(main, key);
   emit('render');
+}
+
+// Emoji are drawn in their own colors whatever the theme's, so Night (red from 9 PM, bar.js) would
+// leave a green 📗 in an assignment's name. Each run of emoji in what the page has just drawn goes in
+// a <span class="emo">, which Night sends through the same red filter as pictures (dashboard.html);
+// other themes show it as it is. It runs right after each part is drawn, never by watching the page,
+// so it cannot start a loop with code that redraws. Text in a form control is skipped: an input's
+// value or an <option> cannot hold a span (a known limit of Night, as are the system's own menus
+// and tooltips).
+// Only what is drawn as a color emoji: a flag (two regional letters), a keycap (1️⃣ #️⃣), a character
+// shown as emoji by default (📗, not one asking for text with U+FE0E), or a symbol asking for emoji
+// with U+FE0F (❤️, not ↗ © ™ ✔, which stay text in the theme's color). Each may carry a skin tone,
+// tag letters (🏴󠁧󠁢󠁥󠁮󠁧󠁿) and further emoji joined by U+200D (👨‍👩‍👧, 🏳️‍🌈).
+const EMOJI_ONE = String.raw`(?:\p{Regional_Indicator}{2}|[#*0-9]\uFE0F?\u20E3|(?:\p{Emoji_Presentation}(?!\uFE0E)|\p{Extended_Pictographic}\uFE0F)(?:\p{Emoji_Modifier}|\uFE0F|\u20E3|[\u{E0020}-\u{E007E}]+\u{E007F})*(?:\u200D\p{Extended_Pictographic}(?:\p{Emoji_Modifier}|\uFE0F)*)*)`;
+const EMOJI = new RegExp(`${EMOJI_ONE}+`, 'gu');
+// Only for asking whether a text has any: not global, so it keeps no place between calls (a global
+// regex's lastIndex, left by test(), would make matchAll below start partway in and skip emoji).
+const HAS_EMOJI = new RegExp(EMOJI_ONE, 'u');
+const NO_EMO = new Set(['SCRIPT', 'STYLE', 'TEXTAREA', 'OPTION', 'SELECT', 'TITLE']);
+function markEmoji(root){
+  if (!root) return root;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const found = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const parent = n.parentElement;
+    if (parent && !NO_EMO.has(parent.tagName) && !parent.closest('.emo') && HAS_EMOJI.test(n.data)) found.push(n);
+  }
+  for (const n of found) {
+    // In a flex or grid box the text was one item; split into text and spans it would become several,
+    // each with the box's gap between them. So there the pieces stay together in one plain span.
+    const display = n.parentElement.isConnected ? getComputedStyle(n.parentElement).display : '';
+    const holder = /flex|grid/.test(display) ? document.createElement('span') : document.createDocumentFragment();
+    let last = 0;
+    for (const m of n.data.matchAll(new RegExp(EMOJI))) {
+      if (m.index > last) holder.append(n.data.slice(last, m.index));
+      holder.append(Object.assign(document.createElement('span'), {className: 'emo', textContent: m[0]}));
+      last = m.index + m[0].length;
+    }
+    if (last < n.data.length) holder.append(n.data.slice(last));
+    n.replaceWith(holder);
+  }
+  return root;
 }
 
 // Instructions are written for a white page, often with colored text and highlights: shown as they
@@ -458,6 +502,7 @@ function openDrawer(id, fromKeyboard = false){
     ${a.comments?.length ? `<h4>Feedback</h4>${a.comments.map(c => `<div class="comment"><b>${esc(c.author)}</b> · <span class="muted">${esc(fmtDue(c.at))}</span>\n${esc(c.text)}</div>`).join('')}` : ''}
     ${fileList('Assignment files', a.files)}
     ${a.description_html ? `<h4>Instructions</h4><div class="doc">${safeHtml(a.description_html)}</div>` : ''}`;
+  markEmoji(drawer);
   drawer.hidden = $('#scrim').hidden = false;
   $('#close').onclick = closeDrawer;
   for (const sel of BEHIND_DRAWER) { const el = $(sel); if (el) el.inert = true; }
@@ -483,6 +528,7 @@ function toast(msg, undo){
   const el = document.createElement('div');
   el.className = 'toast'; el.id = 'toast'; el.setAttribute('role', 'status');
   el.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button type="button">Undo</button>' : ''}<i class="timer" style="animation-duration:${UNDO_MS}ms"></i>`;
+  markEmoji(el);
   document.body.append(el);
   if (undo) el.querySelector('button').onclick = () => { clearTimeout(toastTimer); el.remove(); undo(); };
   toastTimer = setTimeout(() => el.remove(), UNDO_MS);
@@ -664,7 +710,7 @@ window.SchoolHub = {
     plannerState = next;
     refresh();
   },
-  isDone, needsAttention, fmtDue, esc, dot, typingIn, toast, openDrawer, api,
+  isDone, needsAttention, fmtDue, esc, dot, typingIn, toast, openDrawer, api, markEmoji,
   drawerOpen: () => drawerId !== null,
   on(name, fn){ hooks[name].push(fn); if (name === 'ready' && readied) fn(); },
 };

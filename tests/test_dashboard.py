@@ -324,7 +324,7 @@ class PlannerPageTest(unittest.TestCase):
         self.assertIn(".pb-head .pb-title{flex:0 1000 auto;min-width:2.5em}", HTML)
         self.assertIn(".pb-head .pb-time{flex:0 1 auto;min-width:0}", HTML)
         # Dark: the card's overdue status and links keep 4.5:1 on the page's surface.
-        self.assertIn(':root[data-theme="dark"] dialog.pdetail{background:var(--surface)}', HTML)
+        self.assertIn(':root:is([data-theme="dark"],[data-theme="red"]) dialog.pdetail{background:var(--surface)}', HTML)
         # A meal's place set for one day says so.
         self.assertIn("else if (meal && e.placeChanged) notes.push(`Place changed for ${thisDay(shown)} only`);", PLANNER)
 
@@ -333,6 +333,155 @@ class PlannerPageTest(unittest.TestCase):
                                  ("social", "--good-soft", "--good"), ("other", "--surface-3", "--border-strong")):
             self.assertIn(f".k-{kind}{{--pb-fill:var({fill});--pb-edge:var({edge})}}", HTML)
         self.assertIn("border-top:2px solid var(--bad)", HTML)  # the now line
+
+
+def _lum(hex6):
+    def lin(c):
+        c /= 255
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (int(hex6[i:i + 2], 16) for i in (0, 2, 4))
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+
+
+def _contrast(a, b):
+    x, y = sorted((_lum(a), _lum(b)), reverse=True)
+    return (x + 0.05) / (y + 0.05)
+
+
+class NightThemeTest(unittest.TestCase):
+    """Night (2026-11-11): the system's colors, and from 9 PM to midnight every color a shade of red
+    with no blue in it, still readable."""
+
+    RED = re.search(r':root\[data-theme="red"\]\{(.*?)\n\}', HTML, re.S).group(1)
+    TOKENS = dict(re.findall(r"--([\w-]+):#([0-9a-f]{6})", RED))
+
+    def test_every_color_has_no_blue(self):
+        self.assertGreater(len(self.TOKENS), 30)
+        for name, value in self.TOKENS.items():
+            self.assertEqual(value[4:], "00", name)
+        # Colors written another way (rgb()) carry no blue either.
+        for r, g, b in re.findall(r"rgb\((\d+) (\d+) (\d+)", self.RED):
+            self.assertEqual(b, "0")
+
+    def test_text_stays_readable(self):
+        # Every text color on every surface and fill (an overdue pill is --bad on --bad-soft).
+        fills = ["bg", "surface", "surface-2", "surface-3", "surface-raised", "accent-soft", "good-soft", "bad-soft", "warn-soft"]
+        for text in ["text", "muted", "faint", "accent", "good", "bad", "warn"]:
+            for fill in fills:
+                self.assertGreaterEqual(_contrast(self.TOKENS[text], self.TOKENS[fill]), 4.5, (text, fill))
+        self.assertGreaterEqual(_contrast(self.TOKENS["on-accent"], self.TOKENS["accent"]), 4.5)
+        for fill in ["bg", "surface", "surface-2", "surface-3"]:
+            self.assertGreaterEqual(_contrast(self.TOKENS["border-input"], self.TOKENS[fill]), 3)
+        for n in [*range(1, 11), "personal"]:
+            for fill in ["bg", "surface", "surface-2", "surface-3", "surface-raised"]:
+                self.assertGreaterEqual(_contrast(self.TOKENS[f"course-{n}"], self.TOKENS[fill]), 3, (n, fill))
+
+    def test_pictures_and_icon_turn_red(self):
+        self.assertIn('<filter id="redshift"', HTML)
+        self.assertIn('0 0 0 0 0  0 0 0 1 0"/>', HTML)  # no blue out
+        self.assertIn(':root[data-theme="red"] :is(img,video,canvas,iframe,object,embed,picture,.emo,.doc svg){filter:url(#redshift)}', HTML)
+        self.assertIn('markEmoji(main);', JS)
+        self.assertIn('SH.markEmoji?.(grid);', PLANNER)
+        self.assertNotIn('MutationObserver', JS)
+        icon = re.search(r"const ICON_RED = .*$", BAR, re.M).group(0)
+        for color in re.findall(r"#([0-9a-f]{6})", icon):
+            self.assertEqual(color[4:], "00")
+
+    def test_controls_and_dots_turn_red(self):
+        # Radio buttons follow the theme as ticks do; off, both are drawn in Night's reds, not grey.
+        self.assertIn("input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}", HTML)
+        self.assertIn(':root[data-theme="red"] input:is([type=checkbox],[type=radio]){appearance:none;', HTML)
+        # The date and time fields' icons sit in the control's shadow tree: the filter is written out.
+        picker = re.search(r':root\[data-theme="red"\] ::-webkit-calendar-picker-indicator\{filter:url\("data:image/svg\+xml,(.*?)#r"\)\}', HTML).group(1)
+        self.assertIn("values='0.2126 0.7152 0.0722 0 0 0.04 0.13 0.01 0 0 0 0 0 0 0 0 0 0 1 0'", picker)
+        # The browser's blue highlight on the part of a date or time being typed: no blue comes out.
+        self.assertIn(':root[data-theme="red"] :is(input:not([type=checkbox],[type=radio]),textarea,select){filter:url(#redkeep)}', HTML)
+        self.assertIn('<filter id="redkeep" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="1 0 1 0 0  0 0.5 0 0 0  0 0 0 0 0  0 0 0 1 0"/>', HTML)
+        self.assertNotRegex(HTML, r":is\([^)]*::")  # a pseudo-element inside :is() matches nothing
+        # A course's set color gives way to the theme's own course red.
+        self.assertIn(':root[data-theme="red"] .dot{background:var(--dot-theme)}', HTML)
+        self.assertIn('style="--dot:${esc(c.color)};--dot-theme:${esc(c.slot || c.color)}"', JS)
+        self.assertIn(".doc hr{border:0;border-top:1px solid var(--border-strong)", HTML)
+
+    def _mark(self, cases):
+        """Runs dashboard.js's markEmoji on a small stand-in for the page: each case is a list of text
+        nodes, each in its own <span>, and the result is each node as text with [emoji] for a span."""
+        start = JS.index("const EMOJI_ONE = ")
+        end = JS.index("\n}\n", JS.index("function markEmoji")) + 3
+        return run_node(JS[start:end] + """
+class El {
+  constructor(tag, kids = []){ this.tagName = tag; this.kids = []; this.className = ''; this.isConnected = false; for (const k of kids) this.append(k); }
+  append(...xs){ for (let x of xs) { if (typeof x === 'string') x = new Text(x); if (x.frag) { for (const k of x.kids) this.append(k); continue; } x.parentElement = this; this.kids.push(x); } }
+  closest(){ return this.className === 'emo' ? this : null; }
+  set textContent(t){ this.kids = []; this.append(t); }
+  show(){ return this.kids.map(k => k instanceof Text ? k.data : k.className === 'emo' ? `[${k.show()}]` : k.show()).join(''); }
+}
+class Text { constructor(d){ this.data = d; } replaceWith(x){ const p = this.parentElement, i = p.kids.indexOf(this); const tmp = new El('X'); tmp.append(x); for (const k of tmp.kids) k.parentElement = p; p.kids.splice(i, 1, ...tmp.kids); } }
+const texts = el => el.kids.flatMap(k => k instanceof Text ? [k] : texts(k));
+globalThis.NodeFilter = {SHOW_TEXT: 4};
+globalThis.document = {
+  createTreeWalker(root){ const all = texts(root); let i = 0; return {nextNode: () => all[i++] || null}; },
+  createDocumentFragment(){ const f = new El('#fragment'); f.frag = true; return f; },
+  createElement: tag => new El(tag.toUpperCase()),
+};
+const cases = %s;
+console.log(JSON.stringify(cases.map(nodes => {
+  const root = new El('DIV', nodes.map(t => new El('SPAN', [t])));
+  markEmoji(root);
+  return root.kids.map(k => k.show());
+})));
+""" % json.dumps(cases))
+
+    @unittest.skipUnless(NODE, "Node is not installed")
+    def test_every_emoji_is_marked(self):
+        # The last text drawn ending in an emoji once left a global regex part way along, and every
+        # emoji before that point stayed in color.
+        out = self._mark([
+            ["📗 Biology lab", "Good luck! 🍀"],
+            ["a ✅"],
+            ["Study 📗", "Hang out 🎉", "· 11/11 Research Proposal Essay due 📗📙"],
+            ["Flag 🇺🇸 key 1️⃣ #️⃣", "🏴󠁧󠁢󠁥󠁮󠁧󠁿 👍🏽 👨‍👩‍👧 🏳️‍🌈 ❤️"],
+            # Symbols shown as text stay text, in the theme's color.
+            ["Open on Canvas ↗", "© ™ ✔ ▶ ‼ ℹ ❤︎ 12 #3"],
+        ])
+        self.assertEqual(out, [
+            ["[📗] Biology lab", "Good luck! [🍀]"],
+            ["a [✅]"],
+            ["Study [📗]", "Hang out [🎉]", "· 11/11 Research Proposal Essay due [📗📙]"],
+            ["Flag [🇺🇸] key [1️⃣] [#️⃣]", "[🏴󠁧󠁢󠁥󠁮󠁧󠁿] [👍🏽] [👨‍👩‍👧] [🏳️‍🌈] [❤️]"],
+            ["Open on Canvas ↗", "© ™ ✔ ▶ ‼ ℹ ❤︎ 12 #3"],
+        ])
+        # Whether a text has emoji is asked of a regex that keeps no place between calls.
+        self.assertIsNone(re.search(r"(?<!HAS_)EMOJI\.test\(", JS))
+        self.assertIn("const HAS_EMOJI = new RegExp(EMOJI_ONE, 'u');", JS)
+
+    @unittest.skipUnless(NODE, "Node is not installed")
+    def test_night_is_a_choice_and_turns_red_on_time(self):
+        self.assertIn("const THEME_CHOICES = ['system', 'light', 'dark', 'night'];", BAR)
+        init = (REPO / "theme-init.js").read_text(encoding="utf-8")
+        out = run_node("""
+const init = %s;
+const results = {};
+for (const [choice, hour, dark] of [['night', 21, false], ['night', 23, true], ['night', 20, true], ['night', 0, false], ['night', 4, false], ['system', 22, true], ['dark', 22, false], ['light', 23, true]]) {
+  const attrs = {};
+  const RealDate = Date;
+  globalThis.Date = class extends RealDate { getHours(){ return hour; } };
+  globalThis.localStorage = {getItem: () => choice};
+  globalThis.matchMedia = () => ({matches: dark});
+  globalThis.document = {documentElement: {setAttribute: (k, v) => { attrs[k] = v; }}};
+  new Function(init)();
+  globalThis.Date = RealDate;
+  results[`${choice} ${hour} ${dark}`] = attrs['data-theme'];
+}
+console.log(JSON.stringify(results));
+""" % json.dumps(init))
+        self.assertEqual(out, {
+            "night 21 false": "red", "night 23 true": "red", "night 20 true": "dark", "night 0 false": "light",
+            "night 4 false": "light", "system 22 true": "dark", "dark 22 false": "dark", "light 23 true": "light",
+        })
+        # bar.js keeps the same hours, and looks again while the page stays open.
+        self.assertIn("const NIGHT_FROM = 21, NIGHT_TO = 24;", BAR)
+        self.assertIn("setInterval(() => { if (themeChoice() === 'night') applyTheme(); }, 30000);", BAR)
 
 
 @unittest.skipUnless(NODE, "Node is not installed")

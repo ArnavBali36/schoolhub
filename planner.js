@@ -614,6 +614,7 @@
     for (const e of entries.filter(e => e.repeat && e.skip))
       chips.push(`<button type="button" class="pchip" data-prepeat-on="${esc(e.id)}" aria-label="${esc(`${e.title} skipped ${thisDay(shown)}: bring it back`)}"><span>${esc(e.title)} skipped ${thisDay(shown)} · <b>Bring it back</b></span></button>`);
     els.strip.innerHTML = chips.join('');
+    SH.markEmoji?.(els.strip);
     els.strip.hidden = !chips.length;
 
     const wasScrolling = scrolling;
@@ -648,6 +649,7 @@
     for (const f of timed) parts.push({t: f.m, html: flagHtml(f.a, f.m, f.top)});
     parts.sort((p, q) => p.t - q.t);
     grid.innerHTML = parts.map(p => p.html).join('');
+    SH.markEmoji?.(grid);
     placeNow();
 
     const onScreen = root.getClientRects().length > 0;
@@ -759,6 +761,7 @@
     ghost.className = `pblock k-${kind} ghost`;
     Object.assign(ghost.style, {top: y(start) + 'px', height: Math.max(MIN_BLOCK_PX, y(end) - y(start) - 2) + 'px', left: '2px', width: 'calc(100% - var(--lane, 0px) - 4px)'});
     ghost.innerHTML = `<div class="pb-body"><div class="pb-head"><span class="pb-title">${esc(label)}</span></div><span class="pb-time">${esc(range(start, end))}</span></div>`;
+    SH.markEmoji?.(ghost);
     if (!ghost.isConnected) grid.append(ghost);
   }
   const hideGhost = () => ghost?.remove();
@@ -1063,6 +1066,7 @@
         <label class="pin-check"><input type="checkbox" data-ed-done="${esc(it.id)}"${it.done ? ' checked' : ''}> <span class="txt"><span>${esc(it.text)}</span>${it.kind === 'work' && it.course ? `<small>${esc(it.course)}</small>` : ''}${listDone(it) ? '<small class="b-done">done</small>' : ''}</span></label>
         <button type="button" class="b-rm" data-ed-rm="${esc(it.id)}" aria-label="Remove ${esc(it.text)}" title="Remove">×</button></li>`).join('')
       || '<li class="b-none">Nothing yet. Add a to-do, pick from your list, or drag an assignment onto the block.</li>';
+    SH.markEmoji?.(F.bItems);
     if (!F.bPicker.hidden) pickerList();
   }
   function togglePicker(on){
@@ -1076,6 +1080,7 @@
     const list = openItems().filter(a => !there.has(a.id));
     F.bPicker.innerHTML = list.map(a => `<button type="button" class="b-pick" data-ed-pick="${esc(a.id)}">${SH.dot(a.course)}<span class="nm">${esc(a.name)}</span><span class="dd">${esc(a.course?.short || a.course?.name || '')} · ${esc(SH.fmtDue(a.due_at, false, a.all_day))}</span></button>`).join('')
       || '<p class="b-none" style="margin:0;padding:10px">No open assignments or tasks to add.</p>';
+    SH.markEmoji?.(F.bPicker);
   }
   function addEdItem(item){
     if (ed.items.length >= LIMIT.items) return showErr(F.bErr, `A block holds at most ${LIMIT.items} things.`);
@@ -1310,6 +1315,7 @@
         <button type="button" class="btn small" data-pd-close="1">Close</button>
         <button type="button" class="btn small primary" data-pd-edit="1"${can ? '' : ' disabled'}>Edit</button>
       </div>`;
+    SH.markEmoji?.(card);
     if (keepSel) card.querySelector(keepSel)?.focus();
   }
   // Beside the block where there is room (left of it first: the planner is on the right), else
@@ -1445,6 +1451,7 @@
       }
     });
     F.wBlocks.innerHTML = rows.join('') || '<li class="b-none">None yet. Tick “Repeat every …” on a block to add one.</li>';
+    SH.markEmoji?.(F.wBlocks);
   }
   function openWeek(focusId){
     if (!editable() || !F.weekDialog) return;
