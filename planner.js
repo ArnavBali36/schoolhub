@@ -20,7 +20,11 @@
   const MIN_HOUR_PX = 22;
   const DENSE_HOUR_PX = 30;      // under this the hour labels thin out and the half-hour lines go
   const MIN_BLOCK_PX = 20;       // a block is never drawn shorter, whatever its length
-  const NARROW_COL_PX = 70;      // a column narrower than this shows only the kind's initial
+  const NARROW_COL_PX = 70;      // a column narrower than this shows only the kind's icon
+  const ROOMY_PX = 275;          // a block wider than this has its icon in a bubble and a chip (dashboard.html's "@container pblock" line of 260 px, and the block's 15 px of padding)
+  const FREE_MIN = 90;           // a free stretch between two blocks at least this long gets a card that says so
+  const NOW_HIDE_PX = 9;         // an hour's label this near the now line's pill gives way to it,
+  const NOW_CLEAR_PX = 16;       // and one nearer than this steps aside
   const ITEM_PX = 21;            // an item's line on a block
   const FLAG_LANE_PX = 92;       // the lane on the right kept for flags of things due at a time
   const TIME_PAD = 15;           // the timeline's margins above and below (.ptime) and the grid's border
@@ -36,8 +40,6 @@
   const MEAL_NAME = {breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner'};
   const KINDS = ['deep', 'social', 'other'];
   const KIND_NAME = {deep: 'Deep work', social: 'Socialize', other: 'Block'};
-  // What a column too narrow for words shows: the kind's initial (its colour and name go with it).
-  const INITIAL = {meal: 'M', deep: 'D', social: 'S', other: 'B'};
   const DEFAULT_SETTINGS = {day_start: 5, day_end: 24};
   const DEFAULT_MEALS = {breakfast: ['11:00', '12:00'], lunch: ['16:00', '17:00'], dinner: ['18:00', '19:00']};
   // What a row of the list carries when dragged onto the timeline: the assignment's or task's id.
@@ -58,6 +60,8 @@
   // A length: "15 min", "1 hr", "1 hr 30 min".
   const duration = n => [Math.floor(n / 60) ? Math.floor(n / 60) + ' hr' : '', n % 60 ? n % 60 + ' min' : ''].filter(Boolean).join(' ') || '0 min';
   const hourLabel = h =>`${h % 12 || 12} ${h % 24 < 12 ? 'AM' : 'PM'}`;
+  // The hour as the rail draws it: the numeral, and AM or PM small beside it.
+  const hourMark = h => { const [n, m] = hourLabel(h).split(' '); return `<b>${n}</b><small>${m}</small>`; };
   const isoDate = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   const fromIso = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
   const addDays = (s, n) => { const d = fromIso(s); d.setDate(d.getDate() + n); return isoDate(d); };
@@ -628,19 +632,34 @@
     layout(list, e => [e.top, e.top + e.h + 1]);
     return list;
   }
+  // The free stretches of FREE_MIN minutes or more between two of the blocks place() drew, and where
+  // the card that says so goes: from 5 px under the block before it to 4 px over the one after.
+  // None that began before `from` (today: now, so only time still to come has one), and none too
+  // short to hold its words.
+  function freeGaps(list, from = -Infinity){
+    const out = [];
+    let end = null, bottom = 0;
+    for (const e of [...list].sort((a, b) => a.start - b.start)) {
+      const h = e.top - bottom - 9;
+      if (end !== null && end >= from && e.start - end >= FREE_MIN && h >= 22) out.push({from: end, to: e.start, top: bottom + 5, h});
+      end = Math.max(end ?? 0, e.end);
+      bottom = Math.max(bottom, e.top + e.h);
+    }
+    return out;
+  }
   // How a block is drawn for its height and width: 'nar' (a column too narrow for words: the kind's
-  // initial), 'xs' and 'sm' (one line, "Lunch · Chipotle · 4–5 PM"), 'md' (the title and the time
+  // icon), 'xs' and 'sm' (one line, "Lunch · Chipotle · 4–5 PM"), 'md' (the title and the time
   // on one line, items under it, where the line is wide enough) or '' (the title, the time under
   // it, then items).
   const blockForm = (h, w) => w < NARROW_COL_PX ? 'nar' : h < 26 ? 'xs' : h < 40 ? 'sm' : h < 64 && w >= 160 ? 'md' : '';
-  // Whether a one-line block has room for its time after the start of its title (about 6 px a
-  // character): where it has not, the line is all title, and the time is in the details.
-  // extra: the room something else on the line takes (the kind's name or initial).
-  const timeFits = (w, title, time, badge, extra = 0) => w - 16 - (badge ? 26 : 0) - extra - (time.length * 6 + 10) >= Math.min(title.length * 6.6, 60);
-  // The room the kind's name takes as a tag on a block's line ("DEEP WORK"), and its initial as a
-  // badge before the title where the name does not fit.
-  const tagPx = name => name.length * 7.5 + 8;
-  const BADGE_PX = 24;
+  // Whether a block's line has room for its whole title and its time after it (about 6.6 px a
+  // character of the title, 6 of the time). extra: what else the line holds, the kind's icon and
+  // the chip at its end.
+  const timeFits = (w, title, time, extra = 0) => w - 16 - extra - (time.length * 6 + 10) >= title.length * 6.6;
+  // The room the kind's icon takes at the start of a block's line (in its bubble, or alone), and a
+  // chip at its end: [its class, its words], or none.
+  const iconPx = w => w > ROOMY_PX ? 27 : 17;
+  const chipPx = chip => chip ? chip[1].length * 6 + (chip[0] === 'pb-n' ? 20 : 28) : 0;
   // How many of a block's n items fit, and whether "+N more" goes after the time (where a line of
   // its own would cost an item, or does not fit). The one-line forms show none.
   function itemsFit(h, form, n){
@@ -664,8 +683,8 @@
   // ---- drawing ----
   const root = $('#planner');
   if (!root) return;
-  // ---- style-b (markup only): the header is the date as a heading, the buttons with an icon each,
-  // then the week as a strip of day chips between the day arrows. Icons are inline SVG in currentColor.
+  // The header: the date as a heading, the buttons with an icon each, then the week as a strip of
+  // day chips between the day arrows. Icons are inline SVG in currentColor.
   const svg = d => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="${d}"/></svg>`;
   const ICON = {prev: svg('M10 3.5 5.5 8l4.5 4.5'), next: svg('M6 3.5 10.5 8 6 12.5'), plus: svg('M8 3.2v9.6M3.2 8h9.6'),
     today: svg('M4.5 3.5h7a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM2.5 7h11M5.5 2v3M10.5 2v3'),
@@ -679,7 +698,7 @@
       </div>
       <div class="ph-nav">
         <button type="button" class="ph-step" data-pstep="-1" aria-label="Previous day" title="Previous day ([)">${ICON.prev}</button>
-        <div class="ph-week" id="planDays" role="group" aria-label="The week of this day"></div>
+        <div class="ph-week" id="planDays" role="group" aria-label="The week of this day">${WD_NAME.map(n => `<button type="button" class="pday"><span>${n.slice(0, 3)}</span><b></b></button>`).join('')}</div>
         <button type="button" class="ph-step" data-pstep="1" aria-label="Next day" title="Next day (])">${ICON.next}</button>
       </div>
     </div>
@@ -694,21 +713,42 @@
   const els = {date: $('#planDate'), today: $('#planToday'), week: $('#planWeek'), add: $('#planAdd'), strip: $('#planStrip'),
     scroll: $('#planScroll'), msg: $('#planMsg'), time: $('#planTime'), hours: $('#planHours'), grid: $('#planGrid'), days: $('#planDays')};
   const grid = els.grid;
-  // ---- style-b (markup only): the week strip, Sunday to Saturday around the day on show. A chip is
-  // a button to that day (.on: the day on show, .today), read out as its full date.
+  // The week strip, Sunday to Saturday around the day on show: seven buttons that stay, only their
+  // date and state changing (.on: the day on show, .today), so one that has the focus keeps it.
+  // Each shows its day through data-pday (the planner's click handler) and is read out as its full
+  // date. They are one stop for Tab, on the day on show (aria-current); the arrow keys, Home and
+  // End move the focus between them.
+  const dayPills = [...els.days.children];
   const drawWeek = () => {
     const sun = addDays(shown, -fromIso(shown).getDay());
-    els.days.innerHTML = WD.map((_, i) => {
+    dayPills.forEach((b, i) => {
       const d = addDays(sun, i), on = d === shown, today = isToday(d);
-      return `<button type="button" class="pday${on ? ' on' : ''}${today ? ' today' : ''}" data-pday="${d}" aria-pressed="${on}" aria-label="${esc(longDate(d))}${today ? ', today' : ''}"><span>${WD_NAME[i].slice(0, 3)}</span><b>${fromIso(d).getDate()}</b></button>`;
-    }).join('');
+      b.className = 'pday' + (on ? ' on' : '') + (today ? ' today' : '');
+      b.dataset.pday = d;
+      b.tabIndex = on ? 0 : -1;
+      b.setAttribute('aria-label', longDate(d) + (today ? ', today' : ''));
+      if (on) b.setAttribute('aria-current', 'date'); else b.removeAttribute('aria-current');
+      b.lastChild.textContent = fromIso(d).getDate();
+    });
   };
-  // ---- end style-b ----
-  const drawDate = () => { els.date.innerHTML = `<span class="long">${esc(longDate(shown))}</span><span class="short">${esc(shortDate(shown))}</span>`; drawWeek(); };
+  els.days.addEventListener('keydown', e => {
+    const i = dayPills.indexOf(e.target), to = {ArrowLeft: i - 1, ArrowRight: i + 1, Home: 0, End: 6}[e.key];
+    if (i < 0 || to == null || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    e.preventDefault();
+    dayPills[Math.max(0, Math.min(6, to))].focus();
+  });
+  // The date in three lengths, for the room the header has (the page's CSS shows one): "Thursday,
+  // November 12", "Thu, Nov 12", and "Nov 12" for a phone on another day than today, where Today
+  // joins the buttons (the strip under it says the weekday).
+  const drawDate = () => {
+    const tiny = fromIso(shown).toLocaleDateString([], {month: 'short', day: 'numeric'});
+    els.date.innerHTML = `<span class="long">${esc(longDate(shown))}</span><span class="short">${esc(shortDate(shown))}</span><span class="tiny">${esc(tiny)}</span>`;
+    drawWeek();
+  };
   drawDate();
 
   // The focused control, found again once the planner is drawn anew.
-  const FOCUS_KEYS = ['data-open-ref', 'data-pitem', 'data-plan-due', 'data-pedit', 'data-pmeal-on', 'data-prepeat-on', 'data-plan-retry', 'data-pday', 'id'];
+  const FOCUS_KEYS = ['data-open-ref', 'data-pitem', 'data-plan-due', 'data-pedit', 'data-pmeal-on', 'data-prepeat-on', 'data-plan-retry', 'id'];
   function focusKey(){
     const el = document.activeElement;
     if (!el || !root.contains(el)) return null;
@@ -731,61 +771,58 @@
 
   // A block where place() put it, in a grid gridW pixels wide. Every block is drawn and readable
   // (blockForm): tall ones show their title, time and as many items as fit; short ones one line;
-  // a narrow column only the kind's initial and colour, its name in the button's label.
+  // a narrow column only the kind's icon and colour, its name in the button's label.
   function blockHtml(e, gridW){
     const {top, h} = e, w = gridW / e.cols - 4;
     let form = blockForm(h, w);
     const meal = e.kind === 'meal';
     const title = meal ? `${esc(e.title)} · ${e.place ? esc(e.place) : '<i>set a place</i>'}` : esc(e.title);
     const plain = meal ? `${e.title} · ${e.place || 'set a place'}` : e.title;
-    // The kind's name is written, so colour is never the only cue: a meal's is its title, and so is
-    // a block's titled with it. Any other block shows the name as a tag on its line where there is
-    // room for it beside the title (and the time, on one line), else the kind's initial as a badge
-    // before the title. The preview on hover or focus and the label say it in full.
-    const kindName = !meal && e.title !== KIND_NAME[e.kind] ? KIND_NAME[e.kind] : '';
     const items = e.items;
-    let {fit, inline} = itemsFit(h, form, items.length), kindAt = kindName ? 'badge' : '';
-    if (form === 'md') {
-      // Title and time share a line where both fit (the title cut first); else the time goes on a
-      // line of its own, as on a taller block.
-      const long = range(e.start, e.end) + (inline ? ` · +${items.length - fit} more` : '');
-      if (kindName && timeFits(w, plain, long, 0, tagPx(kindName))) kindAt = 'tag';
-      else if (!timeFits(w, plain, long, 0, kindName ? BADGE_PX : 0)) {
-        form = '';
-        ({fit, inline} = itemsFit(h, form, items.length));
-      }
+    let {fit, inline} = itemsFit(h, form, items.length);
+    // Title and time share a line (md) only where both fit whole after the icon (and before the
+    // "+N" of a block too narrow for the chip); else the time goes on a line of its own, as on a
+    // taller block.
+    if (form === 'md' && !timeFits(w, plain, range(e.start, e.end), iconPx(w) + (w > ROOMY_PX || !inline ? 0 : chipPx(['pb-n', '+' + (items.length - fit)])))) {
+      form = '';
+      ({fit, inline} = itemsFit(h, form, items.length));
     }
-    if (form === '' && kindName && w >= 170) kindAt = 'tag';
     const rest = items.length - fit;
-    const badge = kindAt === 'badge' && form !== 'nar' ? `<span class="pb-ki">${INITIAL[e.kind]}</span>` : '';
-    let tag = kindAt === 'tag' ? `<span class="pb-kind">${KIND_NAME[e.kind]}</span>` : '';
-    let body, list = '', more = '';
-    if (form === 'nar') {
-      body = `<span class="pb-ini">${INITIAL[e.kind]}</span>`;
-    } else if (form === 'xs' || form === 'sm') {
-      // One line, cut with an ellipsis: "Lunch · Chipotle · 4–5 PM", and "+N" for its items. The
-      // title gives way to the time, which shows only where it fits whole.
-      const short = shortRange(e.start, e.end);
-      const withTag = kindName && timeFits(w, plain, short, rest, tagPx(kindName));
-      tag = withTag ? `<span class="pb-kind">${KIND_NAME[e.kind]}</span>` : '';
-      const time = withTag || timeFits(w, plain, short, rest, kindName ? BADGE_PX : 0) ? `<span class="pb-time" data-short="1">· ${esc(short)}</span>` : '';
-      body = `<div class="pb-head">${withTag ? '' : badge}<span class="pb-title">${title}</span>${time}${tag}${rest ? `<span class="pb-n">+${rest}</span>` : ''}</div>`;
-    } else {
-      // As many items as fit under the title and the time, then "+2 more" on a line of its own, or
-      // after the time when that line would cost an item.
-      const after = inline ? ` · +${rest} more` : '';
-      const time = `<span class="pb-time">${esc(range(e.start, e.end))}${after}</span>`;
-      body = form === 'md' ? `<div class="pb-head">${badge}<span class="pb-title">${title}</span>${time}${tag}</div>`
-        : `<div class="pb-head">${badge}<span class="pb-title">${title}</span>${tag}</div>${time}`;
+    // The kind is never told by colour alone (docs/planner.md, "the kind's name"): every block has
+    // its kind's icon (the page's CSS draws it), and its label, its preview and its details say the
+    // name. The name is also written on the bar, as the chip at the end of its head, where the
+    // block has room for a chip, the title does not already say it (a meal's does, and so does a
+    // block titled with it) and no count of items has the chip; never the plain "Block", which says
+    // nothing of a block that has a title.
+    // One chip, then, at the end of the head: how many items are done, else the kind's name; a
+    // block too narrow for that says "+N" for the items it does not show. A title is never cut to
+    // make room: the time is left out where it would not fit with the title and the chip (it shows
+    // while the block is dragged), and the page's CSS drops the chip, then the time, before a title.
+    const roomy = w > ROOMY_PX;
+    const kindName = !meal && e.kind !== 'other' && e.title !== KIND_NAME[e.kind] ? KIND_NAME[e.kind] : '';
+    const says = !roomy ? null : items.length && form !== 'xs' ? ['pb-st', `${items.filter(it => it.done || listDone(it)).length} of ${items.length} done`]
+      : kindName && !items.length ? ['pb-kind', kindName] : null;
+    const more = n => says || (n > 0 ? ['pb-n', '+' + n] : null);
+    const chipHtml = chip => chip ? `<span class="${chip[0]}">${chip[1]}</span>` : '';
+    let body = '', list = '', under = '';
+    if (form === 'xs' || form === 'sm') {
+      // One line: "Lunch · Chipotle · 4–5 PM", then the chip, or "+N" for its items.
+      const short = shortRange(e.start, e.end), chip = more(rest);
+      const tight = timeFits(w, plain, '· ' + short, iconPx(w) + chipPx(chip)) ? '' : ' data-tight="1"';
+      body = `<div class="pb-head"><span class="pb-title">${title}</span><span class="pb-time" data-short="1"${tight}>· ${esc(short)}</span>${chipHtml(chip)}</div>`;
+    } else if (form !== 'nar') {
+      // As many items as fit under the title and the time, then "+2 more" on a line of its own; where
+      // that line would cost an item, the chip's count stands for it, or "+2" after the time.
+      // The time in full, or in its compact form ("4–5:30 PM") on a block too narrow for that.
+      const full = range(e.start, e.end), compact = form === '' && !timeFits(w, '', full, iconPx(w));
+      const time = compact ? `<span class="pb-time" data-short="2">${esc(shortRange(e.start, e.end))}</span>` : `<span class="pb-time">${esc(full)}</span>`;
+      const chip = inline ? more(rest) : says;
+      body = form === 'md' ? `<div class="pb-head"><span class="pb-title">${title}</span>${time}${chipHtml(chip)}</div>`
+        : `<div class="pb-head"><span class="pb-title">${title}</span>${chipHtml(says)}</div><div class="pb-sub">${time}${says ? '' : chipHtml(chip)}</div>`;
       list = items.slice(0, fit).map(it => `<li><label class="pb-item${it.done ? ' done' : ''}"><input type="checkbox" data-pitem="${esc(it.id)}"${it.done ? ' checked' : ''}><span>${esc(it.text)}</span>${!it.done && listDone(it) ? '<small>done</small>' : ''}</label></li>`).join('');
       list = list ? `<ul class="pb-items">${list}</ul>` : '';
-      if (rest > 0 && !after) more = `<div class="pb-more" aria-hidden="true">+${rest} more</div>`;
+      if (rest > 0 && !inline) under = `<div class="pb-more" aria-hidden="true">+${rest} more</div>`;
     }
-    // ---- style-b (markup only): a chip at the end of the block's head saying how many of its items
-    // are done. The head is the first <div> of the body and holds only spans.
-    if (items.length && form !== 'nar' && form !== 'xs')
-      body = body.replace('</div>', `<span class="pb-st">${items.filter(it => it.done || listDone(it)).length} of ${items.length} done</span></div>`);
-    // ---- end style-b ----
     const left = e.col / e.cols * 100, width = 100 / e.cols;
     const cls = ['pblock', 'k-' + e.kind, form, e.cutTop && 'cut-top', e.cutBottom && 'cut-bottom', det?.ref === e.ref && 'shown'].filter(Boolean).join(' ');
     // Where words are cut short, the whole of them is in the preview shown while the pointer rests on
@@ -793,7 +830,7 @@
     // would say it twice.
     return `<div class="${cls}" role="listitem" data-ref="${esc(e.ref)}" data-tip="${esc('b:' + e.ref)}" style="top:${top}px;height:${h}px;left:calc((100% - var(--lane, 0px)) * ${left / 100} + 2px);width:calc((100% - var(--lane, 0px)) * ${width / 100} - 4px)">`
       + `<button type="button" class="pb-open" data-open-ref="${esc(e.ref)}" aria-label="${esc(spoken(e))}"></button>`
-      + `<div class="pb-body" aria-hidden="true">${body}</div>${list}${more}`
+      + `<div class="pb-body" aria-hidden="true">${body}</div>${list}${under}`
       + '<span class="pb-rs top" data-edge="top" aria-hidden="true"></span><span class="pb-rs bottom" data-edge="bottom" aria-hidden="true"></span></div>';
   }
   function dueLabel(a, m){
@@ -831,19 +868,23 @@
   function placeNow(){
     const line = grid.querySelector('.pnow'), s = settings(), m = minutesNow();
     const on = isToday(shown) && m >= s.day_start * 60 && m <= s.day_end * 60;
-    // ---- style-b (markup only): where today's hatching of the hours gone by ends (--now), the
-    // blocks that are on now (.now shows a "Now" chip), and the hour label the now line's pill
-    // would half cover (.near-now hides it).
+    // For the page's CSS: where today's hatching of the hours gone by ends (--now); the blocks that
+    // are on now (.now shows a "Now" chip); the hour label the now line's pill sits on (data-now
+    // "at": it gives way) or would touch ("above" or "below" the line: it steps aside); and a free
+    // stretch that has begun, whose card goes (only time still to come has one).
     if (on) grid.style.setProperty('--now', nowTop() + 'px'); else grid.style.removeProperty('--now');
     const live = new Set(on ? entriesOn(shown).filter(e => !e.off && !e.skip && e.start <= m && m < e.end).map(e => e.ref) : []);
     for (const b of grid.querySelectorAll('.pblock[data-ref]')) b.classList.toggle('now', live.has(b.dataset.ref));
-    for (const h of els.hours.children) h.classList.toggle('near-now', on && Math.abs(parseFloat(h.style.top) - nowTop()) < 15);
-    // ---- end style-b ----
+    for (const h of els.hours.children) {
+      const d = on ? parseFloat(h.style.top) - nowTop() : Infinity;
+      h.dataset.now = Math.abs(d) < NOW_HIDE_PX ? 'at' : Math.abs(d) < NOW_CLEAR_PX ? d < 0 ? 'above' : 'below' : '';
+    }
+    for (const f of grid.querySelectorAll('.pfree')) f.hidden = isToday(shown) && +f.dataset.from < m;
     if (!on) return line?.remove();
     const el = line || grid.appendChild(Object.assign(document.createElement('div'), {className: 'pnow'}));
     el.setAttribute('aria-hidden', 'true');
     el.style.top = nowTop() + 'px';
-    el.dataset.now = clock(m, false);   // style-b: the time on the now line's pill
+    el.dataset.now = clock(m, false);   // the time on the now line's pill
   }
 
   let scrolledFor = null;        // the date the timeline was last scrolled for
@@ -930,7 +971,7 @@
     grid.style.setProperty('--hour', hourPx + 'px');
     grid.classList.toggle('dense', hourPx < DENSE_HOUR_PX);
     els.hours.innerHTML = Array.from({length: s.day_end - s.day_start + 1}, (_, i) => i).filter(i => (s.day_start + i) % step === 0)
-      .map(i => `<span class="phour" style="top:${i * hourPx}px">${hourLabel(s.day_start + i)}</span>`).join('');
+      .map(i => `<span class="phour" style="top:${i * hourPx}px">${hourMark(s.day_start + i)}</span>`).join('');
     grid.setAttribute('aria-label', 'Plan for ' + longDate(shown));
     grid.classList.toggle('loading', locked());
 
@@ -941,6 +982,9 @@
     place(inView, lo, hi, hourPx);
     const gridW = (grid.clientWidth || 400) - lane;
     const parts = inView.map(e => ({t: e.start, html: blockHtml(e, gridW)}));
+    // A free stretch still to come gets a card that says how long it is: decoration, no more.
+    for (const g of freeGaps(inView, isToday(shown) ? minutesNow() : -Infinity))
+      parts.push({t: g.from, html: `<div class="pfree" aria-hidden="true" data-from="${g.from}" style="top:${g.top}px;height:${g.h}px"><span>${esc(duration(g.to - g.from))} free</span></div>`});
     // Flags at the same time stack instead of covering each other: downwards, and upwards from the
     // end of the day where that would run past it (most things are due at 11:59 PM).
     let prev = -Infinity;
@@ -1106,10 +1150,12 @@
     const y = v => (v - lo) / 60 * hourPx, H = (hi - lo) / 60 * hourPx;
     const h = Math.max(MIN_BLOCK_PX, y(d.end) - y(d.start) - 2);
     d.el.classList.add('dragging');
+    d.el.classList.toggle('moving', d.mode === 'move');   // a move tilts the bar; a resize keeps it square
     d.el.style.top = Math.max(0, Math.min(y(d.start), H - h)) + 'px';
     d.el.style.height = h + 'px';
     const time = d.el.querySelector('.pb-time');
-    if (time) time.textContent = time.dataset.short ? '· ' + shortRange(d.start, d.end) : range(d.start, d.end);
+    // As the block writes it: compact after its title on one line ("· 4–5 PM"), compact on a narrow block, or in full.
+    if (time) time.textContent = time.dataset.short ? (time.dataset.short === '1' ? '· ' : '') + shortRange(d.start, d.end) : range(d.start, d.end);
   }
   // Near the top or bottom edge, the timeline scrolls under the drag.
   function edgeScroll(clientY){
@@ -1128,7 +1174,7 @@
     if (!drag) return;
     drag.armed = true;
     try { grid.setPointerCapture(drag.id); } catch {}
-    if (drag.el) drag.el.classList.add('armed');
+    if (drag.el) { drag.el.classList.add('armed'); drag.el.classList.toggle('moving', drag.mode === 'move'); }
     else { drag.lastY = drag.y; drag.moved = true; update(); }
   }
   // Ends a drag. cancelled: put everything back as it was (Esc, or the browser took the pointer).
@@ -1140,6 +1186,7 @@
     try { if (grid.hasPointerCapture(d.id)) grid.releasePointerCapture(d.id); } catch {}
     hideGhost();
     drag = null;
+    d.el?.classList.remove('armed', 'dragging', 'moving');   // set down (a block only pressed is not drawn anew)
     if (cancelled) render();
   }
   grid.addEventListener('pointerdown', e => {
@@ -1280,7 +1327,7 @@
     const step = t.closest('[data-pstep]');
     if (step) return setDate(addDays(shown, +step.dataset.pstep));
     if (t.closest('#planToday')) { scrolledFor = null; return setDate(todayIso()); }
-    const day = t.closest('[data-pday]');   // style-b: a chip of the week strip shows its day
+    const day = t.closest('[data-pday]');   // a chip of the week strip shows its day
     if (day) { scrolledFor = null; return setDate(day.dataset.pday); }
     if (t.closest('#planWeek')) return afterCopy(openWeek);
     if (t.closest('#planAdd')) return afterCopy(newBlockAt);

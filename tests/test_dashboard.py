@@ -261,13 +261,17 @@ class PlannerPageTest(unittest.TestCase):
 
     def test_every_block_stays_visible_and_readable(self):
         # Short blocks are one line ("Lunch · Chipotle · 4–5 PM"), a narrow column shows the kind's
-        # initial with its name in the label, and a block cut by the hours shown is marked so.
-        self.assertIn("const INITIAL = {meal: 'M', deep: 'D', social: 'S', other: 'B'};", PLANNER)
-        self.assertIn("body = `<span class=\"pb-ini\">${INITIAL[e.kind]}</span>`;", PLANNER)
+        # icon with its name in the label, and a block cut by the hours shown is marked so.
         self.assertIn('aria-label="${esc(spoken(e))}"></button>', PLANNER)
         self.assertIn("e.cutTop && 'cut-top', e.cutBottom && 'cut-bottom'", PLANNER)
         self.assertIn(".pblock.cut-top{border-top:2px dashed var(--pb-edge)", HTML)
-        self.assertIn('<span class="pb-n">+${rest}</span>', PLANNER)
+        # Items a block does not show are counted: "+N" in a chip of its own.
+        self.assertRegex(PLANNER, r"\['pb-n', '\+' \+ n\]")
+        # The kind's letter is gone from the bars (2026-11-11): every block has its kind's icon, drawn
+        # by the page's CSS, alone in the middle of a column too narrow for words.
+        self.assertNotRegex(PLANNER + HTML, r"\bINITIAL\b|\bpb-ini\b|\bpb-ki\b")
+        self.assertRegex(HTML, r"\.pblock\.nar::after\{left:50%;top:50%;[^}]*mask-size:12px 12px\}")
+        self.assertRegex(HTML, r"\.pblock::after\{background:currentColor;-webkit-mask:var\(--pb-icon\)")
         # Hour labels thin out under 30 px an hour.
         self.assertIn(".filter(i => (s.day_start + i) % step === 0)", PLANNER)
         # Flags keep a lane of their own, so none covers a block; the name shows on hover or focus.
@@ -333,10 +337,16 @@ class PlannerPageTest(unittest.TestCase):
         # The card beside a block closes when focus leaves it, and the page's keys ignore it.
         self.assertIn("if (det && !card.matches(':modal') && !card.contains(e.target)) closeDetails(false);", PLANNER)
         self.assertIn("const dialogOpen = () => [...document.querySelectorAll('dialog[open]')].some(d => d.matches(':modal'));", JS)
-        # One-line blocks write the kind (a tag, else its initial), and the title gives way to the time.
-        self.assertIn('<span class="pb-ki">${INITIAL[e.kind]}</span>', PLANNER)
-        self.assertIn(".pb-head .pb-title{flex:0 1000 auto;min-width:2.5em}", HTML)
-        self.assertIn(".pb-head .pb-time{flex:0 1 auto;min-width:0}", HTML)
+        # Changed 2026-11-11: a title is no longer cut to make room. The head is one line that wraps
+        # and shows its first line only, so the chip goes first, then the time, then the title is cut;
+        # in a drag, where the time is what is watched, the title gives way to it as before.
+        head = re.search(r"^\.pb-head\{[^}]*\}", HTML, re.M).group(0)
+        for part in ("flex-wrap:wrap", "overflow:hidden", "height:1lh"):
+            self.assertIn(part, head)
+        self.assertRegex(HTML, r"(?m)^\.pb-head \.pb-title\{flex:0 1 auto\}")
+        self.assertRegex(HTML, r"(?m)^\.pb-head \.pb-time\{flex:none\}")
+        self.assertRegex(HTML, r"(?m)^\.pblock\.dragging \.pb-head\{flex-wrap:nowrap\}")
+        self.assertRegex(HTML, r"(?m)^\.pblock\.dragging \.pb-head \.pb-title\{flex-shrink:\d{4,};min-width:2\.5em\}")
         # Dark: the card's overdue status and links keep 4.5:1 on the page's surface.
         self.assertIn(':root:is([data-theme="dark"],[data-theme="red"]) dialog.pdetail{background:var(--surface)}', HTML)
         # A meal's place set for one day says so.
@@ -372,17 +382,32 @@ class PlannerPageTest(unittest.TestCase):
         # The block that is on now says so, each minute.
         self.assertIn("for (const b of grid.querySelectorAll('.pblock[data-ref]')) b.classList.toggle('now', live.has(b.dataset.ref));", PLANNER)
         self.assertIn('.pblock.now .pb-head::after{content:"\\2022\\00a0Now";margin-left:auto}', HTML)
-        # The hour label under the now line's pill gives way to it.
-        self.assertIn("h.classList.toggle('near-now', on && Math.abs(parseFloat(h.style.top) - nowTop()) < 15);", PLANNER)
-        self.assertIn(".phour.near-now{visibility:hidden}", HTML)
+        # The hour label the now line's pill sits on gives way to it; one it would only touch steps
+        # aside (planner.js says which, each minute; the page's CSS does it).
+        self.assertRegex(PLANNER, r"const NOW_HIDE_PX = 9;")
+        self.assertRegex(PLANNER, r"const NOW_CLEAR_PX = 16;")
+        self.assertRegex(PLANNER, r"h\.dataset\.now = Math\.abs\(d\) < NOW_HIDE_PX \? 'at' : Math\.abs\(d\) < NOW_CLEAR_PX \? d < 0 \? 'above' : 'below' : '';")
+        self.assertRegex(HTML, r'\.phour\[data-now="at"\][^{]*\{visibility:hidden\}')
+        self.assertRegex(HTML, r'\.phour\[data-now="above"\]\{--dy:-\d+px\}\.phour\[data-now="below"\]\{--dy:\d+px\}')
+        self.assertNotIn("near-now", PLANNER + HTML)
 
     def test_the_week_strip_shows_and_picks_a_day(self):
-        self.assertIn('<div class="ph-week" id="planDays" role="group" aria-label="The week of this day"></div>', PLANNER)
-        self.assertIn("const sun = addDays(shown, -fromIso(shown).getDay());", PLANNER)
-        self.assertIn('data-pday="${d}" aria-pressed="${on}"', PLANNER)
-        self.assertIn("if (day) { scrolledFor = null; return setDate(day.dataset.pday); }", PLANNER)
-        # A chip keeps the focus when the planner is drawn anew, and today is marked by more than colour.
-        self.assertIn("'data-pday', 'id'];", PLANNER)
+        # Seven buttons, made once and kept: only their date and state change, so one that has the
+        # focus keeps it with nothing found again after a redraw.
+        self.assertRegex(PLANNER, r'<div class="ph-week" id="planDays" role="group" aria-label="The week of this day">\$\{WD_NAME\.map\(n => `<button type="button" class="pday">')
+        self.assertRegex(PLANNER, r"const dayPills = \[\.\.\.els\.days\.children\];")
+        self.assertNotRegex(PLANNER, r"els\.days\.innerHTML")
+        self.assertRegex(PLANNER, r"const sun = addDays\(shown, -fromIso\(shown\)\.getDay\(\)\);")
+        self.assertRegex(PLANNER, r"b\.dataset\.pday = d;")
+        # A click on one shows its day, through the planner's one click handler.
+        self.assertRegex(PLANNER, r"const day = t\.closest\('\[data-pday\]'\);")
+        self.assertRegex(PLANNER, r"if \(day\) \{ scrolledFor = null; return setDate\(day\.dataset\.pday\); \}")
+        # One stop for Tab, on the day on show, which is the current date for a screen reader; each is
+        # read as its full date, today said so; today is marked by more than colour.
+        self.assertRegex(PLANNER, r"b\.tabIndex = on \? 0 : -1;")
+        self.assertRegex(PLANNER, r"if \(on\) b\.setAttribute\('aria-current', 'date'\); else b\.removeAttribute\('aria-current'\);")
+        self.assertRegex(PLANNER, r"b\.setAttribute\('aria-label', longDate\(d\) \+ \(today \? ', today' : ''\)\);")
+        self.assertNotIn("aria-pressed", PLANNER[PLANNER.index("const dayPills"):PLANNER.index("const FOCUS_KEYS")])
         self.assertIn('.pday.today::after{content:"";', HTML)
         # The same controls as before, each still a button with its name.
         for control in ('data-pstep="-1" aria-label="Previous day"', 'data-pstep="1" aria-label="Next day"', 'id="planToday"',
@@ -717,6 +742,9 @@ console.log(JSON.stringify({{
         cls.out = run_node(script)
         # The pure layout functions (the whole day in view): the hour's height, labels, where each
         # block is drawn and in which form, and the compact times.
+        # Four blocks with 90, 120 and 120 minutes free between them.
+        spaced = [{"ref": "a", "start": 540, "end": 630}, {"ref": "b", "start": 720, "end": 780},
+                  {"ref": "c", "start": 900, "end": 960}, {"ref": "d", "start": 1080, "end": 1140}]
         busy = [{"ref": "early", "start": 240, "end": 360}, {"ref": "deep", "start": 540, "end": 660},
                 {"ref": "pset", "start": 600, "end": 750}, {"ref": "call", "start": 780, "end": 795},
                 {"ref": "next", "start": 795, "end": 855}, {"ref": "late", "start": 1380, "end": 1440},
@@ -732,8 +760,15 @@ console.log(JSON.stringify({{
   fits: [itemsFit(20, 'xs', 3), itemsFit(50, 'md', 3), itemsFit(53, '', 1), itemsFit(100, '', 2), itemsFit(100, '', 5), itemsFit(150, '', 1)],
   short: [shortRange(960, 1020), shortRange(990, 1050), shortRange(660, 720), shortRange(1380, 1440), shortRange(780, 795), shortRange(0, 60)],
   lengths: [duration(15), duration(60), duration(90), duration(150), duration(1440)],
-  timeFits: [timeFits(300, 'Lunch · Chipotle', '4–5 PM', 0), timeFits(86, 'Study group', '4:30–5:30 PM', 1), timeFits(148, 'Lunch · Chipotle', '4–5 PM', 1),
-             timeFits(148, 'Lunch · Chipotle', '4–5 PM', 1, tagPx('Deep work')), timeFits(300, 'Study group', '4–5 PM', 0, tagPx('Socialize'))],
+  timeFits: [timeFits(300, 'Lunch · Chipotle', '· 4–5 PM', iconPx(300)), timeFits(197, 'Coffee with Sam', '· 4:30–5:30 PM', iconPx(197)),
+             timeFits(197, 'Gym', '4:00–5:30 PM', iconPx(197)), timeFits(197, 'Laundry and pack', '· 10:30–11:30 PM', iconPx(197) + chipPx(['pb-n', '+2'])),
+             timeFits(87, '', '4:00–5:30 PM', iconPx(87)), timeFits(400, 'Review notes', '8:30–10:15 AM', iconPx(400))],
+  room: [iconPx(275), iconPx(276), chipPx(null), chipPx(['pb-n', '+2']), chipPx(['pb-st', '1 of 3 done'])],
+  free36: freeGaps(place({json.dumps(spaced)}, 300, 1440, 36)),
+  freeLater: freeGaps(place({json.dumps(spaced)}, 300, 1440, 36), 781),
+  free22: freeGaps(place({json.dumps(spaced)}, 300, 1440, 22)).map(g => [g.from, g.to, g.h >= 22]),
+  freeUnder: freeGaps(place({json.dumps(spaced + [{"ref": "long", "start": 540, "end": 1050}])}, 300, 1440, 36)),
+  freeShort: freeGaps(place([{{ref: 'a', start: 540, end: 600}}, {{ref: 'b', start: 689, end: 749}}], 300, 1440, 36)),
 }}));
 """
         cls.lay = run_node(layout_script)
@@ -814,8 +849,34 @@ console.log(JSON.stringify({{
         # The compact times, and the lengths the details show.
         self.assertEqual(self.lay["short"], ["4–5 PM", "4:30–5:30 PM", "11 AM–12 PM", "11 PM–12 AM", "1–1:15 PM", "12–1 AM"])
         self.assertEqual(self.lay["lengths"], ["15 min", "1 hr", "1 hr 30 min", "2 hr 30 min", "24 hr"])
-        # A one-line block too narrow for its time leaves it out rather than showing a sliver of it.
-        self.assertEqual(self.lay["timeFits"], [True, False, True, False, True])
+        # A line has its time only where the whole title, the icon and the chip leave it room: a
+        # title is never cut for it (2026-11-11). A narrow tall block writes its time in the compact form.
+        self.assertEqual(self.lay["timeFits"], [True, False, True, False, False, True])
+        # The icon's room (alone up to 275 px of block, in its bubble past that) and a chip's.
+        self.assertEqual(self.lay["room"], [17, 27, 0, 32, 94])
+
+    def test_a_free_stretch_between_two_blocks_gets_a_card(self):
+        # An hour and a half or more between two blocks: the card lies between them, 5 px under the
+        # one before and 4 px over the one after. Nothing before the first block or after the last.
+        self.assertIn("const FREE_MIN = 90;", PLANNER)
+        self.assertEqual(self.lay["free36"], [{"from": 630, "to": 720, "top": 201, "h": 47}, {"from": 780, "to": 900, "top": 291, "h": 65},
+                                              {"from": 960, "to": 1080, "top": 399, "h": 65}])
+        # Today, only time still to come: a stretch that began before now has none.
+        self.assertEqual([g["from"] for g in self.lay["freeLater"]], [960])
+        self.assertRegex(PLANNER, r"freeGaps\(inView, isToday\(shown\) \? minutesNow\(\) : -Infinity\)")
+        self.assertRegex(PLANNER, r"for \(const f of grid\.querySelectorAll\('\.pfree'\)\) f\.hidden = isToday\(shown\) && \+f\.dataset\.from < m;")
+        # At the least hour (22 px) a card still has room for its words; a block lying over a gap
+        # leaves none, and 89 minutes are not a stretch.
+        self.assertEqual(self.lay["free22"], [[630, 720, True], [780, 900, True], [960, 1080, True]])
+        self.assertEqual(self.lay["freeUnder"], [])
+        self.assertEqual(self.lay["freeShort"], [])
+        # Decoration only: no role, hidden from screen readers, and the pointer goes through it, so a
+        # click or a drag on free time still makes a block.
+        self.assertRegex(PLANNER, r'<div class="pfree" aria-hidden="true" data-from="\$\{g\.from\}"')
+        rule = re.search(r"^\.pfree\{[^}]*\}", HTML, re.M).group(0)
+        self.assertIn("pointer-events:none", rule)
+        self.assertIn("border:1.5px dashed var(--free-line)", rule)
+        self.assertNotIn(".pfree::", HTML)   # no arcs: nothing crosses its words
 
     def test_times_read_as_the_page_writes_them(self):
         self.assertEqual(self.out["times"], ["4:00–5:00 PM", "11:00 AM–12:00 PM", "11:00 PM–12:00 AM", "9:30 to 11:30 AM", "5 AM", "12 PM", "12 AM"])

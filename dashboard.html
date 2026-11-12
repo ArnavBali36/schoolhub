@@ -54,22 +54,31 @@
   /* Motion: short and eased, and off under prefers-reduced-motion. */
   --ease-out:cubic-bezier(.22,1,.36,1);--ease-sheet:cubic-bezier(.32,.72,0,1);--ease-spring:cubic-bezier(.34,1.56,.64,1);
   --dur-1:140ms;--dur-2:220ms;--dur-3:340ms;
-  /* Direction B, "soft cells, vivid bars" (2026-11-11). The planner is a tray (--tray) of soft cells
-     (--cell), today's hours gone by hatched; panes and rows sit on a soft two-sided shadow (--neu).
-     Each kind of block is a bar in a gradient (-a to -b) with its own ink (-ink, and -ink2 for its
-     second line), both at least 4.5:1 on both ends of the gradient under the sheen (--pb-gloss), and
-     an edge colour for its hairline, a cut end and the drag ghost. */
-  --tray:#eceff5;--cell:#ffffff;--cell-line:rgb(15 23 42 / .16);--hatch:rgb(15 23 42 / .075);--hatch-fill:rgb(15 23 42 / .028);
+  /* School's own look, "soft cells, vivid bars" (2026-11-11). None of it touches the tokens above,
+     which are QuantPrep's, so the bar and the Mac app's title strip stay the same in both apps.
+     The planner is a tray (--tray) of soft cells (--cell), the last hours gone by today hatched;
+     panes and rows sit on a soft two-sided shadow (--neu). Each kind of block is a bar in a gradient
+     (-a to -b) with its own ink (-ink, and -ink2 for its second line), both at least 4.5:1 on both
+     ends of the gradient under the sheen (--pb-gloss), and an edge colour for its hairline (drawn at
+     --pb-edge-mix over the bar, which keeps it 3:1 against the cell), a cut end and the drag ghost. */
+  --tray:#ecebf6;--cell:#ffffff;--cell-line:rgb(15 23 42 / .16);--hatch:rgb(15 23 42 / .07);--hatch-fill:rgb(15 23 42 / .014);
   --neu:-4px -4px 10px rgb(255 255 255 / .85),5px 8px 20px -6px rgb(24 39 75 / .13),0 1px 2px rgb(24 39 75 / .05);
   --neu-sm:-2px -2px 6px rgb(255 255 255 / .8),2px 4px 10px -3px rgb(24 39 75 / .1),0 1px 1.5px rgb(24 39 75 / .04);
-  --k-meal-a:#ffc670;--k-meal-b:#ff9d5c;--k-meal-ink:#3a1a00;--k-meal-ink2:#562a05;--k-meal-edge:#b85a00;
-  --k-deep-a:#5f3fdc;--k-deep-b:#4a2cc4;--k-deep-ink:#ffffff;--k-deep-ink2:#efeaff;--k-deep-edge:#cdc2ff;
-  --k-social-a:#5cdba5;--k-social-b:#2dbf83;--k-social-ink:#03301c;--k-social-ink2:#083c24;--k-social-edge:#0f7a4e;
-  --k-other-a:#d3e2ff;--k-other-b:#a9c4ff;--k-other-ink:#10255c;--k-other-ink2:#263d7c;--k-other-edge:#4a74dc;
+  --k-meal-a:#ffc670;--k-meal-b:#ff9d5c;--k-meal-ink:#3a1a00;--k-meal-ink2:#562a05;--k-meal-edge:#a84f00;
+  --k-deep-a:#5838d4;--k-deep-b:#4425ba;--k-deep-ink:#ffffff;--k-deep-ink2:#f1edff;--k-deep-edge:#a898f5;
+  --k-social-a:#5cdba5;--k-social-b:#2dbf83;--k-social-ink:#03301c;--k-social-ink2:#083c24;--k-social-edge:#0b6b43;
+  --k-other-a:#dde7ff;--k-other-b:#b7cbff;--k-other-ink:#10255c;--k-other-ink2:#263d7c;--k-other-edge:#3558c4;
   --k-panel:rgb(255 255 255 / .3);--k-deep-panel:rgb(24 10 96 / .26);
   --pb-gloss:linear-gradient(180deg,rgb(255 255 255 / .1),rgb(255 255 255 / 0) 26px);--pb-rim:rgb(255 255 255 / .4);
   --pb-bubble:rgb(255 255 255 / .24);--pb-bubble-rim:rgb(255 255 255 / .5);--pb-shade:rgb(24 39 75 / .12);--pb-lift:rgb(24 39 75 / .32);
   --pb-chip:#ffffff;--pb-chip-ink:#1b2130;--ink-pill:#14161c;--on-ink-pill:#ffffff;
+  /* The pale bar of a plain block keeps a bubble that shows on it; how much of the edge colour a
+     bar's hairline takes; and the dashed card over a free stretch of the day. */
+  --k-other-bubble:rgb(255 255 255 / .72);--k-other-bubble-rim:rgb(53 88 196 / .28);--pb-edge-mix:60%;--free-line:rgb(104 82 190 / .42);
+  /* School's canvas under the bar: soft washes of lilac, rose and sky on a layer of their own
+     (body::after), which never reaches behind the bar. Text straight on the canvas is --text or
+     --muted, which keep 4.5:1 where all three are at their strongest. */
+  --canvas-wash-1:rgb(139 108 240 / .2);--canvas-wash-2:rgb(236 132 178 / .15);--canvas-wash-3:rgb(104 176 236 / .13);
   /* Icons, as masks that take the colour of what they sit on: the kinds of block, and the stat tiles. */
   --ic-meal:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 3v18M4 3v5a3 3 0 0 0 6 0V3M17 21v-8h-3.5v-2c0-4 1.3-6.8 3.5-8z'/%3E%3C/svg%3E");--ic-deep:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 6.5C10 5.2 7.5 4.7 4 5v13c3.5-.3 6 .2 8 1.5 2-1.3 4.5-1.8 8-1.5V5c-3.5-.3-6 .2-8 1.5zM12 6.5v13'/%3E%3C/svg%3E");--ic-social:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3.5 19c.6-3 2.7-4.5 5.5-4.5s4.9 1.5 5.5 4.5M16 5.2a3 3 0 0 1 0 5.6M17.5 14.7c1.7.6 2.7 2 3 4.3'/%3E%3C/svg%3E");--ic-other:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7.5A2.5 2.5 0 0 1 7.5 5h9A2.5 2.5 0 0 1 19 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 5 16.5zM9 10h6M9 14h3.5'/%3E%3C/svg%3E");--ic-alert:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7.5v5.5M12 16.4v.1'/%3E%3C/svg%3E");--ic-clock:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7.5V12l3 2'/%3E%3C/svg%3E");--ic-cal:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 5 17.5zM5 9.5h14M9 2.5v3M15 2.5v3'/%3E%3C/svg%3E");--ic-file:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 3h7l4 4v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v4h4'/%3E%3C/svg%3E");
   color-scheme:light;
@@ -98,12 +107,21 @@
   --titlebar:#17181e;
   --course-1:#5b8ef7;--course-2:#f0706a;--course-3:#3fbf80;--course-4:#b18cf2;--course-5:#ec9440;
   --course-6:#2bb5cc;--course-7:#e874a8;--course-8:#c4bc2a;--course-9:#b9875a;--course-10:#d7a2d5;--course-personal:#8c93a0;
-  --tray:#0e1014;--cell:#1a1d24;--cell-line:rgb(255 255 255 / .13);--hatch:rgb(255 255 255 / .075);--hatch-fill:rgb(0 0 0 / .32);
+  /* School's look in dark: every token of it has a value here. The bars are deep, low fills of each
+     kind's hue with light ink (nothing glares on the dark tray), deep work the richest of them. */
+  --tray:#0e1014;--cell:#1a1d24;--cell-line:rgb(255 255 255 / .13);--hatch:rgb(255 255 255 / .06);--hatch-fill:rgb(0 0 0 / .2);
   --neu:-3px -3px 8px rgb(255 255 255 / .022),5px 8px 20px -6px rgb(0 0 0 / .6),0 1px 2px rgb(0 0 0 / .4);
   --neu-sm:-2px -2px 5px rgb(255 255 255 / .018),2px 4px 10px -3px rgb(0 0 0 / .5),0 1px 1.5px rgb(0 0 0 / .35);
-  --k-meal-a:#f7bb62;--k-meal-b:#f0905a;--k-social-a:#56d39e;--k-social-b:#28b47a;--k-other-a:#bdd0fb;--k-other-b:#93b2f6;
-  --pb-rim:rgb(255 255 255 / .3);--pb-shade:rgb(0 0 0 / .4);--pb-lift:rgb(0 0 0 / .7);
-  --ink-pill:#e8eaee;--on-ink-pill:#0b0d11;
+  --k-meal-a:#754418;--k-meal-b:#5f3211;--k-meal-ink:#ffe9cf;--k-meal-ink2:#ffd9ae;--k-meal-edge:#e79a55;
+  --k-deep-a:#563cd0;--k-deep-b:#452cb4;--k-deep-ink:#ffffff;--k-deep-ink2:#ece6ff;--k-deep-edge:#a99bff;
+  --k-social-a:#1c5c44;--k-social-b:#154a36;--k-social-ink:#d9f8e8;--k-social-ink2:#c4f1d9;--k-social-edge:#55c795;
+  --k-other-a:#33416b;--k-other-b:#2a365a;--k-other-ink:#e3eaff;--k-other-ink2:#c9d4f4;--k-other-edge:#8fa6e6;
+  --k-panel:rgb(0 0 0 / .2);--k-deep-panel:rgb(0 0 0 / .22);
+  --pb-gloss:linear-gradient(180deg,rgb(255 255 255 / .07),rgb(255 255 255 / 0) 26px);--pb-rim:rgb(255 255 255 / .14);
+  --pb-bubble:rgb(255 255 255 / .12);--pb-bubble-rim:rgb(255 255 255 / .24);--pb-shade:rgb(0 0 0 / .4);--pb-lift:rgb(0 0 0 / .7);
+  --pb-chip:#e6e9f1;--pb-chip-ink:#141821;--ink-pill:#e8eaee;--on-ink-pill:#0b0d11;
+  --k-other-bubble:rgb(255 255 255 / .12);--k-other-bubble-rim:rgb(255 255 255 / .24);--pb-edge-mix:50%;--free-line:rgb(169 155 255 / .4);
+  --canvas-wash-1:rgb(139 108 240 / .075);--canvas-wash-2:rgb(236 132 178 / .04);--canvas-wash-3:rgb(104 176 236 / .04);
   color-scheme:dark;
 }
 /* Night, from 9 PM to midnight (bar.js): every color a shade of red, with no blue in any of them,
@@ -138,7 +156,7 @@
   --course-6:#d42400;--course-7:#ff6400;--course-8:#e84a00;--course-9:#ffae00;--course-10:#c83c00;--course-personal:#c03800;
   /* Direction B in red: the bars are dark, each kind in its own shade from red to amber with its
      own bright ink, and the chip takes the place of white. Nothing here has blue. */
-  --tray:#0b0000;--cell:#170100;--cell-line:rgb(255 60 0 / .24);--hatch:rgb(255 60 0 / .17);--hatch-fill:rgb(0 0 0 / .4);
+  --tray:#0b0000;--cell:#170100;--cell-line:rgb(255 60 0 / .24);--hatch:rgb(255 60 0 / .07);--hatch-fill:rgb(0 0 0 / .22);
   --neu:0 1px 2px rgb(0 0 0 / .55),0 0 0 1px rgb(255 40 0 / .06);--neu-sm:0 1px 2px rgb(0 0 0 / .6);
   --k-meal-a:#3a1600;--k-meal-b:#2b0f00;--k-meal-ink:#ff8a00;--k-meal-ink2:#ff7400;--k-meal-edge:#ff7400;
   --k-deep-a:#4a0a00;--k-deep-b:#350600;--k-deep-ink:#ff5e00;--k-deep-ink2:#ff5200;--k-deep-edge:#ff5200;
@@ -147,6 +165,10 @@
   --k-panel:rgb(0 0 0 / .3);--k-deep-panel:rgb(0 0 0 / .3);
   --pb-gloss:none;--pb-rim:rgb(255 72 0 / .14);--pb-bubble:rgb(255 72 0 / .16);--pb-bubble-rim:rgb(255 72 0 / .32);--pb-shade:rgb(0 0 0 / .5);--pb-lift:rgb(0 0 0 / .75);
   --pb-chip:#ff5a00;--pb-chip-ink:#0b0000;--ink-pill:#ff4800;--on-ink-pill:#0b0000;
+  /* A bar's fill is close to its cell here, so its hairline is the whole edge colour (5:1 and more);
+     the canvas keeps a breath of red where the other themes have their washes. */
+  --k-other-bubble:rgb(255 72 0 / .16);--k-other-bubble-rim:rgb(255 72 0 / .32);--pb-edge-mix:100%;--free-line:rgb(255 72 0 / .4);
+  --canvas-wash-1:rgb(255 40 0 / .035);--canvas-wash-2:rgb(255 72 0 / .02);--canvas-wash-3:rgb(255 40 0 / .02);
   color-scheme:dark;
   scrollbar-color:var(--border-strong) var(--bg);
 }
@@ -187,6 +209,13 @@ body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--font-t
 /* A faint tint of the accent at the top of the page, on a fixed layer that never repaints on scroll. */
 body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
   background:radial-gradient(1100px 520px at 8% -8%,var(--wash-1),transparent 70%),radial-gradient(900px 480px at 100% -6%,var(--wash-2),transparent 70%)}
+/* School's own canvas, on a second fixed layer: washes of lilac at the left, rose at the right and
+   sky from below. The layer starts under the bar's resting place and fades in from there, so
+   nothing of it is ever behind the bar, which stays QuantPrep's to the pixel; the first 60 px under
+   the bar, where a narrow window keeps the last sync, get under a quarter of it. */
+body::after{content:"";position:fixed;left:0;right:0;top:calc(var(--bar-height) + 1px);bottom:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(72% 64% at 0% 24%,var(--canvas-wash-1),transparent 72%),radial-gradient(62% 58% at 100% 34%,var(--canvas-wash-2),transparent 72%),radial-gradient(76% 62% at 40% 108%,var(--canvas-wash-3),transparent 72%);
+  -webkit-mask:linear-gradient(transparent 8px,#000 240px);mask:linear-gradient(transparent 8px,#000 240px)}
 button,input,select,textarea{font:inherit;color:inherit}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline;text-underline-offset:2px}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -279,7 +308,7 @@ input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 
 /* The page column, QuantPrep's, with room at the bottom for the + button. */
 .page{display:block;max-width:calc(var(--content) + 2 * var(--gutter));margin:0 auto;padding:36px var(--gutter) 96px}
-.banner{background:var(--surface-2);color:var(--muted);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:18px;font-size:13.5px}
+.banner{background:var(--surface);color:var(--muted);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shine),var(--neu-sm);padding:11px 16px;margin-bottom:18px;font-size:13.5px}
 .banner a{font-weight:600}
 .errors{background:var(--warn-soft);color:var(--warn);border-radius:var(--radius-sm);padding:10px 14px;margin-bottom:18px;font-size:13.5px}
 .errors ul{margin:4px 0 0;padding-left:18px}
@@ -332,6 +361,8 @@ input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 .clist .n{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 .chead{display:flex;align-items:baseline;gap:14px;margin-bottom:14px;flex-wrap:wrap}
 .chead h2{margin:0;font:350 28px/1.2 var(--font-rounded);letter-spacing:-.022em}
+/* The canvas is tinted: a note in a colour of its own stands on its own soft ground there. */
+.chead .note.warn{padding:2px 10px;border-radius:999px;background:var(--warn-soft)}
 .sub{margin-top:28px}
 .mat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shine),var(--neu);padding:6px 20px;font-size:14px}
 details.mod{border-top:1px solid var(--border);padding:9px 0}details.mod:first-child{border-top:0}
@@ -339,10 +370,12 @@ details.mod summary{cursor:pointer;font-weight:560}
 details.mod ul{margin:6px 0 2px;padding-left:20px}details.mod li{margin:3px 0}
 
 /* The drawer and the task dialog. The drawer is a sheet of thick glass floating 10 px from the
-   window's edges; it slides in from the right. */
+   window's edges; it slides in from the right. It is read, and the planner's bars are vivid, so its
+   glass is nearly solid (the thick glass with most of --surface mixed in: 97% in light): what is
+   under it never shows as coloured smudges. Solid wherever the glass tokens are. */
 .scrim{position:fixed;inset:0;background:var(--scrim);z-index:9}
 aside{position:fixed;top:10px;right:10px;bottom:10px;width:min(580px,calc(100% - 20px));z-index:10;border:1px solid var(--glass-edge);border-radius:var(--radius-lg);overflow:auto;padding:22px 24px 60px;
-  background:var(--glass-thick);-webkit-backdrop-filter:var(--glass-blur-thick);backdrop-filter:var(--glass-blur-thick);box-shadow:var(--glass-rim),var(--shadow-lg);
+  background:color-mix(in srgb,var(--surface) 72%,var(--glass-thick));-webkit-backdrop-filter:var(--glass-blur-thick);backdrop-filter:var(--glass-blur-thick);box-shadow:var(--glass-rim),var(--shadow-lg);
   animation:sh-drawer-in var(--dur-3) var(--ease-sheet)}
 @keyframes sh-drawer-in{from{opacity:0;transform:translateX(24px)}}
 aside:focus{outline:none}
@@ -383,8 +416,10 @@ a.dl::after{content:"\2193";content:"\2193" / "";display:inline-block;margin-lef
 /* The toast: an inverted capsule of glass; solid in Night and wherever transparency is reduced.
    Centred at its own width (up to 680 px), so a long name wraps only past that; its corners stay a
    capsule's on one line and round off a box's when it wraps. */
-.toast{position:fixed;left:0;right:0;bottom:24px;width:max-content;max-width:min(680px,calc(100% - 32px));margin:0 auto;background:color-mix(in srgb,var(--text) 90%,transparent);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);color:var(--bg);border-radius:24px;padding:8px 8px 8px 18px;display:flex;gap:14px;align-items:center;z-index:20;box-shadow:var(--shadow-lg);font-size:13.5px;overflow:hidden}
-.toast button{flex:none;border:0;background:var(--bg);color:var(--text);font-weight:650;border-radius:999px;padding:5px 14px;cursor:pointer}
+.toast{position:fixed;left:0;right:0;bottom:24px;width:max-content;max-width:min(680px,calc(100% - 32px));margin:0 auto;background:color-mix(in srgb,var(--text) 90%,transparent);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);color:var(--bg);border-radius:24px;padding:7px 7px 7px 18px;display:flex;gap:14px;align-items:center;z-index:20;box-shadow:var(--shadow-lg);font-size:13.5px;line-height:1.4;overflow:hidden}
+/* Its button (Undo, Redo): a chip like the one on a bar, in the page's own ground. */
+.toast button{flex:none;min-height:30px;border:0;background:var(--bg);color:var(--text);box-shadow:0 1px 2px var(--pb-shade);font-size:13px;font-weight:650;border-radius:999px;padding:0 15px;cursor:pointer;transition:transform var(--dur-1) var(--ease-out)}
+.toast button:active{transform:scale(.96)}
 /* The focus ring in the page's own background, which stands out on the inverted toast. */
 .toast button:focus-visible{outline-color:var(--bg)}
 :root[data-theme="red"] .toast,:root.reduce-transparency .toast{background:var(--text);-webkit-backdrop-filter:none;backdrop-filter:none}
@@ -500,9 +535,18 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
    it scroll). Each kind of block is a gradient bar with its own ink, its icon in a bubble at the
    left and its name written on it or in the chip at the right. */
 .ph{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:6px 6px 0;padding:11px 11px 11px 15px;border-radius:calc(var(--radius-lg) - 6px);background:var(--surface);box-shadow:var(--shine),var(--neu-sm)}
-.ph-date{flex:1 1 auto;margin:0;font:350 20px/1.2 var(--font-rounded);letter-spacing:-.015em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.ph-date .short{display:none}
+/* The date: large and light, as wide as the pane lets it be (21 to 26 px); the gap after its comma
+   is kept open, which tight tracking in a light rounded face would close. */
+.ph-date{flex:1 1 0;margin:0;font:300 24px/1.2 var(--font-rounded);font-size:clamp(21px,4.4cqi,26px);letter-spacing:-.012em;word-spacing:.07em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ph-date :is(.short,.tiny){display:none}
 @container planner (max-width:520px){.ph-date .long{display:none}.ph-date .short{display:inline}}
+/* On another day than today, Today joins the buttons: the date steps down a size to stay whole
+   beside them, and takes its short form a little sooner. */
+.ph:has(#planToday:not([hidden])) .ph-date{font-size:clamp(19px,3.9cqi,22px)}
+@container planner (max-width:545px){.ph:has(#planToday:not([hidden])) .ph-date .long{display:none}.ph:has(#planToday:not([hidden])) .ph-date .short{display:inline}}
+/* A phone, where the three buttons leave it least room: the month and the day (the strip under it
+   says the weekday). */
+@container planner (max-width:400px){.ph:has(#planToday:not([hidden])) .ph-date :is(.long,.short){display:none}.ph:has(#planToday:not([hidden])) .ph-date .tiny{display:inline}}
 /* A phone: Today and Week… are their words alone, so the three still fit on the date's line. */
 @container planner (max-width:400px){#planWeek svg,#planToday svg{display:none}}
 .ph-actions{display:flex;align-items:center;gap:6px;flex:none;margin-left:auto}
@@ -536,16 +580,26 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 .pchip > span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .pchip.done > span{color:var(--muted);text-decoration:line-through}
 .pchip b{font-weight:600;color:var(--accent)}
-.pscroll{position:relative;flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+/* A few pixels above the first hour and under the last, outside what planner.js measures (the
+   scroller's own height), so its fit of the day stays exact. */
+.pscroll{position:relative;flex:1;min-height:0;margin:3px 0 4px;overflow-y:auto;overscroll-behavior:contain}
 .pmsg{margin:0;padding:40px 20px;text-align:center;color:var(--muted);font-size:14px}
 .pmsg .btn{margin-top:12px}
 /* Room for the first and last hour's labels; planner.js adds room at the bottom where the + button
    would cover the last hour. */
 .ptime{position:relative;margin:7px 0}
 .phours{position:absolute;left:0;top:0;bottom:0;width:58px}
-.phour{position:absolute;right:10px;transform:translateY(-50%);font-size:11px;line-height:1;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
-/* The label the now line's pill would half cover gives way to it. */
-.phour.near-now{visibility:hidden}
+/* An hour: a large light numeral with a small AM or PM beside it, centred on the hour's line (the
+   first a little under its line and the last a little over, inside the tray). */
+.phour{position:absolute;right:9px;display:flex;align-items:baseline;gap:2px;transform:translateY(calc(-50% + var(--dy,0px)));color:var(--muted);line-height:1;white-space:nowrap;font-variant-numeric:tabular-nums;transition:transform var(--dur-2) var(--ease-out)}
+.phour b{font:300 19px/1 var(--font-rounded);letter-spacing:-.02em;color:var(--text)}
+.phour small{font-size:10.5px;font-weight:600;letter-spacing:.02em}
+.phour:first-child{--dy:3px}.phour:last-child{--dy:-3px}
+/* The now line's pill and an hour never overlap (planner.js says where the pill is, each minute):
+   an hour the pill sits on gives way to it, as the pill says the time; one it would only touch
+   steps a few pixels away from it, or gives way where that would take it out of the tray. */
+.phour[data-now="at"],.phour:first-child[data-now="above"],.phour:last-child[data-now="below"]{visibility:hidden}
+.phour[data-now="above"]{--dy:-8px}.phour[data-now="below"]{--dy:8px}
 /* A soft cell for each hour, as tall as the hour less 2 px (a block of an hour covers it): --cell-shape
    draws a rounded rectangle on every --hour from gradients alone (two bands and four corners), so it
    takes the theme's --cell and also masks the hatching below. Vertical drags on empty time scroll on
@@ -564,32 +618,44 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 .pgrid::before{content:"";position:absolute;inset:0 14px;z-index:-2;pointer-events:none;background:repeating-linear-gradient(90deg,var(--cell-line) 0 2px,transparent 2px 7px);
   -webkit-mask:linear-gradient(#000 1px,transparent 1px) 0 calc(var(--hour,48px) / 2)/100% var(--hour,48px);mask:linear-gradient(#000 1px,transparent 1px) 0 calc(var(--hour,48px) / 2)/100% var(--hour,48px)}
 .pgrid.dense::before{display:none}
-/* Today's hours gone by are hatched, down to the now line (planner.js sets --now on today). */
-.pgrid::after{content:"";position:absolute;left:0;right:0;top:0;height:min(var(--now,0px),100%);z-index:-2;pointer-events:none;
-  background:repeating-linear-gradient(135deg,var(--hatch) 0 1.5px,transparent 1.5px 7px),var(--hatch-fill);-webkit-mask:var(--cell-shape);mask:var(--cell-shape)}
+/* Today's last hours gone by are hatched, lightly: most at the now line (planner.js sets --now on
+   today) and fading out over the three and a half hours above it, under a veil of the cell's own
+   colour, so a day seen late in the evening is still a tray of white cells. It lies under the
+   half-hour dots and takes no pointer: a click or a drag on hatched time still makes a block. */
+.pgrid::after{content:"";position:absolute;left:0;right:0;top:0;height:min(var(--now,0px),100%);z-index:-3;pointer-events:none;
+  background:linear-gradient(to top,transparent,var(--cell) calc(var(--hour,48px) * 3.5)),repeating-linear-gradient(135deg,var(--hatch) 0 1.5px,transparent 1.5px 7px),var(--hatch-fill);-webkit-mask:var(--cell-shape);mask:var(--cell-shape)}
 .pgrid.loading{opacity:.55;pointer-events:none}
-/* A block: a bar in its kind's gradient under a faint sheen, with a hairline of its edge colour and
-   a soft shadow of its own colour. It is a container, so its decorations can go where it is narrow.
-   No blur and no backdrop-filter here: a drag moves it every frame. */
-.pblock{position:absolute;container-type:inline-size;padding:3px 8px 3px 7px;border-radius:12px;background:var(--pb-gloss),linear-gradient(100deg,var(--pb-a),var(--pb-b));color:var(--pb-ink);
-        box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pb-edge) 36%,transparent),inset 0 1px 0 var(--pb-rim),0 1px 2px var(--pb-shade),0 6px 12px -7px color-mix(in srgb,var(--pb-b) 75%,transparent);
-        overflow:hidden;font-size:12.5px;line-height:1.35;cursor:grab;transition:box-shadow var(--dur-1) var(--ease-out),transform var(--dur-2) var(--ease-out),opacity var(--dur-1) var(--ease-out)}
-.pblock:hover{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pb-edge) 55%,transparent),inset 0 1px 0 var(--pb-rim),0 2px 4px var(--pb-shade),0 10px 18px -8px color-mix(in srgb,var(--pb-b) 85%,transparent)}
+/* A block: a bar in its kind's gradient under a faint sheen, with a hairline of its edge colour
+   (--pb-edge-mix of it over the bar: 3:1 against the cell in every theme) and a soft shadow of its
+   own colour. It is a container, named, so its decorations can go where it is narrow and no other
+   container can answer for it. No blur and no backdrop-filter here: a drag moves it every frame. */
+.pblock{position:absolute;container:pblock / inline-size;padding:3px 8px 3px 7px;border-radius:12px;background:var(--pb-gloss),linear-gradient(100deg,var(--pb-a),var(--pb-b));color:var(--pb-ink);
+        box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pb-edge) var(--pb-edge-mix),transparent),inset 0 1px 0 var(--pb-rim),0 1px 2px var(--pb-shade),0 6px 12px -7px color-mix(in srgb,var(--pb-glow) 75%,transparent);
+        overflow:hidden;font-size:12.5px;line-height:1.35;cursor:grab;transition:box-shadow var(--dur-1) var(--ease-out),transform var(--dur-2) var(--ease-out)}
+.pblock:hover{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pb-edge) var(--pb-edge-mix),transparent),inset 0 1px 0 var(--pb-rim),0 2px 4px var(--pb-shade),0 10px 18px -8px color-mix(in srgb,var(--pb-glow) 90%,transparent)}
 .k-meal{--pb-a:var(--k-meal-a);--pb-b:var(--k-meal-b);--pb-ink:var(--k-meal-ink);--pb-ink2:var(--k-meal-ink2);--pb-edge:var(--k-meal-edge);--pb-panel:var(--k-panel);--pb-icon:var(--ic-meal)}
 .k-deep{--pb-a:var(--k-deep-a);--pb-b:var(--k-deep-b);--pb-ink:var(--k-deep-ink);--pb-ink2:var(--k-deep-ink2);--pb-edge:var(--k-deep-edge);--pb-panel:var(--k-deep-panel);--pb-icon:var(--ic-deep)}
 .k-social{--pb-a:var(--k-social-a);--pb-b:var(--k-social-b);--pb-ink:var(--k-social-ink);--pb-ink2:var(--k-social-ink2);--pb-edge:var(--k-social-edge);--pb-panel:var(--k-panel);--pb-icon:var(--ic-social)}
 .k-other{--pb-a:var(--k-other-a);--pb-b:var(--k-other-b);--pb-ink:var(--k-other-ink);--pb-ink2:var(--k-other-ink2);--pb-edge:var(--k-other-edge);--pb-panel:var(--k-panel);--pb-icon:var(--ic-other)}
+/* The colour of a bar's soft shadow and of its bubble: its own, except the plain block's, whose bar
+   is pale on purpose (the quiet one of the four) and so takes its shadow from its edge and a bubble
+   that shows on it. --pb-fill is the name the fill had before the gradients, kept for any rule
+   still written against it. */
+.k-meal,.k-deep,.k-social,.k-other{--pb-glow:var(--pb-b);--pb-bub:var(--pb-bubble);--pb-bub-rim:var(--pb-bubble-rim);--pb-fill:var(--pb-b)}
+.k-other{--pb-glow:color-mix(in srgb,var(--k-other-edge) 62%,transparent);--pb-bub:var(--k-other-bubble);--pb-bub-rim:var(--k-other-bubble-rim)}
 /* The kind's icon in a round bubble at the left (the icon is a mask, so it takes the block's ink):
-   26 px on a tall block, 20 px on one line, the icon alone on the shortest, nothing on a column too
-   narrow for words. */
+   26 px on a tall block, 20 px on one line, the icon alone on the shortest and on a narrow block,
+   and alone in the middle of a column too narrow for words. Every block has it, whatever its size:
+   the kind is never told by colour alone. */
 .pblock::before,.pblock::after{content:"";position:absolute;left:7px;top:5px;width:26px;height:26px;border-radius:50%;pointer-events:none}
-.pblock::before{background:var(--pb-bubble);box-shadow:inset 0 0 0 1px var(--pb-bubble-rim)}
+.pblock::before{background:var(--pb-bub);box-shadow:inset 0 0 0 1px var(--pb-bub-rim)}
 .pblock::after{background:currentColor;-webkit-mask:var(--pb-icon) center/14px 14px no-repeat;mask:var(--pb-icon) center/14px 14px no-repeat}
 .pblock.md::before,.pblock.md::after{top:2px;width:20px;height:20px}
 .pblock.sm::before,.pblock.sm::after{top:50%;width:20px;height:20px;margin-top:-10px}
 .pblock:is(.md,.sm)::after{-webkit-mask-size:12px 12px;mask-size:12px 12px}
-.pblock.xs::before,.pblock.nar::before,.pblock.nar::after{display:none}
+.pblock.xs::before,.pblock.nar::before{display:none}
 .pblock.xs::after{left:6px;top:50%;width:12px;height:12px;margin-top:-6px;border-radius:0;-webkit-mask-size:12px 12px;mask-size:12px 12px}
+.pblock.nar::after{left:50%;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:0;-webkit-mask-size:12px 12px;mask-size:12px 12px}
 /* The block's button lies under its text and opens its details; the text lets the pointer through,
    except the items' checkboxes. */
 .pb-open{position:absolute;inset:0;width:100%;padding:0;border:0;border-radius:inherit;background:none;cursor:inherit}
@@ -598,28 +664,35 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 .pb-body,.pb-more{margin-left:33px}
 .pblock:is(.md,.sm) :is(.pb-body,.pb-more){margin-left:27px}
 .pblock.xs .pb-body{margin-left:17px}
-.pb-head{display:flex;align-items:baseline;gap:6px;min-width:0}
+/* The head is one line, and what does not fit on it whole goes, the last first: the chip, then
+   the time, and only then is the title cut. (It wraps, and shows its first line alone.) So a title
+   is never cut to make room for a time or a chip; the time and the count are in the block's details
+   and its preview. */
+.pb-head{display:flex;flex-wrap:wrap;align-items:baseline;align-content:flex-start;gap:0 6px;height:1.35em;height:1lh;overflow:hidden;min-width:0}
 .pb-title{font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .pb-title i{font-style:normal;font-weight:500;color:var(--pb-ink2)}
 .pb-time{display:block;color:var(--pb-ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
-/* Where the title and the time share a line, the title gives way first (planner.js shows the time
-   only where it fits beside the start of the title), and the time is cut only after that. */
-.pb-head .pb-title{flex:0 1000 auto;min-width:2.5em}
-.pb-head .pb-time{flex:0 1 auto;min-width:0}
-/* The title gives way so much sooner that the time loses no part of a pixel (and so no "…") before the title is at its least. */
-.pb-head .pb-title{flex-shrink:999999}
+.pb-head .pb-title{flex:0 1 auto}
+.pb-head .pb-time{flex:none}
+/* A time planner.js found no room for beside the whole title (data-tight) shows only in a drag. */
+.pb-time[data-tight]{display:none}
+.pblock.dragging .pb-time[data-tight]{display:block}
+/* While a block is dragged its time is what is watched: the line no longer wraps, the title gives
+   way to the time (to 2.5em, so much sooner that the time loses no part of a pixel before then). */
+.pblock.dragging .pb-head{flex-wrap:nowrap}
+.pblock.dragging .pb-head .pb-title{flex-shrink:999999;min-width:2.5em}
+.pblock.dragging .pb-head .pb-time{flex:0 1 auto;min-width:0}
 /* One chip at the right of the head, white on the bar: "Now" while the block is on (planner.js marks
    it .now each minute), else how many of its items are done, else the kind's name where the title
-   does not say it, else "+N" for items not shown. */
+   does not say it (never the plain "Block"), else "+N" for items not shown. */
 .pb-kind,.pb-n,.pb-st,.pblock.now .pb-head::after{flex:none;align-self:center;padding:0 7px;border-radius:999px;background:var(--pb-chip);color:var(--pb-chip-ink);box-shadow:0 1px 2px var(--pb-shade);font-size:10.5px;font-weight:650;line-height:16px;white-space:nowrap}
 .pb-head > :is(.pb-kind,.pb-n,.pb-st){margin-left:auto}
-.pb-head > :is(.pb-kind,.pb-n,.pb-st) ~ :is(.pb-n,.pb-st){margin-left:0}
 .pb-kind::before,.pb-st::before{content:"";display:inline-block;position:relative;top:-1px;width:4px;height:4px;margin-right:4px;border-radius:50%;background:currentColor;vertical-align:middle}
-.pb-head:has(.pb-st) :is(.pb-kind,.pb-n){display:none}
 .pblock.now .pb-head::after{content:"\2022\00a0Now";margin-left:auto}
-.pblock.now .pb-head :is(.pb-kind,.pb-n,.pb-st){display:none}
-/* A block's kind as its initial, before the title: only where the block is too narrow for the bubble. */
-.pb-ki{display:none;flex:none;align-self:center;min-width:15px;padding:0 3px;border-radius:4px;background:var(--pb-chip);color:var(--pb-chip-ink);font-size:9.5px;font-weight:700;line-height:14px;text-align:center}
+/* A tall block's second line: its time, and "+N" after it where the block is too narrow for the
+   chip above and its items have no line of their own to say how many more there are. */
+.pb-sub{display:flex;align-items:center;gap:6px;min-width:0}
+.pb-sub .pb-time{flex:0 1 auto;min-width:0}
 /* Short blocks: one line, "Lunch · Chipotle · 4–5 PM", cut with an ellipsis, in the middle of the
    bar; so is the one line of a taller block that shows no items. */
 .pblock:is(.sm,.xs),.pblock.md:not(:has(.pb-items,.pb-more)){display:flex;align-items:center}
@@ -629,10 +702,9 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 .pblock.xs{padding:1px 6px 1px 6px;border-radius:9px;font-size:11px;line-height:16px}
 .pblock:is(.xs,.sm) .pb-head{align-items:center}
 .pblock.xs :is(.pb-kind,.pb-n,.pb-st),.pblock.xs.now .pb-head::after{padding:0 6px;font-size:9.5px;line-height:14px;box-shadow:none}
-/* A column too narrow for words: the kind's initial, and its colour (the name is in the label). */
-.pblock.nar{padding:0;border-radius:9px;text-align:center}
+/* A column too narrow for words: the kind's icon alone (its name is in the label and the preview). */
+.pblock.nar{padding:0;border-radius:9px}
 .pblock.nar .pb-body{margin-left:0}
-.pb-ini{display:block;font-size:12px;font-weight:700;line-height:18px}
 /* A block running past the hours shown is cut at their edge, which shows as a dashed line. */
 .pblock.cut-top{border-top:2px dashed var(--pb-edge);border-top-left-radius:0;border-top-right-radius:0}
 .pblock.cut-bottom{border-bottom:2px dashed var(--pb-edge);border-bottom-left-radius:0;border-bottom-right-radius:0}
@@ -648,34 +720,41 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 .pb-item.done span{color:var(--pb-ink2);text-decoration:line-through}
 .pb-item small{flex:none;color:var(--pb-ink);font-weight:700}
 .pb-more{position:relative;color:var(--pb-ink2);font-size:11.5px;pointer-events:none}
-/* A half-width block keeps its line for the title and the time: the icon without its bubble, and no
+/* A block with room (over 260 px inside: planner.js's ROOMY_PX is the same line) has the chip, and
+   while it is on, "Now" in place of any other. */
+@container pblock (min-width:260.01px){
+  .pblock.now .pb-head :is(.pb-kind,.pb-n,.pb-st){display:none}
+}
+/* A narrower block keeps its line for its words: the icon without its bubble, on every form, and no
    chip but "+N" (the now line and its pill still say which block is on). */
-@container (max-width:260px){
+@container pblock (max-width:260px){
   .pb-st,.pb-kind,.pblock.now .pb-head::after{display:none}
-  .pb-head:has(.pb-st) .pb-n,.pblock.now .pb-head .pb-n{display:block}
-  .pblock:is(.md,.sm)::before{display:none}
-  .pblock:is(.md,.sm)::after{left:6px;width:12px;height:12px;border-radius:0}
-  .pblock.md::after{top:6px}
+  .pblock:not(.nar,.xs)::before{display:none}
+  .pblock:not(.nar,.xs)::after{left:6px;top:6px;width:12px;height:12px;margin-top:0;border-radius:0;-webkit-mask-size:12px 12px;mask-size:12px 12px}
   .pblock.sm::after,.pblock.md:not(:has(.pb-items,.pb-more))::after{top:50%;margin-top:-6px}
-  .pblock:is(.md,.sm) :is(.pb-body,.pb-more){margin-left:17px}
-  .pblock.md .pb-items{margin-left:11px}
+  .pblock:not(.nar,.xs) :is(.pb-body,.pb-more){margin-left:17px}
+  .pblock:not(.nar) .pb-items{margin-left:11px}
+  .pb-sub .pb-time{font-size:11.5px}
 }
-/* A narrow block gives its width to its words: no bubble, no chip, the kind as its initial. */
-@container (max-width:150px){
-  .pblock:not(.nar)::before,.pblock:not(.nar)::after{display:none}
-  .pblock:not(.nar) :is(.pb-body,.pb-more){margin-left:0}
-  .pblock:not(.nar) .pb-items{margin-left:-6px}
-  .pb-ki{display:block}
-}
+/* The narrowest column that still has words: the time starts under the icon, for the room. */
+@container pblock (max-width:110px){.pb-sub{margin-left:-11px}}
 .pb-rs{position:absolute;left:0;right:0;z-index:2;height:7px;cursor:ns-resize}
 .pb-rs.top{top:0}.pb-rs.bottom{bottom:0}
 .pb-rs::after{content:"";position:absolute;left:50%;width:22px;height:3px;margin-left:-11px;border-radius:2px;background:var(--pb-ink);opacity:0;transition:opacity 120ms ease}
 .pb-rs.top::after{top:2px}.pb-rs.bottom::after{bottom:2px}
 .pblock:hover .pb-rs::after{opacity:.4}
 .pblock:is(.xs,.nar) .pb-rs{height:4px}.pblock:is(.xs,.nar) .pb-rs::after{display:none}
-/* Picked up, the bar lifts off the cells, turns a little see-through with a bright rim, and tilts. */
-.pblock.dragging,.pblock.armed{z-index:4;cursor:grabbing;opacity:.93;transform:rotate(-1.1deg) scale(1.012);will-change:transform;
+/* Picked up, the bar lifts off the cells with a bright rim; moved (planner.js adds .moving), it
+   also tilts a little. Its edges dragged, it stays square to the hours it is being set against.
+   It stays solid, so its words keep their contrast. */
+.pblock.dragging,.pblock.armed{z-index:4;cursor:grabbing;
   box-shadow:inset 0 0 0 1.5px var(--pb-bubble-rim),inset 0 1px 0 var(--pb-rim),0 3px 6px var(--pb-shade),0 20px 32px -12px var(--pb-lift)}
+.pblock.moving{transform:rotate(-1.1deg) scale(1.012);will-change:transform}
+/* A free stretch of an hour and a half or more between two blocks (planner.js, freeParts): a dashed
+   card that says how long it is, on a pill of its own. Decoration only: hidden from screen readers,
+   and the pointer goes through it, so a click or a drag there still makes a block. */
+.pfree{position:absolute;left:2px;width:calc(100% - var(--lane, 0px) - 4px);display:grid;place-items:center;border:1.5px dashed var(--free-line);border-radius:12px;pointer-events:none}
+.pfree span{padding:0 9px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--muted);font-size:11.5px;font-weight:560;line-height:17px;white-space:nowrap}
 .pblock.ghost{z-index:4;opacity:.9;pointer-events:none;outline:1.5px dashed var(--pb-edge);outline-offset:-1.5px}
 .pblock.shown{z-index:3;outline:2px solid var(--accent);outline-offset:1px}
 .pblock.drop-hit{z-index:3;outline:2px solid var(--accent);outline-offset:1px}
@@ -696,9 +775,9 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 .pnow{position:absolute;left:0;right:0;z-index:-1;height:2px;margin-top:-1px;border-radius:1px;background:repeating-linear-gradient(90deg,var(--accent) 0 7px,transparent 7px 12px);pointer-events:none}
 .pnow::before{content:attr(data-now);position:absolute;right:calc(100% + 3px);top:-8px;height:18px;padding:0 7px;border-radius:9px;background:var(--sheen),var(--accent);color:var(--on-accent);box-shadow:0 2px 6px -2px color-mix(in srgb,var(--accent) 60%,transparent);font-size:10.5px;font-weight:700;line-height:18px;white-space:nowrap;font-variant-numeric:tabular-nums}
 /* A block's details: a card beside the block (planner.js places it), or a sheet at the bottom of a
-   narrow screen. */
+   narrow screen. It opens over the bars, so its glass is the drawer's: nearly solid. */
 dialog.pdetail{position:fixed;inset:auto;left:8px;top:8px;z-index:12;margin:0;width:min(350px,calc(100vw - 16px));max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px);overflow:auto;
-  padding:18px 20px 16px;border:1px solid var(--glass-edge);border-radius:var(--radius-lg);background:var(--glass-thick);-webkit-backdrop-filter:var(--glass-blur-thick);backdrop-filter:var(--glass-blur-thick);color:var(--text);box-shadow:var(--glass-rim),var(--shadow-lg);overscroll-behavior:contain}
+  padding:18px 20px 16px;border:1px solid var(--glass-edge);border-radius:var(--radius-lg);background:color-mix(in srgb,var(--surface) 72%,var(--glass-thick));-webkit-backdrop-filter:var(--glass-blur-thick);backdrop-filter:var(--glass-blur-thick);color:var(--text);box-shadow:var(--glass-rim),var(--shadow-lg);overscroll-behavior:contain}
 dialog.pdetail[open]{animation:sh-pop-in var(--dur-2) var(--ease-out)}
 @keyframes sh-pop-in{from{opacity:0;transform:scale(.96)}}
 dialog.pdetail:focus{outline:none}
@@ -712,8 +791,8 @@ dialog.pdetail::backdrop{background:var(--scrim)}
 :root:is([data-theme="dark"],[data-theme="red"]) dialog.pdetail{-webkit-backdrop-filter:none;backdrop-filter:none}
 dialog.pdetail .close{top:12px;right:12px}
 /* The kind, as a small bar of its own: its icon in a bubble, then its name. */
-.pd-kind{display:inline-flex;align-items:center;gap:6px;max-width:calc(100% - 44px);padding:3px 11px 3px 4px;border-radius:999px;background:var(--pb-gloss),linear-gradient(100deg,var(--pb-a),var(--pb-b));color:var(--pb-ink);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pb-edge) 36%,transparent);font-size:12px;font-weight:650;line-height:20px}
-.pd-kind i{position:relative;flex:none;width:20px;height:20px;border-radius:50%;background:var(--pb-bubble);box-shadow:inset 0 0 0 1px var(--pb-bubble-rim)}
+.pd-kind{display:inline-flex;align-items:center;gap:6px;max-width:calc(100% - 44px);padding:3px 11px 3px 4px;border-radius:999px;background:var(--pb-gloss),linear-gradient(100deg,var(--pb-a),var(--pb-b));color:var(--pb-ink);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pb-edge) var(--pb-edge-mix),transparent);font-size:12px;font-weight:650;line-height:20px}
+.pd-kind i{position:relative;flex:none;width:20px;height:20px;border-radius:50%;background:var(--pb-bub);box-shadow:inset 0 0 0 1px var(--pb-bub-rim)}
 .pd-kind i::after{content:"";position:absolute;inset:0;background:currentColor;-webkit-mask:var(--pb-icon) center/12px 12px no-repeat;mask:var(--pb-icon) center/12px 12px no-repeat}
 #pdTitle{margin:10px 40px 6px 0;font:400 23px/1.2 var(--font-rounded);letter-spacing:-.02em;overflow-wrap:anywhere}
 .pd-line{margin:2px 0;font-size:13.5px;color:var(--muted);overflow-wrap:anywhere}
@@ -723,6 +802,12 @@ dialog.pdetail .close{top:12px;right:12px}
 .pd-item{padding:9px 11px;border-radius:13px;background:var(--surface-2)}
 .pd-check{display:flex;align-items:flex-start;gap:8px;font-size:14px;line-height:1.35;cursor:pointer}
 .pd-check input{flex:none;width:16px;height:16px;margin:1px 0 0;cursor:pointer}
+/* The card's ticks are drawn as the preview's and the bars' are, the same in every theme and engine. */
+.pd-check input{appearance:none;-webkit-appearance:none;display:inline-grid;place-content:center;border:1.5px solid var(--border-input);border-radius:5px;background:var(--surface)}
+.pd-check input:checked{background:var(--accent);border-color:var(--accent)}
+.pd-check input:checked::before{content:"";width:8px;height:4px;margin-top:-2px;border:solid var(--on-accent);border-width:0 0 2px 2px;transform:rotate(-45deg)}
+.pd-check input:focus-visible{outline:2px solid var(--accent);outline-offset:2px;box-shadow:none}
+.pd-check input:disabled{opacity:.5;cursor:default}
 .pd-text{overflow-wrap:anywhere;min-width:0}
 .pd-item.done .pd-text{color:var(--muted);text-decoration:line-through}
 .pd-work{display:flex;flex-wrap:wrap;align-items:center;gap:3px 8px;margin:3px 0 0 24px;font-size:12.5px;color:var(--muted)}
@@ -748,8 +833,9 @@ dialog.pdetail .close{top:12px;right:12px}
 :root:is([data-theme="dark"],[data-theme="red"]) .ptip[data-cut="1"]::after{background:linear-gradient(to top,var(--surface),transparent)}
 .ptip h3{margin:4px 0 3px;font-size:14.5px;font-weight:650;letter-spacing:-.01em;line-height:1.3;overflow-wrap:anywhere}
 .ptip > h3:first-child{margin-top:0}
-.ptip .pd-kind{margin-right:0;font-size:10.5px}
-.ptip .pd-kind i{width:10px;height:10px}
+.ptip .pd-kind{margin-right:0;padding:2px 9px 2px 3px;font-size:10.5px;line-height:16px}
+.ptip .pd-kind i{width:16px;height:16px}
+.ptip .pd-kind i::after{-webkit-mask-size:10px 10px;mask-size:10px 10px}
 .ptip .pd-line{margin:1px 0;font-size:12.5px}
 .ptip .pd-sec{margin:10px 0 6px;font-size:10.5px}
 .ptip .pd-items{gap:7px}
@@ -762,6 +848,11 @@ dialog.pdetail .close{top:12px;right:12px}
 .pd-tick.on::before{content:"";width:8px;height:4px;margin-top:-2px;border:solid var(--on-accent);border-width:0 0 2px 2px;transform:rotate(-45deg)}
 .pd-rest{margin-left:21px;font-size:12px;color:var(--muted)}
 .pd-notes{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;line-clamp:4;overflow:hidden;margin-top:5px;white-space:pre-line}
+/* The line under Sync now that says when the Mac syncs next (dashboard.js, "the next sync"): the
+   previews' surface, as one compact line with a small clock before it. */
+#syncNote{padding:7px 13px 7px 10px;border-radius:16px}
+#syncNote .pd-line{display:flex;align-items:center;gap:7px;margin:0}
+#syncNote .pd-line::before{content:"";flex:none;width:13px;height:13px;background:currentColor;-webkit-mask:var(--ic-clock) center/13px 13px no-repeat;mask:var(--ic-clock) center/13px 13px no-repeat}
 
 /* The block editor and the weekly form, built like the task dialog. */
 dialog.task input[type=checkbox],dialog.task input[type=radio]{width:16px;height:16px;margin:0;padding:0}
@@ -863,8 +954,8 @@ dialog.task .wk-hours label{flex:1 1 160px}
 /* Nothing moves for those who ask for less motion. */
 @media (prefers-reduced-motion:reduce){
   aside,dialog.task[open],dialog.pdetail[open],.ptip{animation:none}
-  .btn,.fab,.check,.pblock,.app-seg a,.views button,.theme-btn,.close,.ph-step,.pday,.row,.clist button{transition:none}
-  .btn:active,.fab:hover,.fab:active,.check:active,.check.on,.row:hover,.pblock.dragging,.pblock.armed{transform:none}
+  .btn,.fab,.check,.pblock,.phour,.toast button,.app-seg a,.views button,.theme-btn,.close,.ph-step,.pday,.row,.clist button{transition:none}
+  .btn:active,.fab:hover,.fab:active,.check:active,.check.on,.row:hover,.pblock.moving,.toast button:active{transform:none}
 }
 </style>
 </head>
