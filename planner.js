@@ -261,12 +261,16 @@
   let chain = Promise.resolve();
   const latest = {};             // key → the number of its latest save, so an older answer never wins
   let shown = todayIso();
+  // The plan on show is the copy kept from the last visit ("the copy kept from the last visit",
+  // below), until the server's own answer comes: it is there to be read, and nothing in it changes.
+  let copied = false;
 
   const settings = () => plan?.settings || DEFAULT_SETTINGS;
   const weekOf = wd => plan?.week?.[wd] || cleanWeek(null);
   const inRange = d => !!loaded && d >= loaded.from && d <= loaded.to;
-  // The shown date's own value is known, so a change to it cannot lose what is stored.
-  const editable = () => !!plan && inRange(shown);
+  // The shown date's own value is known, so a change to it cannot lose what is stored. Never while
+  // the plan is a copy: a change made to one would save over whatever the server has since.
+  const editable = () => !!plan && inRange(shown) && !copied;
 
   function getKey(key){
     if (key === 'settings') return plan.settings;
@@ -313,7 +317,7 @@
         for (const [k, v] of confirmed) setKey(k, v);
       }
       confirmed.clear();
-      if (needReload) load(shown); else render();
+      if (needReload) load(shown); else { keepPlan(); render(); }
     });
     recording?.sent.push(sent);
     render();
@@ -457,23 +461,98 @@
     const from = addDays(center, -7), to = addDays(center, 7), n = ++loadSeq, serial = saveSerial;
     let r = null, body = null;
     try { r = await fetch(`api/plan?from=${from}&to=${to}`, {cache: 'no-store'}); } catch {}
+    // The page turned out not to save here (it was drawn from the last visit's copy, and the server
+    // did not answer: dashboard.js has taken the planner away).
+    if (SH.mode.WRITE !== 'local') return;
     // A server from before the planner: no planner, rather than one that never saves.
+    if (r?.status === 404) dropCopy();
     if (r?.status === 404 && !plan) return SH.setPlanner('off');
     if (r?.ok) try { body = await r.json(); } catch {}
     if (n !== loadSeq) return;
     if (!body || typeof body !== 'object') {
+      // The server could not be asked: a copy is not left on show as the plan.
+      dropCopy();
       if (!plan) { loadFailed = true; SH.setPlanner('on'); }
       return render();
     }
     if (pending || serial !== saveSerial) { needReload = true; if (!pending) load(shown); return; }
-    plan = {settings: cleanSettings(body.settings), week: {}, days: {}};
-    for (const wd of WD) plan.week[wd] = cleanWeek(body.week?.[wd]);
-    for (const [d, v] of Object.entries(body.days || {})) if (v && typeof v === 'object') plan.days[d] = v;
+    const next = planOf(body);
+    // The copy on show is what the server has: nothing is drawn again (unlock).
+    const asShown = copied && same(plan, next) && same(loaded, {from, to});
+    plan = next;
     loaded = {from, to};
     loadFailed = false;
+    const done = uncopy();
+    keepPlan();
+    SH.setPlanner('on');
+    if (asShown) unlock(); else render();
+    // (Not under a form opened meanwhile.)
+    if (done && !document.querySelector('dialog[open] form')) done();
+  }
+  // The plan as the page holds it, from the server's answer or the copy kept of one.
+  function planOf(body){
+    const p = {settings: cleanSettings(body.settings), week: {}, days: {}};
+    for (const wd of WD) p.week[wd] = cleanWeek(body.week?.[wd]);
+    for (const [d, v] of Object.entries(isObject(body.days) ? body.days : {})) if (v && typeof v === 'object') p.days[d] = v;
+    return p;
+  }
+
+  // ---- the copy kept from the last visit ----
+  // The plan as the server last had it is kept in the browser (dashboard.js, "kept for the next
+  // visit") with the dates it covers, after each load and each save that went through. The next
+  // visit draws the planner from it at once, where it used to wait for two answers in turn, and
+  // asks the server as before. Until the answer comes the copy is only read (copied: nothing is
+  // editable, so nothing is saved from it); then the answer takes its place, drawn again only where
+  // it differs. A date shows its own stored value, so a copy from yesterday shows today as it was
+  // known then, never yesterday's blocks; a copy that does not cover today is not used.
+  const COPY_QUIET_MS = 1200;     // a copy looks like the plan this long; then it shows it is waiting
+  const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+  let waiting = false;            // the answer is taking long: the copy shows as loading (dimmed, its buttons off)
+  let quietTimer = 0, wanted = null, whenLoaded = null;
+  function keepPlan(){
+    const today = todayIso();
+    if (!plan || copied || !loaded || today < loaded.from || today > loaded.to) return;
+    SH.kept?.write('plan', JSON.stringify({from: loaded.from, to: loaded.to, plan}));
+  }
+  function showKept(){
+    const c = SH.kept?.read('plan'), today = todayIso();
+    if (plan || !isObject(c) || !isObject(c.plan) || !ISO_DATE.test(c.from) || !ISO_DATE.test(c.to) || today < c.from || today > c.to) return;
+    try {
+      plan = planOf(c.plan);
+      loaded = {from: c.from, to: c.to};
+      copied = true;
+      entriesOn(shown);            // a copy that cannot be read is no copy
+    } catch (err) {
+      console.error(err);
+      plan = loaded = null;
+      copied = false;
+      return SH.kept.drop('plan');
+    }
+    quietTimer = setTimeout(() => { if (copied) { waiting = true; render(); } }, COPY_QUIET_MS);
     SH.setPlanner('on');
     render();
   }
+  // The copy's time is over: the server's plan is here (load). It answers what was asked for while
+  // the copy showed (+ Block, Every week), to be done once the plan is drawn.
+  function uncopy(){
+    if (!copied) return null;
+    copied = waiting = false;
+    clearTimeout(quietTimer);
+    whenLoaded?.();
+    const fn = wanted;
+    wanted = whenLoaded = null;
+    return fn;
+  }
+  // The copy is not the plan after all (the server could not be asked): it goes from the page.
+  function dropCopy(){
+    if (!copied) return;
+    plan = loaded = null;
+    uncopy();
+  }
+  // Something pressed while the copy shows is done once the plan is here.
+  const afterCopy = fn => { if (copied) wanted = fn; else fn(); };
+  // Waits for the server's plan while the copy shows.
+  const loadedPlan = () => copied ? new Promise(done => { const before = whenLoaded; whenLoaded = () => { before?.(); done(); }; }) : Promise.resolve();
 
   // ---- what shows on a date ----
   // Meals (the date's change over the weekday's over the defaults), the weekday's repeating blocks
@@ -755,12 +834,22 @@
     return true;
   }
 
+  // Whether the planner shows that it cannot be changed (its buttons off, the day dimmed). A copy
+  // from the last visit looks like the plan for a moment (COPY_QUIET_MS), since the server's answer
+  // is usually the same and then nothing on the page changes; it is not editable meanwhile either.
+  const locked = () => !editable() && !(copied && !waiting && inRange(shown));
+  // The server's plan is the copy that was on show: only what may be changed now is.
+  function unlock(){
+    els.week.disabled = els.add.disabled = locked();
+    grid.classList.toggle('loading', locked());
+    syncDetails();
+  }
   function render(){
     if (SH.plannerState !== 'on' || drag) return;
     const key = focusKey();
     drawDate();
     els.today.hidden = isToday(shown);
-    els.week.disabled = els.add.disabled = !editable();
+    els.week.disabled = els.add.disabled = locked();
     if (!plan) {
       els.strip.hidden = els.time.hidden = true;
       els.msg.hidden = false;
@@ -812,7 +901,7 @@
     els.hours.innerHTML = Array.from({length: s.day_end - s.day_start + 1}, (_, i) => i).filter(i => (s.day_start + i) % step === 0)
       .map(i => `<span class="phour" style="top:${i * hourPx}px">${hourLabel(s.day_start + i)}</span>`).join('');
     grid.setAttribute('aria-label', 'Plan for ' + longDate(shown));
-    grid.classList.toggle('loading', !editable());
+    grid.classList.toggle('loading', locked());
 
     // A day with things due at a time keeps a lane on the right for their flags, so no flag covers a
     // block; a flag shows its time there and its name too when pointed at or focused.
@@ -917,6 +1006,8 @@
     if (shown !== today) { shown = today; scrolledFor = null; }
     // A load waits for the saves on their way (load), so wait for them first.
     while (pending) await chain;
+    await loadedPlan();
+    if (!plan) return SH.toast("Couldn't load the plan");
     if (!inRange(today)) await load(today);
     if (!editable()) return SH.toast("Couldn't load the plan");
     const now = minutesNow();
@@ -1090,7 +1181,9 @@
   grid.addEventListener('change', e => {
     const box = e.target.closest('[data-pitem]');
     const ref = box?.closest('.pblock')?.dataset.ref;
-    if (!ref || !editable()) return;
+    if (!ref) return;
+    // Not now (the plan on show is still the last visit's copy): the tick goes back.
+    if (!editable()) { box.checked = !box.checked; return; }
     tickItem(ref, box.dataset.pitem, box.checked);
   });
 
@@ -1153,8 +1246,8 @@
     const step = t.closest('[data-pstep]');
     if (step) return setDate(addDays(shown, +step.dataset.pstep));
     if (t.closest('#planToday')) { scrolledFor = null; return setDate(todayIso()); }
-    if (t.closest('#planWeek')) return openWeek();
-    if (t.closest('#planAdd')) return newBlockAt();
+    if (t.closest('#planWeek')) return afterCopy(openWeek);
+    if (t.closest('#planAdd')) return afterCopy(newBlockAt);
     if (t.closest('[data-plan-retry]')) { loadFailed = false; render(); return load(shown); }
     const open = t.closest('.pb-open, [data-pedit]');
     if (open) {
@@ -1942,6 +2035,7 @@
   SH.on('ready', () => {
     const m = SH.mode;
     if (m.PHONE || m.LOCAL_FILES || m.WRITE !== 'local') return SH.setPlanner('off');
+    showKept();
     load(shown);
   });
   SH.on('render', render);

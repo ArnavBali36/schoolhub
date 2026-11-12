@@ -1,12 +1,14 @@
-// SchoolHub's dashboard. Loaded by dashboard.html after data.js (the last sync), from a file rather
-// than inline so the page runs under a Content-Security-Policy of script-src 'self'. The app bar
+// SchoolHub's dashboard. Loaded by dashboard.html, from a file rather than inline so the page runs
+// under a Content-Security-Policy of script-src 'self'. data.js (the last sync) is asked for by the
+// page too, without waiting for it: when it is here first the page starts from it, and otherwise
+// from the copy kept from the last visit ("kept for the next visit", "starting"). The app bar
 // (theme, app switch, the O key) is bar.js's, drawn before the first paint, and the day planner is
 // planner.js's, loaded after this file (it uses window.SchoolHub, at the end).
 //
 // Every request to SchoolHub's own server uses a relative URL (api/marks, file?p=…), so the page
 // works at http://localhost:8722/ and under a path prefix such as /school/ on a platform that
 // forwards to it. Only the phone site's cloud API (/api/state/) is absolute.
-const D = window.SCHOOL_DATA;
+let D = window.SCHOOL_DATA || null;                // the last sync: data.js, or until it comes the copy kept of it ("starting")
 const $ = s => document.querySelector(s);
 let LIVE = false;                                   // true once server.py answers: file opening, Sync now
 // Reached from another device through a platform (platform.json says "remote": true): files and
@@ -30,6 +32,87 @@ const mem = {
   get(k, d){ try { const v = localStorage.getItem('sh:' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v){ try { localStorage.setItem('sh:' + k, JSON.stringify(v)); } catch {} },
 };
+
+// ---- kept for the next visit ----
+// What the server last answered is kept in this browser (localStorage), so the next visit draws the
+// page at once and asks quietly, where a load used to wait for each answer in turn: the last sync's
+// data ('data', what data.js holds), the marks and tasks with where the page saves ('state'), and
+// the planner's days ('plan', planner.js). A copy is only ever shown. Nothing is saved from one: a
+// change made while one shows waits for the server's own answer (sending, below), and that answer
+// takes the copy's place, on the page too where it differs. One copy per place: the kind of site
+// (the phone site or a server) and the page's path. Each carries the time it was kept: older than
+// KEPT_DAYS, longer than KEPT_MAX or not what it should hold, it is not used. Where the browser
+// keeps nothing (a private window, a full disk) the page loads as it did before there were copies.
+const KEPT = 'sh:kept:1:';                         // 1: the form of the copies. Another form, another number, and these are never read.
+const KEPT_DAYS = 3;
+const KEPT_MAX = {data: 1500000, state: 200000, plan: 200000};   // characters
+const keptKey = what => `${KEPT}${what}:${PHONE ? 'phone' : 'server'}:${location.pathname}`;
+const kept = {
+  // A copy as kept: {at, text} (text is JSON), or null. Never from a file on disk.
+  get(what){
+    if (LOCAL_FILES) return null;
+    try {
+      const v = localStorage.getItem(keptKey(what)), cut = v ? v.indexOf('\n') : -1;
+      const at = cut > 0 ? Number(v.slice(0, cut)) : NaN, age = Date.now() - at;
+      return age >= 0 && age < KEPT_DAYS * 864e5 ? {at, text: v.slice(cut + 1)} : null;
+    } catch { return null; }
+  },
+  read(what){ try { return JSON.parse(this.get(what)?.text ?? null); } catch { return null; } },
+  // Keeps text, and answers whether it did. Too long, or refused by the browser, the copy before it
+  // goes too, so an older one is never taken for the last.
+  write(what, text){
+    if (LOCAL_FILES) return false;
+    try {
+      if (typeof text !== 'string' || text.length > KEPT_MAX[what]) throw new Error('not kept');
+      localStorage.setItem(keptKey(what), Date.now() + '\n' + text);
+      return true;
+    } catch { this.drop(what); return false; }
+  },
+  drop(what){ try { localStorage.removeItem(keptKey(what)); } catch {} },
+  // Copies no visit will read again go: those of another form, and those past their time.
+  tidy(){
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (!k?.startsWith('sh:kept:')) continue;
+        const age = k.startsWith(KEPT) ? Date.now() - parseInt(localStorage.getItem(k), 10) : NaN;
+        if (!(age >= 0 && age < KEPT_DAYS * 864e5)) localStorage.removeItem(k);
+      }
+    } catch {}
+  },
+};
+const isMap = v => !!v && typeof v === 'object' && !Array.isArray(v);
+// The last sync's data as the page needs it: courses, each with its assignments.
+const dataShaped = d => isMap(d) && Array.isArray(d.courses)
+  && d.courses.every(c => isMap(c) && typeof c.id === 'string' && Array.isArray(c.assignments) && c.assignments.every(a => isMap(a) && typeof a.id === 'string'));
+// The marks and tasks kept from the last visit, with where the page saved then (at; none on the
+// phone site, which saves in one place), or null.
+function keptState(){
+  const c = kept.read('state');
+  return isMap(c) && isMap(c.marks) && Object.values(c.marks).every(m => isMap(m) && typeof m.marked_at === 'string')
+    && isMap(c.tasks) && Object.entries(c.tasks).every(([id, t]) => isMap(t) && t.id === id && typeof t.name === 'string')
+    && (PHONE || (isMap(c.at) && typeof c.at.remote === 'boolean' && typeof c.at.public === 'boolean')) ? c : null;
+}
+// The marks and the tasks as the server last gave them, each whole. Every answer that holds all of
+// one, a read or a save, is noted here (heard) and kept for the next visit: the server's own
+// answers, never what the page shows, which may hold a ✓ not saved yet. Kept only once the server
+// itself has said where the page saves (placed, "starting"), never on the word of a copy.
+const server = {marks: null, tasks: null};
+let placed = false;
+function keepState(){
+  if (!placed || !server.marks || !server.tasks) return;
+  kept.write('state', JSON.stringify({at: PHONE ? null : {remote: REMOTE, public: PUBLIC}, marks: server.marks, tasks: server.tasks}));
+}
+function heard(path, r){
+  const got = path === 'cloud' ? r : path === 'api/marks' || path === 'api/mark' ? {marks: r}
+    : path === 'api/tasks' || path === 'api/task' || path === 'api/task/delete' ? {tasks: r?.tasks} : null;
+  if (isMap(got?.marks)) server.marks = got.marks;
+  if (isMap(got?.tasks)) server.tasks = got.tasks;
+  if (isMap(got?.marks) || isMap(got?.tasks)) keepState();
+  return r;
+}
+// ---- end of kept for the next visit ----
+
 const VIEWS = ['upcoming', 'courses', 'day'];
 const state = { view: VIEWS.includes(mem.get('view', 'upcoming')) ? mem.get('view', 'upcoming') : 'upcoming', showDone: mem.get('showDone', false), course: mem.get('course', null) };
 const now = new Date();
@@ -59,15 +142,37 @@ const num = n => n == null ? '' : (Math.round(n * 100) / 100).toString();
 const size = b => b > 1e6 ? (b / 1e6).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1e3)) + ' KB';
 const sod = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
 const dayDiff = d => Math.round((sod(d) - sod(now)) / 864e5);
-const api = (path, body) => fetch(path, {
+// ---- asking and saving ----
+// Nothing is sent to be saved before the server itself has said where the page saves (known,
+// settled in "starting"). A page drawn from the copy kept from the last visit shows its ✓ buttons
+// at once, and a change made in that moment waits here: then it goes as it would have, or fails as
+// any save does when the server turns out not to answer.
+let nowKnown;
+const known = new Promise(done => { nowKnown = done; });
+const sending = to => known.then(() => { if (WRITE !== to) throw new Error('nowhere to save'); });
+const answer = r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); };
+// Counts every save of a mark or a task as it is sent and as it is answered: marks and tasks read
+// before either moment may be older than the save's own answer, which holds them all, and are not
+// taken (reloadState).
+let saves = 0;
+const saved = (path, sent) => {
+  if (!/^(api\/(mark|task)|cloud)\b/.test(path)) return sent;
+  saves++;
+  return sent.finally(() => { saves++; });
+};
+const api = (path, body) => sending('local').then(() => saved(path, fetch(path, {
   method: 'POST', headers: {'Content-Type': 'application/json', 'X-SchoolHub': '1'}, body: JSON.stringify(body),
-}).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
-const getJson = path => fetch(path).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
-const cloudApi = body => fetch('/api/state/', {
-  method: body ? 'POST' : 'GET',
-  headers: {'Content-Type': 'application/json', 'X-SchoolHub-Key': SITE_KEY},
-  body: body ? JSON.stringify(body) : undefined,
-}).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+}))).then(answer).then(r => heard(path, r));
+const getJson = path => fetch(path).then(answer).then(r => heard(path, r));
+const cloudApi = body => {
+  const ask = () => fetch('/api/state/', {
+    method: body ? 'POST' : 'GET',
+    headers: {'Content-Type': 'application/json', 'X-SchoolHub-Key': SITE_KEY},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return (body ? sending('cloud').then(() => saved('cloud', ask())) : ask()).then(answer).then(r => heard('cloud', r));
+};
+// ---- end of asking and saving ----
 // Same calls whether saving through your Mac's server or the phone site's cloud database.
 const backend = {
   // as: a mark an undo puts back as it was, with its own time and names (a server that does not take
@@ -158,11 +263,6 @@ function ago(iso){
   return h < 1 ? Math.max(1, Math.round(h * 60)) + ' min ago' : h < 48 ? Math.round(h) + 'h ago' : Math.round(h / 24) + 'd ago';
 }
 
-if (!D) {
-  $('#main').innerHTML = '<p class="empty">No data yet. Run <code>python3 sync.py</code> in the SchoolHub folder.</p>';
-  throw new Error('no data');
-}
-
 // Your own tasks, live from server.py. null means use the copy the last sync baked into data.js.
 let tasks = null;
 // Whether a task stays at the top: its own choice, or, for one saved before the choice existed,
@@ -197,11 +297,12 @@ function rebuild(){
   all = courses.flatMap(c => c.assignments.map(a => ({...a, course: c})));
   byId = Object.fromEntries(all.map(a => [a.id, a]));
 }
-rebuild();
 const dot = c => `<i class="dot" style="--dot:${esc(c.color)};--dot-theme:${esc(c.slot || c.color)}"></i>`;
 
-// Marks as of the last sync; replaced by the live copy from server.py when available.
-let marks = Object.fromEntries(all.filter(a => a.marked_done).map(a => [a.id, {marked_at: a.marked_done}]));
+// Marks as of the last sync (syncedMarks, once its data is here); replaced by the live copy from
+// server.py when available.
+const syncedMarks = () => Object.fromEntries(all.filter(a => a.marked_done).map(a => [a.id, {marked_at: a.marked_done}]));
+let marks = {};
 
 const SOURCE_DONE = ['submitted','graded','excused'];
 const past = a => a.due_at && new Date(a.due_at) < now;
@@ -347,7 +448,17 @@ function refocus(within, keys){
   }
 }
 
+// When the data on show was synced, by its own time: said anew with each drawing, and when the page
+// is asked again with nothing to draw (reloadState).
+function showSynced(){
+  // A public copy gives data with no sync time before the Mac's first sync has reached it.
+  const hrs = D.generated_at ? (now - new Date(D.generated_at)) / 36e5 : Infinity;
+  $('#sync').textContent = D.generated_at ? 'Synced ' + ago(D.generated_at) : 'Not synced yet';
+  $('#sync').title = D.generated_at ? new Date(D.generated_at).toLocaleString() : '';
+  $('#sync').classList.toggle('stale', hrs > 30);
+}
 function render(){
+  if (!D) return;   // not started: data.js has not come, and there is no copy of it ("starting")
   const view = shownView();
   document.querySelectorAll('#views button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === view)));
   // Day is offered once the planner is known to be there (or while Day is the view on show, as
@@ -355,11 +466,7 @@ function render(){
   $('#views [data-view="day"]').hidden = plannerState === 'off' || (plannerState === 'unknown' && view !== 'day');
   $('.page').dataset.view = view;
   $('.page').dataset.plan = plannerState;
-  // A public copy gives data with no sync time before the Mac's first sync has reached it.
-  const hrs = D.generated_at ? (now - new Date(D.generated_at)) / 36e5 : Infinity;
-  $('#sync').textContent = D.generated_at ? 'Synced ' + ago(D.generated_at) : 'Not synced yet';
-  $('#sync').title = D.generated_at ? new Date(D.generated_at).toLocaleString() : '';
-  $('#sync').classList.toggle('stale', hrs > 30);
+  showSynced();
   const vis = visible(), main = $('#main'), key = focusKey(main);
   main.innerHTML = stats() + (view === 'courses' ? coursesView(vis) : upcomingView(vis));
   markEmoji(main);
@@ -486,6 +593,8 @@ function openDrawer(id, fromKeyboard = false){
   const a = byId[id]; if (!a) return;
   const drawer = $('#drawer'), first = drawerId === null;
   const key = first ? null : focusKey(drawer);
+  // Drawn again for the same item (a mark, or newer answers from the server), it stays where it was read.
+  const top = drawerId === id ? drawer.scrollTop : 0;
   if (first) drawerOpener = document.activeElement;
   drawerId = id;
   const s = eff(a), m = marks[a.id];
@@ -515,6 +624,7 @@ function openDrawer(id, fromKeyboard = false){
     ${a.description_html ? `<h4>Instructions</h4><div class="doc">${safeHtml(a.description_html)}</div>` : ''}`;
   markEmoji(drawer);
   drawer.hidden = $('#scrim').hidden = false;
+  drawer.scrollTop = top;
   $('#close').onclick = closeDrawer;
   for (const sel of BEHIND_DRAWER) { const el = $(sel); if (el) el.inert = true; }
   if (first) (fromKeyboard ? $('#close') : drawer).focus(); else refocus(drawer, key);
@@ -589,7 +699,8 @@ document.addEventListener('click', e => {
   const dt = e.target.closest('[data-delete-task]'); if (dt) { e.preventDefault(); return deleteTask(dt.dataset.deleteTask); }
   const op = e.target.closest('[data-open]');
   // Never from another device: what opens there would open on the Mac's screen.
-  if (op) { e.preventDefault(); if (REMOTE) return; return api('api/open', {path: op.dataset.open}).catch(() => toast("Couldn't open that file.")); }
+  // (Asked again once the server has said where the page is: a link drawn from the last visit's copy.)
+  if (op) { e.preventDefault(); if (REMOTE) return; return known.then(() => REMOTE || api('api/open', {path: op.dataset.open})).catch(() => toast("Couldn't open that file.")); }
   // A click the keyboard made (Enter or Space on a name) has no click count.
   const r = e.target.closest('.row'); if (r) return openDrawer(r.dataset.id, e.detail === 0);
   if (e.target.closest('#doneToggle')) { state.showDone = !state.showDone; mem.set('showDone', state.showDone); return render(); }
@@ -633,6 +744,18 @@ function refreshTasks(next){
   // The open drawer's task is gone (an undo took it away, or another device deleted it): it closes.
   if (drawerId !== null && !byId[drawerId]) closeDrawer();
   refresh();
+}
+// The marks and tasks as the server has them now (asked at the start, and on coming back to the
+// tab), taken in place. A ✓ whose save is still on its way stays as the page shows it: its own
+// answer follows. When nothing differs from what is on show, nothing is drawn again. It answers
+// whether anything was.
+function took(m, t){
+  const next = {...m};
+  for (const id in unsavedMark) { if (marks[id]) next[id] = marks[id]; else delete next[id]; }
+  const changed = !same(marks, next) || !same(tasks, t);
+  marks = next;
+  if (changed) refreshTasks(t); else tasks = t;
+  return changed;
 }
 async function saveTask(e){
   e.preventDefault();
@@ -828,11 +951,12 @@ async function pollSync(){
   try { sessionStorage.setItem('sh:synced', JSON.stringify({ok: s.ok, output: s.output})); } catch {}
   location.reload();
 }
+// (The tasks are asked for with the marks, in "starting". Called again when the server's answer
+// names another place than the copy the page was drawn from: Sync now comes or goes.)
 function enableServerFeatures(){
   $('#fab').hidden = false;
-  getJson('api/tasks').then(r => refreshTasks(r.tasks)).catch(() => {});
-  if (PUBLIC) return;
-  syncBtn.hidden = false;
+  syncBtn.hidden = PUBLIC;
+  if (PUBLIC || syncBtn.onclick) return;
   syncBtn.onclick = () => api('api/sync', {}).then(() => { showSyncing(true); setTimeout(pollSync, 1500); })
     .catch(() => toast("Couldn't start a sync. Is the SchoolHub server running?"));
   getJson('api/sync').then(s => { if (s.running) { showSyncing(true); pollSync(); } }).catch(() => {});
@@ -849,14 +973,13 @@ function enableServerFeatures(){
 // Pick up changes made on your other device when you come back to this tab.
 async function reloadState(){
   try {
-    if (WRITE === 'cloud') {
-      const s = await cloudApi();
-      marks = s.marks;
-      refreshTasks(s.tasks);
-    } else if (WRITE === 'local') {
-      marks = await getJson('api/marks');
-      refreshTasks((await getJson('api/tasks')).tasks);
-    }
+    const before = saves;
+    let s = null;
+    if (WRITE === 'cloud') s = await cloudApi();
+    else if (WRITE === 'local') s = {marks: await getJson('api/marks'), tasks: (await getJson('api/tasks')).tasks};
+    // A save went out or came back meanwhile: its answer is the newer one, and this one is left.
+    // Nothing changed: nothing is drawn again, but "Synced 2h ago" is said for now.
+    if (s && before === saves && !took(s.marks, s.tasks)) showSynced();
   } catch {}
   emit('reload');
 }
@@ -896,6 +1019,8 @@ window.SchoolHub = {
   same, addStep, offerStep, holdUndo: fn => { holds.push(fn); },
   undo: () => requestStep('undo'),
   redo: () => requestStep('redo'),
+  // The copies kept for the next visit ("kept for the next visit"): planner.js keeps the plan there.
+  kept,
   on(name, fn){ hooks[name].push(fn); if (name === 'ready' && readied) fn(); },
 };
 // planner.js not there at all (a server that does not serve it): no planner, rather than a Day view
@@ -903,37 +1028,151 @@ window.SchoolHub = {
 window.addEventListener('load', () => { if (!window.SchoolHub.plannerLoaded && plannerState === 'unknown') window.SchoolHub.setPlanner('off'); });
 // ---- end of what planner.js uses ----
 
-// Your Mac's server or a platform is asked below, before the first render, unless the page is the
-// phone site or a file on disk.
-PROBING = !PHONE && !LOCAL_FILES;
-render();
+// ---- starting ----
+// The page starts once it has the last sync's data. dashboard.html asks for data.js without waiting
+// for it (async): here already, the page starts from it; not yet, from the copy kept of it at the
+// last visit, and data.js takes the copy's place when it comes (dataHere); with neither (a first
+// visit) the page starts when data.js arrives, as it always did.
+//
+// Then your Mac's server or a platform is asked where the page is and what is stored (the phone
+// site: its cloud database), unless the page is a file on disk. With the answers kept from the last
+// visit the page is drawn from those at once, ✓ buttons, tasks, planner and all, and the server's
+// own answer follows quietly: the same as the copy, nothing is drawn again; different, the page
+// takes it in place (took). Without a copy the list shows as of the last sync meanwhile.
+
+// Where the page is, by platform.json's answer or the copy kept of it; no answer (at is null): a
+// page that does not save. A public copy serves no files (LIVE stays false).
+function setPlace(at){
+  REMOTE = !!at?.remote;
+  PUBLIC = !!at?.public;
+  LIVE = !!at && !PUBLIC;
+  WRITE = at ? 'local' : null;
+}
+// The first drawing: the list as of the last sync, or (copy) with the marks and tasks kept from the
+// last visit and the ✓ buttons where the page saved then.
+function drawFirst(copy){
+  tasks = copy ? copy.tasks : null;
+  rebuild();
+  marks = copy ? copy.marks : syncedMarks();
+  if (PHONE) WRITE = copy ? 'cloud' : null; else setPlace(copy?.at);
+  // Your Mac's server or a platform is asked below, unless the page is the phone site or a file on
+  // disk: no read-only banner meanwhile.
+  PROBING = !PHONE && !LOCAL_FILES;
+  render();
+}
 // The last sync shows once it is known whether Sync now goes with it, so the two appear together.
 const showSyncbox = () => { $('#syncbox').hidden = false; };
-if (PHONE || LOCAL_FILES) { showSyncbox(); emit('ready'); }
-if (PHONE) {
+function start(){
+  let copy = keptState();
+  try { drawFirst(copy); } catch (err) {
+    // A copy that cannot be drawn is no copy: as on a first visit.
+    if (!copy) throw err;
+    console.error(err);
+    kept.drop('state');
+    drawFirst(copy = null);
+  }
+  setTimeout(() => kept.tidy(), 3000);
+  if (PHONE || LOCAL_FILES) { showSyncbox(); emit('ready'); }
+  if (LOCAL_FILES) return nowKnown();
+  // Drawn from the copy: what goes with a page that saves shows with it.
+  if (copy && PHONE) $('#fab').hidden = false;
+  if (copy && !PHONE) { enableServerFeatures(); showSyncbox(); emit('ready'); }
   // The phone site: the cloud database saves marks and tasks when it is connected; without it the
-  // page stays a read-only view.
-  cloudApi().then(s => {
-    marks = s.marks;
-    WRITE = 'cloud';
-    $('#fab').hidden = false;
-    refreshTasks(s.tasks);
-  }).catch(() => {});
-} else if (!LOCAL_FILES) {
-  // Your Mac's server answers api/marks, at / on its own port or under a platform's prefix, and a
-  // platform says in platform.json whether the page was reached from another device or is public.
-  const where = fetch('platform.json', {cache: 'no-store'}).then(platformMode).catch(() => ({remote: true, public: false}));
-  Promise.all([getJson('api/marks'), where]).then(([m, at]) => {
-    marks = m;
-    REMOTE = at.remote;
-    PUBLIC = at.public;
-    LIVE = !PUBLIC;
-    WRITE = 'local';
-    enableServerFeatures();
-  }).catch(() => {}).finally(() => {
+  // page stays a read-only view. Anywhere else your Mac's server answers api/marks and api/tasks,
+  // at / on its own port or under a platform's prefix, and a platform says in platform.json
+  // whether the page was reached from another device or is public.
+  const where = PHONE ? null : fetch('platform.json', {cache: 'no-store'}).then(platformMode).catch(() => ({remote: true, public: false}));
+  // (The tasks not answering alone leaves those of the last sync, as it always did.)
+  const asked = PHONE ? cloudApi()
+    : Promise.all([getJson('api/marks'), where, getJson('api/tasks').catch(() => null)]).then(([m, at, t]) => ({marks: m, tasks: t?.tasks ?? null, at}));
+  asked.then(got => {
+    // Another place than the copy's (or no copy): the page is drawn again whatever the marks are.
+    const moved = !copy || (!PHONE && !same(copy.at, got.at));
+    if (PHONE) WRITE = 'cloud'; else setPlace(got.at);
+    placed = true;
+    keepState();
     PROBING = false;
-    render();
-    showSyncbox();
-    emit('ready');
+    if (PHONE) $('#fab').hidden = false; else enableServerFeatures();
+    if (!took(got.marks, got.tasks) && moved) refresh();
+  }, () => {
+    // Asked, and not answered: drawn again without the banner's wait, so a page that cannot save
+    // says so. One drawn from a copy goes back to what it is without it.
+    PROBING = false;
+    if (copy) forgetCopy(); else render();
+  }).finally(() => {
+    if (!copy && !PHONE) { showSyncbox(); emit('ready'); }
+    nowKnown();
   });
+}
+// The server did not answer after all: the page as it is without the copy, which cannot save (a
+// change made meanwhile fails as a save does, and is put back). The copy goes: the next visit asks
+// first, as a first visit does.
+function forgetCopy(){
+  kept.drop('state');
+  tasks = null;
+  rebuild();
+  marks = syncedMarks();
+  if (PHONE) WRITE = null; else setPlace(null);
+  $('#fab').hidden = syncBtn.hidden = true;
+  if (drawerId !== null && !byId[drawerId]) closeDrawer();
+  plannerState = PHONE ? plannerState : 'off';
+  refresh();
+}
+
+// data.js: here before this file ran, or awaited (its script's load or error, or the window's load
+// when that was missed). Its text, as JSON, is what is kept, and what tells a new sync from the copy.
+let shownData = null;      // the kept copy's text, while the page shows that copy
+let dataSeen = false;
+function keepData(text){
+  const had = kept.get('data');
+  // (Kept again once a day though nothing changed, so a copy in use does not run out of time.)
+  if (had?.text === text && Date.now() - had.at < 864e5) return;
+  if (dataShaped(D)) kept.write('data', text); else kept.drop('data');
+}
+function dataHere(){
+  if (dataSeen) return;
+  dataSeen = true;
+  const fresh = window.SCHOOL_DATA;
+  if (!fresh) {
+    // No data.js to be had. A page drawn from the copy stays as it is, under the copy's own sync
+    // time; with nothing to draw, it says what to do.
+    if (!D) $('#main').innerHTML = '<p class="empty">No data yet. Run <code>python3 sync.py</code> in the SchoolHub folder.</p>';
+    return;
+  }
+  const text = LOCAL_FILES ? '' : JSON.stringify(fresh);
+  if (!D) { D = fresh; start(); }
+  else if (D !== fresh && text !== shownData) {
+    // A newer sync than the copy the page was drawn from: taken in place.
+    D = fresh;
+    rebuild();
+    if (!WRITE) marks = syncedMarks();
+    if (drawerId !== null && !byId[drawerId]) closeDrawer();
+    refresh();
+  }
+  shownData = null;
+  if (!LOCAL_FILES) keepData(text);
+}
+if (!D) {
+  const had = LOCAL_FILES ? null : kept.get('data');
+  let copy = null;
+  try { copy = had && JSON.parse(had.text); } catch {}
+  if (dataShaped(copy)) {
+    D = copy;
+    shownData = had.text;
+    try { start(); } catch (err) {
+      // A copy that cannot be drawn is no copy: the page waits for data.js, as on a first visit.
+      console.error(err);
+      kept.drop('data');
+      D = shownData = null;
+      $('#main').innerHTML = '';
+    }
+  }
+  const script = document.querySelector('script[src="data.js"]');
+  script?.addEventListener('load', dataHere);
+  script?.addEventListener('error', dataHere);
+  if (document.readyState === 'complete') dataHere(); else window.addEventListener('load', dataHere);
+} else {
+  start();
+  // Kept for the next visit once the page is drawn.
+  setTimeout(dataHere, 0);
 }

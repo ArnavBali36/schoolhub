@@ -352,6 +352,30 @@ card; the preview comes first, and is only read.
   and Night, solid where transparency is reduced; a 140 ms fade that is off under reduced motion.
   Every colour is a token, so Night's preview has no blue. Emoji in it are marked as everywhere.
 
+### Added 2026-11-11: drawn at once from the last visit
+
+The learner noticed that switching between the two apps "is reloading everything". In a browser a
+switch is a page load, and the planner was the last thing to appear: it waited for the page to learn
+where it saves, and then for `/api/plan`.
+
+- **What is kept.** After every load whose dates cover today, and every save that went through, the
+  plan as the page holds it (`settings`, the seven weekdays, the loaded dates) is kept in the
+  browser with its range, through dashboard.js's `SchoolHub.kept` (README, "Opening at once").
+- **The next visit.** When the page knows where it saves, which with dashboard.js's own copy is at
+  once, the planner draws the kept plan (`showKept`) and asks `/api/plan` as before (`load`).
+- **Read, never changed.** While the copy shows (`copied`) nothing is editable: a drag does not
+  start, nothing drops, a tick goes back, the card's buttons are off. So nothing is ever saved from a
+  copy, and whatever the server has since is not overwritten. **+ Block** and **Every week** pressed
+  meanwhile open once the plan is here; **Plan it** waits for it.
+- **The answer.** The same as the copy: nothing is drawn again, only what may be changed is switched
+  on (`unlock`). Different: drawn again, as after any load. None: the copy goes from the page and
+  the planner says "Couldn't load the plan", as without a copy.
+- **A slow answer.** The copy looks like the plan for 1.2 s (`COPY_QUIET_MS`); after that the day is
+  dimmed and the buttons are off, as whenever the plan loads, until the answer comes.
+- **Never the wrong day.** The planner shows today, and a date shows its own stored value, so a copy
+  kept yesterday shows today as it was known then. A copy whose dates do not cover today is not
+  used. One older than 3 days, or not a plan, is not used either.
+
 ### Access
 
 - Every control has a label.

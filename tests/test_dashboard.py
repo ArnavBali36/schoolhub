@@ -67,15 +67,22 @@ class SourceTest(unittest.TestCase):
         self.assertEqual(block().count("data-open="), 1)
 
     def test_the_open_click_does_nothing_from_another_device(self):
-        self.assertRegex(JS, r"if \(op\) \{ e\.preventDefault\(\); if \(REMOTE\) return; return api\('api/open'")
+        # Checked at the click, and again once the server itself has said where the page is: a link
+        # drawn from the last visit's copy is not sent on that copy's word.
+        self.assertRegex(JS, r"if \(op\) \{ e\.preventDefault\(\); if \(REMOTE\) return; return known\.then\(\(\) => REMOTE \|\| api\('api/open'")
 
     def test_remote_and_public_come_from_platform_json_and_unknown_counts_as_remote(self):
         self.assertIn("fetch('platform.json', {cache: 'no-store'}).then(platformMode).catch(() => ({remote: true, public: false}))", JS)
-        # Set with LIVE, before the page is drawn with the server's features. A public copy serves no
-        # files (LIVE stays false); everywhere else LIVE is true, as before.
-        self.assertRegex(JS, r"Promise\.all\(\[getJson\('api/marks'\), where\]\)\.then\(\(\[m, at\]\) => \{\s*"
-                             r"marks = m;\s*REMOTE = at\.remote;\s*PUBLIC = at\.public;\s*LIVE = !PUBLIC;\s*WRITE = 'local';\s*"
-                             r"enableServerFeatures\(\);")
+        # Set with LIVE in one place (setPlace), before the page is drawn with the server's features.
+        # A public copy serves no files (LIVE stays false); everywhere else LIVE is true, as before.
+        # No answer (null) is a page that does not save.
+        self.assertIn("function setPlace(at){\n  REMOTE = !!at?.remote;\n  PUBLIC = !!at?.public;\n  LIVE = !!at && !PUBLIC;\n  WRITE = at ? 'local' : null;\n}", JS)
+        # The marks, the place and the tasks are asked for together; the answer sets the place, then
+        # the server's features, then the marks and tasks.
+        self.assertIn("Promise.all([getJson('api/marks'), where, getJson('api/tasks').catch(() => null)]).then(([m, at, t]) => ({marks: m, tasks: t?.tasks ?? null, at}));", JS)
+        self.assertRegex(JS, r"if \(PHONE\) WRITE = 'cloud'; else setPlace\(got\.at\);\s*placed = true;\s*keepState\(\);\s*PROBING = false;\s*"
+                             r"if \(PHONE\) \$\('#fab'\)\.hidden = false; else enableServerFeatures\(\);\s*"
+                             r"if \(!took\(got\.marks, got\.tasks\) && moved\) refresh\(\);")
         # Set nowhere else (besides their declarations).
         self.assertEqual(len(re.findall(r"^\s+PUBLIC = ", JS, re.M)), 1)
         self.assertEqual(len(re.findall(r"^\s+LIVE = ", JS, re.M)), 1)
@@ -83,9 +90,12 @@ class SourceTest(unittest.TestCase):
     def test_no_read_only_banner_while_the_page_asks_where_it_is(self):
         # A slow first answer (a cold public site) once showed "Read-only view" on a page that saves.
         self.assertIn("const banner = LIVE || WRITE || PROBING ? '' : LOCAL_FILES", JS)
-        self.assertIn("PROBING = !PHONE && !LOCAL_FILES;\nrender();", JS)
+        self.assertIn("  PROBING = !PHONE && !LOCAL_FILES;\n  render();\n}", JS)
         # Asked, answered or not: drawn again without it, so a page that cannot save still says so.
-        self.assertRegex(JS, r"\.catch\(\(\) => \{\}\)\.finally\(\(\) => \{\s*PROBING = false;\s*render\(\);\s*showSyncbox\(\);")
+        # (Answered, it is drawn by took or refresh, above; one drawn from a copy goes back to what
+        # it is without the copy.)
+        self.assertRegex(JS, r"\}, \(\) => \{\s*(//[^\n]*\s*)*PROBING = false;\s*if \(copy\) forgetCopy\(\); else render\(\);\s*\}\)\.finally\(\(\) => \{\s*"
+                             r"if \(!copy && !PHONE\) \{ showSyncbox\(\); emit\('ready'\); \}")
 
     def test_a_task_is_kept_at_the_top_or_in_the_list_as_chosen(self):
         html = (REPO / "dashboard.html").read_text(encoding="utf-8")
@@ -173,7 +183,11 @@ class PlannerPageTest(unittest.TestCase):
         # where it saves (kept, for a planner.js that loads after the answer).
         self.assertIn("  refocus(main, key);\n  emit('render');\n}", JS)
         self.assertRegex(JS, r"catch \{\}\n  emit\('reload'\);\n\}")
-        self.assertRegex(JS, r"\.finally\(\(\) => \{\s*PROBING = false;\s*render\(\);\s*showSyncbox\(\);\s*emit\('ready'\);")
+        # Once the server has answered, or at once when the page is drawn from the last visit's copy
+        # of its answer; never twice.
+        self.assertRegex(JS, r"\.finally\(\(\) => \{\s*if \(!copy && !PHONE\) \{ showSyncbox\(\); emit\('ready'\); \}")
+        self.assertIn("if (copy && !PHONE) { enableServerFeatures(); showSyncbox(); emit('ready'); }", JS)
+        self.assertEqual(JS.count("emit('ready')"), 3)
         self.assertIn("if (PHONE || LOCAL_FILES) { showSyncbox(); emit('ready'); }", JS)
         self.assertIn("on(name, fn){ hooks[name].push(fn); if (name === 'ready' && readied) fn(); },", JS)
         # A server that does not serve planner.js: no planner rather than an empty Day view.
@@ -822,13 +836,14 @@ console.log(JSON.stringify(out));
         cls.out = run_node(script)
 
     def test_on_the_mac_and_from_another_device_as_before(self):
+        # (The tasks are asked for with the marks, at the start: see BootTest.)
         self.assertEqual(self.out["mac"], {"syncShown": True, "syncClick": True, "fabShown": True,
-                                           "calls": ["GET api/tasks", "GET api/sync"]})
+                                           "calls": ["GET api/sync"]})
 
     def test_a_public_copy_has_no_sync_now(self):
         # Marks and tasks work (the + button, the tasks); nothing asks for a sync or its state.
         self.assertEqual(self.out["public"], {"syncShown": False, "syncClick": False, "fabShown": True,
-                                              "calls": ["GET api/tasks"]})
+                                              "calls": []})
 
     def test_a_failed_sync_points_to_the_sync_log(self):
         # The server adds each sync's output to state/sync.log (server.py run_sync); the toast says so.
@@ -1293,7 +1308,7 @@ class UndoPlanTest(unittest.TestCase):
 const store = {}, posts = [];
 let down = false, refuse = false, renders = 0, scrolledFor = 'x', wentTo = null, focusGone = false, refocused = null;
 const copy = v => v == null ? null : JSON.parse(JSON.stringify(v));
-const SH = {same, addStep, offerStep, toast, setPlanner(){}, plannerState: 'on',
+const SH = {same, addStep, offerStep, toast, setPlanner(){}, plannerState: 'on', mode: {WRITE: 'local'},
   api: async (path, body) => {
     if (down || refuse) throw new Error('refused');
     posts.push(body.key + (body.value === null ? ' removed' : ''));
@@ -2100,3 +2115,987 @@ console.log(JSON.stringify(out));
         cut = self.out["cut"]
         self.assertEqual(cut, {"style": {"left": "67px", "top": "8px", "maxWidth": "", "maxHeight": "284px"}, "side": "above", "cut": "1"})
         self.assertIn('.ptip[data-cut="1"]::after{', HTML)
+
+
+# ---- opening at once: the copies kept for the next visit (dashboard.js "kept for the next visit",
+# ---- "asking and saving", "starting"; planner.js "the copy kept from the last visit") ----
+KEPT_START, KEPT_END = "// ---- kept for the next visit ----", "// ---- end of kept for the next visit ----"
+ASK_START, ASK_END = "// ---- asking and saving ----", "// ---- end of asking and saving ----"
+BOOT_START = "// ---- starting ----"
+PLAN_COPY_START = "  // ---- the copy kept from the last visit ----"
+
+
+def kept_section():
+    return JS[JS.index(KEPT_START):JS.index(KEPT_END)]
+
+
+class KeptSourceTest(unittest.TestCase):
+    """The page opens from what the server last answered, kept in the browser, and asks quietly."""
+
+    def test_data_js_does_not_hold_the_page_up(self):
+        # Asked for as before, from the same place, but the page no longer waits for it.
+        self.assertIn('<script src="data.js" async fetchpriority="high"></script>\n<script src="dashboard.js"></script>\n<script src="planner.js"></script>', HTML)
+        self.assertIn("let D = window.SCHOOL_DATA || null;", JS)
+        self.assertIn("  if (!D) return;   // not started", JS)
+        # Its arrival is heard from its own script, or the window's load when that was missed.
+        self.assertIn("const script = document.querySelector('script[src=\"data.js\"]');", JS)
+        for event in ("script?.addEventListener('load', dataHere);", "script?.addEventListener('error', dataHere);", "window.addEventListener('load', dataHere);"):
+            self.assertIn(event, JS)
+
+    def test_nothing_new_is_fetched_and_no_service_worker(self):
+        # The same requests to the same places as before the copies: only when they are made changed.
+        self.assertEqual(sorted(re.findall(r"fetch\(([^,)]+)", JS)), ["'/api/state/'", "'platform.json'", "path", "path"])
+        self.assertEqual(sorted(set(re.findall(r"getJson\('([^']+)'\)", JS))), ["api/marks", "api/sync", "api/tasks"])
+        self.assertEqual(re.findall(r"fetch\(([^,)]+)", PLANNER), ["`api/plan?from=${from}&to=${to}`"] * 2)
+        self.assertEqual(re.findall(r"fetch\(([^,)]+)", BAR), ["'platform.json'"])
+        for text in (JS, PLANNER, BAR, HTML):
+            self.assertNotIn("serviceWorker", text)
+            self.assertNotIn("indexedDB", text)
+            self.assertNotIn("caches.", text)
+
+    def test_the_copies_have_a_form_a_place_a_time_and_a_size(self):
+        self.assertIn("const KEPT = 'sh:kept:1:';", JS)
+        self.assertIn("const keptKey = what => `${KEPT}${what}:${PHONE ? 'phone' : 'server'}:${location.pathname}`;", JS)
+        self.assertIn("const KEPT_DAYS = 3;", JS)
+        self.assertIn("const KEPT_MAX = {data: 1500000, state: 200000, plan: 200000};", JS)
+        self.assertIn("return age >= 0 && age < KEPT_DAYS * 864e5 ? {at, text: v.slice(cut + 1)} : null;", JS)
+        self.assertIn("if (typeof text !== 'string' || text.length > KEPT_MAX[what]) throw new Error('not kept');", JS)
+
+    def test_storage_is_only_touched_where_a_failure_is_caught(self):
+        # localStorage in two places only, each call inside a try; the planner keeps its copy
+        # through dashboard.js.
+        outside = JS[:JS.index(KEPT_START)] + JS[JS.index(KEPT_END):]
+        self.assertEqual(outside.count("localStorage"), 2)   # mem.get and mem.set, as before
+        for line in JS.splitlines():
+            if "localStorage." in line and "try" not in line:
+                self.assertRegex(line, r"^\s{6,}", line)     # inside a method's try block
+        section = kept_section()
+        for method in ("get(what){", "write(what, text){", "drop(what){", "tidy(){"):
+            body = section[section.index("  " + method):]
+            body = body[:body.index("\n  },") if "\n  }," in body else len(body)]
+            self.assertIn("try", body, method)
+        self.assertNotIn("localStorage", PLANNER)
+        self.assertIn("SH.kept?.write('plan', JSON.stringify({from: loaded.from, to: loaded.to, plan}));", PLANNER)
+        self.assertIn("const c = SH.kept?.read('plan'), today = todayIso();", PLANNER)
+
+    def test_nothing_is_saved_on_the_word_of_a_copy(self):
+        # Every save waits for the server's own answer about where the page saves.
+        self.assertIn("const sending = to => known.then(() => { if (WRITE !== to) throw new Error('nowhere to save'); });", JS)
+        self.assertIn("const api = (path, body) => sending('local').then(() => saved(path, fetch(path, {", JS)
+        self.assertIn("return (body ? sending('cloud').then(() => saved('cloud', ask())) : ask()).then(answer).then(r => heard('cloud', r));", JS)
+        self.assertEqual(JS.count("nowKnown()"), 2)          # from disk at once; else when the server answered or did not
+        self.assertRegex(JS, r"\}\)\.finally\(\(\) => \{\s*if \(!copy && !PHONE\) \{ showSyncbox\(\); emit\('ready'\); \}\s*nowKnown\(\);\s*\}\);")
+        # What is kept is what the server said, once it has said where the page saves.
+        self.assertIn("if (!placed || !server.marks || !server.tasks) return;", JS)
+        self.assertEqual(len(re.findall(r"^\s*placed = true;", JS, re.M)), 1)
+        # The plan: a copy is read, never changed, so nothing is saved from one.
+        self.assertIn("const editable = () => !!plan && inRange(shown) && !copied;", PLANNER)
+        self.assertIn("if (!plan || copied || !loaded || today < loaded.from || today > loaded.to) return;", PLANNER)
+        self.assertIn("if (!editable()) { box.checked = !box.checked; return; }", PLANNER)
+        # And the copy is drawn from at the start only.
+        self.assertEqual(len(re.findall(r"\bkeptState\(\)", JS)), 2)   # its definition, and start
+        self.assertEqual(len(re.findall(r"\bshowKept\(\)", PLANNER)), 2)
+
+    def test_the_servers_answer_is_taken_in_place(self):
+        # Equal to what is on show, nothing is drawn again; a ✓ not saved yet stays as shown.
+        self.assertIn("for (const id in unsavedMark) { if (marks[id]) next[id] = marks[id]; else delete next[id]; }", JS)
+        self.assertIn("if (changed) refreshTasks(t); else tasks = t;", JS)
+        self.assertIn("if (s && before === saves && !took(s.marks, s.tasks)) showSynced();", JS)
+        self.assertIn("const asShown = copied && same(plan, next) && same(loaded, {from, to});", PLANNER)
+        self.assertIn("if (asShown) unlock(); else render();", PLANNER)
+        # The drawer stays where it was read when it is drawn again for the same item.
+        self.assertIn("const top = drawerId === id ? drawer.scrollTop : 0;", JS)
+        self.assertIn("drawer.scrollTop = top;", JS)
+        # No page load in any of it.
+        self.assertEqual(JS.count("location.reload()"), 1)   # after Sync now, as before
+
+    def test_synced_ago_is_the_datas_own_time(self):
+        start = JS.index("function showSynced(){")
+        body = JS[start:JS.index("\n}\n", start)]
+        self.assertIn("$('#sync').textContent = D.generated_at ? 'Synced ' + ago(D.generated_at) : 'Not synced yet';", body)
+        self.assertIn("function render(){\n  if (!D) return;", JS)
+        self.assertRegex(JS, r"\$\('\.page'\)\.dataset\.plan = plannerState;\n  showSynced\(\);")
+
+    def test_a_copy_looks_like_the_plan_for_a_moment_then_shows_it_is_waiting(self):
+        self.assertIn("const COPY_QUIET_MS = 1200;", PLANNER)
+        self.assertIn("const locked = () => !editable() && !(copied && !waiting && inRange(shown));", PLANNER)
+        self.assertIn("els.week.disabled = els.add.disabled = locked();", PLANNER)
+        self.assertIn("grid.classList.toggle('loading', locked());", PLANNER)
+        self.assertIn("quietTimer = setTimeout(() => { if (copied) { waiting = true; render(); } }, COPY_QUIET_MS);", PLANNER)
+        # + Block and Every week pressed meanwhile are done once the plan is here.
+        self.assertIn("if (t.closest('#planWeek')) return afterCopy(openWeek);", PLANNER)
+        self.assertIn("if (t.closest('#planAdd')) return afterCopy(newBlockAt);", PLANNER)
+        # The copy is drawn when the page knows where it saves, before the server is asked.
+        self.assertRegex(PLANNER, r"return SH\.setPlanner\('off'\);\n    showKept\(\);\n    load\(shown\);")
+
+
+# The kept copies with the browser's storage stood in for: `stored` is what it holds, and `broken`
+# how it fails ('quota': nothing can be written; 'deny': every call throws; 'gone': reaching
+# localStorage itself throws, as with site data blocked).
+STORAGE_PAGE = """
+const stored = new Map();
+let broken = '';
+const storage = {
+  get length(){ if (broken === 'deny') throw new Error('denied'); return stored.size; },
+  key: i => [...stored.keys()][i] ?? null,
+  getItem: k => { if (broken === 'deny') throw new Error('denied'); return stored.has(k) ? stored.get(k) : null; },
+  setItem: (k, v) => { if (broken) throw new Error('quota'); stored.set(k, String(v)); },
+  removeItem: k => { if (broken === 'deny') throw new Error('denied'); stored.delete(k); },
+};
+Object.defineProperty(globalThis, 'localStorage', {configurable: true, get(){ if (broken === 'gone') throw new Error('SecurityError'); return storage; }});
+const DAY = 864e5;
+// A copy as the page keeps it, for a place (the kind of site and the path) and of an age in days.
+const keep = (what, value, {place = 'server', path = '/school/', age = 0, text} = {}) =>
+  stored.set(`sh:kept:1:${what}:${place}:${path}`, (Date.now() - age * DAY) + '\\n' + (text ?? JSON.stringify(value)));
+const keptNow = (what, place = 'server', path = '/school/') => {
+  const v = stored.get(`sh:kept:1:${what}:${place}:${path}`);
+  return v === undefined ? null : JSON.parse(v.slice(v.indexOf('\\n') + 1));
+};
+let PHONE = false, LOCAL_FILES = false, REMOTE = false, PUBLIC = false, LIVE = false, WRITE = null, PROBING = false;
+const location = {pathname: '/school/', reload(){}};
+"""
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class KeptStoreTest(unittest.TestCase):
+    """dashboard.js's own store of copies, run under Node against a stand-in for localStorage."""
+
+    @classmethod
+    def setUpClass(cls):
+        script = STORAGE_PAGE + kept_section() + """
+const out = {};
+const T = {'task:aaaaaaaa': {id: 'task:aaaaaaaa', name: 'Buy milk'}};
+const M = {'canvas:1': {marked_at: '2026-11-10T10:00:00+00:00', name: 'HW 1', course: '15-122'}};
+// Written with its time, under its form, the kind of site and the page's path; read back.
+out.wrote = kept.write('plan', JSON.stringify({a: 1}));
+out.keys = [...stored.keys()];
+out.value = /^\\d{13}\\n\\{"a":1\\}$/.test(stored.get('sh:kept:1:plan:server:/school/'));
+out.read = kept.read('plan');
+out.got = typeof kept.get('plan').at;
+// Another path, and the phone site at the same path, have their own.
+location.pathname = '/school/dashboard.html'; out.otherPath = kept.read('plan');
+location.pathname = '/school/'; PHONE = true; out.otherKind = kept.read('plan'); kept.write('plan', '{"b":2}'); out.phoneKey = [...stored.keys()].filter(k => k.includes('phone'));
+PHONE = false;
+// Its time: a few days at most, and never from the future (a clock set back).
+keep('state', {x: 1}, {age: 2.9}); out.days29 = kept.read('state');
+keep('state', {x: 1}, {age: 3.1}); out.days31 = kept.read('state');
+keep('state', {x: 1}, {age: -0.1}); out.future = kept.read('state');
+// Not what it should hold: no time, no JSON, cut short.
+stored.set('sh:kept:1:state:server:/school/', '{"x":1}'); out.noTime = kept.read('state');
+stored.set('sh:kept:1:state:server:/school/', 'soon\\n{"x":1}'); out.badTime = kept.read('state');
+keep('state', null, {text: '{"x":'}); out.cutShort = kept.read('state');
+keep('state', null, {text: ''}); out.empty = kept.read('state');
+// Too long: not kept, and the copy before it goes too.
+keep('state', {old: true});
+out.tooLong = [kept.write('state', 'x'.repeat(200001)), stored.has('sh:kept:1:state:server:/school/')];
+out.longEnough = kept.write('state', '"' + 'x'.repeat(199998) + '"');
+out.dataRoom = [kept.write('data', '"' + 'x'.repeat(1499998) + '"'), kept.write('data', '"' + 'x'.repeat(1499999) + '"')];
+out.notText = kept.write('state', {x: 1});
+// A full disk: what is there can be read; a write fails quietly and the copy before it goes.
+keep('state', {old: true}); broken = 'quota';
+out.full = {read: kept.read('state'), wrote: kept.write('state', '{"new":true}'), left: stored.has('sh:kept:1:state:server:/school/')};
+// Storage that throws at every call, or cannot be reached at all: nothing is kept, nothing throws.
+for (const how of ['deny', 'gone']) {
+  broken = '';
+  keep('state', {old: true});
+  broken = how;
+  out[how] = [kept.get('state'), kept.read('state'), kept.write('state', '{}'), kept.drop('state') === undefined, kept.tidy() === undefined, keptState()];
+}
+broken = '';
+// Tidying: other forms and copies past their time go, wherever they are from; the rest stays.
+stored.clear();
+keep('data', {x: 1}); keep('state', {x: 1}, {age: 5}); keep('plan', {x: 1}, {path: '/old/', age: 4}); keep('data', {x: 1}, {path: '/other/', age: 1});
+stored.set('sh:kept:0:data:server:/school/', Date.now() + '\\n{}'); stored.set('sh:kept:1:data:server:/broken/', 'nonsense');
+stored.set('sh:view', '"courses"'); stored.set('qp.theme', 'night'); stored.set('sh:keptish', 'x');
+kept.tidy();
+out.tidied = [...stored.keys()].sort();
+// From a file on disk nothing is read or kept.
+stored.clear(); keep('state', {x: 1}); LOCAL_FILES = true;
+out.disk = [kept.get('state'), kept.read('state'), kept.write('plan', '{}'), stored.size];
+LOCAL_FILES = false;
+// The marks and tasks of the last visit are taken only as what they should be.
+const state = (c, o) => { stored.clear(); keep('state', c, o); return !!keptState(); };
+const at = {remote: false, public: false};
+out.states = {
+  good: state({at, marks: M, tasks: T}), empty: state({at, marks: {}, tasks: {}}),
+  marksList: state({at, marks: [], tasks: T}), markNoTime: state({at, marks: {x: {name: 'HW'}}, tasks: T}), markNull: state({at, marks: {x: null}, tasks: T}),
+  noTasks: state({at, marks: M, tasks: null}), taskOtherId: state({at, marks: M, tasks: {'task:bbbbbbbb': T['task:aaaaaaaa']}}), taskNoName: state({at, marks: M, tasks: {'task:aaaaaaaa': {id: 'task:aaaaaaaa'}}}),
+  noPlace: state({marks: M, tasks: T}), placeWords: state({at: {remote: 'no', public: false}, marks: M, tasks: T}), notAMap: state([1, 2]), text: state('marks'),
+};
+PHONE = true;
+out.phoneState = [state({at: null, marks: M, tasks: T}, {place: 'phone'}), state({at, marks: M, tasks: T})];   // its own kind only
+PHONE = false;
+out.shaped = [dataShaped({courses: []}), dataShaped({generated_at: 'x', courses: [{id: 'c', assignments: [{id: 'a'}]}]}), dataShaped({}), dataShaped(null), dataShaped([]),
+  dataShaped({courses: [{id: 'c'}]}), dataShaped({courses: [{id: 'c', assignments: [{name: 'no id'}]}]}), dataShaped({courses: [null]})];
+// What the server answers is what is kept, each of the marks and the tasks whole, once the server
+// has said where the page saves; an answer that holds neither changes nothing.
+stored.clear();
+heard('api/marks', M); heard('api/tasks', {tasks: T});
+out.beforePlaced = keptNow('state');
+placed = true; REMOTE = true; PUBLIC = true;
+heard('api/sync', {running: false}); heard('api/plan', {key: 'settings', value: null}); heard('api/open', {});
+out.notTheirs = keptNow('state');
+heard('api/mark', {...M, 'canvas:2': {marked_at: 'now', name: null, course: null}});
+out.afterMark = keptNow('state');
+heard('api/task/delete', {removed: T['task:aaaaaaaa'], tasks: {}});
+out.afterDelete = keptNow('state');
+heard('api/task', {task: T['task:aaaaaaaa'], tasks: T}); heard('api/marks', 'oops'); heard('api/tasks', {});
+out.afterNonsense = keptNow('state');
+PHONE = true; location.pathname = '/k/';
+heard('cloud', {marks: M, tasks: T});
+out.cloud = keptNow('state', 'phone', '/k/');
+heard('cloud', {task: T['task:aaaaaaaa'], tasks: {}});
+out.cloudTask = keptNow('state', 'phone', '/k/');
+console.log(JSON.stringify(out));
+"""
+        cls.out = run_node(script)
+
+    def test_a_copy_is_kept_with_its_time_per_place(self):
+        out = self.out
+        self.assertTrue(out["wrote"])
+        self.assertEqual(out["keys"], ["sh:kept:1:plan:server:/school/"])
+        self.assertTrue(out["value"])
+        self.assertEqual(out["read"], {"a": 1})
+        self.assertEqual(out["got"], "number")
+        self.assertIsNone(out["otherPath"])
+        self.assertIsNone(out["otherKind"])
+        self.assertEqual(out["phoneKey"], ["sh:kept:1:plan:phone:/school/"])
+
+    def test_an_old_or_broken_copy_is_not_used(self):
+        out = self.out
+        self.assertEqual(out["days29"], {"x": 1})
+        for name in ("days31", "future", "noTime", "badTime", "cutShort", "empty"):
+            self.assertIsNone(out[name], name)
+
+    def test_a_copy_too_long_is_not_kept_and_leaves_none(self):
+        out = self.out
+        self.assertEqual(out["tooLong"], [False, False])
+        self.assertTrue(out["longEnough"])
+        self.assertEqual(out["dataRoom"], [True, False])
+        self.assertFalse(out["notText"])
+
+    def test_the_page_works_with_storage_full_or_unavailable(self):
+        out = self.out
+        self.assertEqual(out["full"], {"read": {"old": True}, "wrote": False, "left": False})
+        for how in ("deny", "gone"):
+            self.assertEqual(out[how], [None, None, False, True, True, None], how)
+        self.assertEqual(out["disk"], [None, None, False, 1])
+
+    def test_tidying_removes_only_copies_no_visit_will_read(self):
+        self.assertEqual(self.out["tidied"], ["qp.theme", "sh:kept:1:data:server:/other/", "sh:kept:1:data:server:/school/", "sh:keptish", "sh:view"])
+
+    def test_only_what_it_should_hold_is_taken(self):
+        states = self.out["states"]
+        self.assertEqual({k for k, v in states.items() if v}, {"good", "empty"})
+        self.assertEqual(self.out["phoneState"], [True, False])
+        self.assertEqual(self.out["shaped"], [True, True, False, False, False, False, False, False])
+
+    def test_what_the_server_answers_is_what_is_kept(self):
+        out = self.out
+        self.assertIsNone(out["beforePlaced"])
+        self.assertIsNone(out["notTheirs"])
+        self.assertEqual(out["afterMark"]["at"], {"remote": True, "public": True})
+        self.assertEqual(sorted(out["afterMark"]["marks"]), ["canvas:1", "canvas:2"])
+        self.assertEqual(sorted(out["afterMark"]["tasks"]), ["task:aaaaaaaa"])
+        self.assertEqual(out["afterDelete"]["tasks"], {})
+        self.assertEqual(sorted(out["afterDelete"]["marks"]), ["canvas:1", "canvas:2"])
+        self.assertEqual(sorted(out["afterNonsense"]["tasks"]), ["task:aaaaaaaa"])
+        self.assertEqual(sorted(out["afterNonsense"]["marks"]), ["canvas:1", "canvas:2"])
+        self.assertEqual(out["cloud"]["at"], None)
+        self.assertEqual(sorted(out["cloud"]["marks"]), ["canvas:1"])
+        self.assertEqual(out["cloudTask"]["tasks"], {})
+
+
+# The page's start with the page, the network and the browser's storage stood in for. Every request
+# waits until the test answers it (answerNow), from what the stand-in server (there) holds at that
+# moment; draws lists every drawing of the list with what it was drawn from.
+BOOT_PAGE = STORAGE_PAGE + """
+const realTimeout = globalThis.setTimeout;
+const tick = () => new Promise(r => realTimeout(r, 0));
+const later = [];
+const setTimeout = (fn, ms) => { later.push({fn, ms}); return later.length; };
+const clearTimeout = () => {};
+const copy = v => v == null ? v : JSON.parse(JSON.stringify(v));
+const SITE_KEY = 'k';
+const els = {};
+for (const sel of ['#fab', '#syncbox', '#syncBtn']) els[sel] = {hidden: true, onclick: null, disabled: false, textContent: ''};
+els['#main'] = {innerHTML: ''};
+const $ = sel => els[sel] || null;
+const toasts = [];
+let toastTimer = null;
+const toast = (msg, action, o = {}) => { toasts.push(msg + (action ? ' [' + (o.label || 'Undo') + ']' : '')); };
+const script = {on: {}, addEventListener(type, fn){ this.on[type] = fn; }};
+const page = {focus: {tagName: 'BODY'}, on: {}};
+const document = {readyState: 'loading', get activeElement(){ return page.focus; }, body: {tagName: 'BODY'}, addEventListener(){},
+  querySelector: sel => sel === 'script[src="data.js"]' ? script : null};
+const window = {on: {}, addEventListener(type, fn){ this.on[type] = fn; }, SCHOOL_DATA: undefined};
+const CSS = {escape: s => s};
+const errors = [];
+const console = {error: e => errors.push(String(e && e.message || e)), log: (...a) => globalThis.console.log(...a)};
+const sessionStorage = {getItem: () => null, setItem(){}, removeItem(){}};
+const pinnedTask = t => typeof t.pinned === 'boolean' ? t.pinned : !t.due_at;
+const DATA = {generated_at: 'G1', errors: [], new_files: [], courses: [{id: 'c1', short: '15-122', assignments: [
+  {id: 'a1', name: 'HW 1', marked_done: 'M0'}, {id: 'a2', name: 'HW 2'}, {id: 'a3', name: 'HW 3'}]}]};
+const MARK = at => ({marked_at: at, name: null, course: null});
+const TASK = (id, name) => ({id, name, course_id: 'personal', due_at: null, all_day: false, pinned: true, notes: '', created_at: 'C', updated_at: 'U'});
+
+// The stand-in server, and every request made to it.
+const there = {marks: {}, tasks: {}, platform: {status: 204}, down: false};
+const net = {log: [], waiting: []};
+let stamp = 0;
+function serve(q){
+  if (there.down) return q.rej(new TypeError('Failed to fetch'));
+  const ok = body => q.res({ok: true, status: 200, json: async () => copy(body)});
+  const b = q.body || {};
+  if (q.url === 'platform.json') return q.res({ok: there.platform.status === 200, status: there.platform.status, json: async () => copy(there.platform.body)});
+  if (q.url === 'api/marks') return ok(there.marks);
+  if (q.url === 'api/tasks') return ok({tasks: there.tasks});
+  if (q.url === 'api/sync') return ok({running: false});
+  const mark = () => { if (b.done) there.marks[b.id] = MARK(b.marked_at || 'T' + (++stamp)); else delete there.marks[b.id]; };
+  if (q.url === 'api/mark') { mark(); return ok(there.marks); }
+  if (q.url === '/api/state/') { if (q.method === 'POST' && b.action === 'mark') mark(); return ok({marks: there.marks, tasks: there.tasks}); }
+  return q.res({ok: false, status: 404, json: async () => ({})});
+}
+const fetch = (url, o = {}) => new Promise((res, rej) => {
+  const q = {url, method: o.method || 'GET', body: o.body ? JSON.parse(o.body) : null, res, rej};
+  net.log.push(q.method + ' ' + url);
+  net.waiting.push(q);
+});
+const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
+// Answers the requests that wait (all, or those that match), and lets the page take the answers in.
+async function answerNow(match = () => true){
+  const go = net.waiting.filter(match);
+  net.waiting = net.waiting.filter(q => !go.includes(q));
+  go.forEach(serve);
+  await settle();
+}
+const posts = () => net.log.filter(l => l.startsWith('POST'));
+
+// The page's own state and drawing.
+let tasks = null, courses = [], all = [], byId = {}, drawerId = null, plannerState = 'unknown', cannotDraw = null;
+const draws = [], events = [];
+let closed = 0, synced = 0;
+function rebuild(){
+  all = D.courses.flatMap(c => c.assignments.map(a => ({...a, course: c})));
+  for (const t of Object.values(tasks || {})) all.push({id: t.id, name: t.name, is_task: true});
+  byId = Object.fromEntries(all.map(a => [a.id, a]));
+}
+function render(){
+  if (!D) return;
+  if (cannotDraw && cannotDraw()) throw new Error('cannot draw this');
+  draws.push({data: D.generated_at, write: WRITE, live: LIVE, remote: REMOTE, pub: PUBLIC, probing: PROBING, plan: plannerState,
+    marks: Object.keys(marks).sort().join(' '), tasks: tasks ? Object.keys(tasks).sort().join(' ') : null, items: all.length});
+}
+function refresh(){ render(); }
+function closeDrawer(){ drawerId = null; closed++; }
+function showSynced(){ synced++; }
+const emit = name => { events.push(name); };
+const shown = () => draws[draws.length - 1];
+"""
+
+
+def boot_sections():
+    marks = re.search(r"^const syncedMarks = .*\nlet marks = \{\};$", JS, re.M).group(0)
+    return "\n".join([
+        "let D = window.SCHOOL_DATA || null;", kept_section(), JS[JS.index(ASK_START):JS.index(ASK_END)], source_of("const backend = {"),
+        source_of("async function platformMode(r){"), marks, source_of("function refreshTasks(next){"), source_of("function took(m, t){"),
+        source_of("async function setMark(id, done, as){"), source_of("const unsavedMark = {};"), undo_section(),
+        JS[JS.index(SYNC_START):JS.index(SYNC_END)], source_of("async function reloadState(){"), JS[JS.index(BOOT_START):]])
+
+
+def boot(setup, body):
+    """One visit: setup says what the browser and the server hold before the page's scripts run,
+    body what happens after."""
+    return run_node(BOOT_PAGE + setup + boot_sections() + "\nconst out = {};\n(async () => {\n" + body + "\nconsole.log(JSON.stringify(out));\n})();\n")
+
+
+# What the server holds in most visits, and the copy the last visit kept of it.
+BOOT_SERVER = """
+window.SCHOOL_DATA = DATA;
+there.marks = {a2: MARK('S1')};
+there.tasks = {'task:aaaaaaaa': TASK('task:aaaaaaaa', 'Buy milk')};
+there.platform = {status: 200, body: {apps: [], public: true}};
+"""
+BOOT_COPY = BOOT_SERVER + "keep('state', {at: {remote: true, public: true}, marks: there.marks, tasks: there.tasks});\n"
+BOOT_SEEN = """
+out.atStart = {draws: draws.length, shown: shown(), asked: [...net.log], events: [...events], fab: !els['#fab'].hidden, syncbox: !els['#syncbox'].hidden, syncBtn: !els['#syncBtn'].hidden};
+"""
+BOOT_ANSWERED = """
+await answerNow();
+out.answered = {draws: draws.length, shown: shown(), events: [...events], fab: !els['#fab'].hidden, syncbox: !els['#syncbox'].hidden, syncBtn: !els['#syncBtn'].hidden,
+  kept: keptNow('state'), placed, errors, later: later.map(l => l.ms)};
+"""
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class BootTest(unittest.TestCase):
+    """How the page starts: dashboard.js's own "starting", requests and copies, run under Node. A
+    first visit goes as it always did; a later one is drawn at once from what the last one kept,
+    and the server's answer is taken quietly."""
+
+    def test_a_first_visit_asks_then_draws_what_the_server_says(self):
+        out = boot(BOOT_SERVER, BOOT_SEEN + BOOT_ANSWERED)
+        start, done = out["atStart"], out["answered"]
+        # The list as of the last sync, with no ✓ buttons and no read-only banner while it asks.
+        self.assertEqual(start["draws"], 1)
+        self.assertEqual(start["shown"], {"data": "G1", "write": None, "live": False, "remote": False, "pub": False, "probing": True,
+                                          "plan": "unknown", "marks": "a1", "tasks": None, "items": 3})
+        # Where it is, the marks and the tasks, asked for together; nothing else, and no save.
+        self.assertEqual(start["asked"], ["GET platform.json", "GET api/marks", "GET api/tasks"])
+        self.assertEqual([start["events"], start["fab"], start["syncbox"]], [[], False, False])
+        # Answered: drawn once more, as a page that saves; the planner is told; the answers are kept.
+        self.assertEqual(done["draws"], 2)
+        self.assertEqual(done["shown"], {"data": "G1", "write": "local", "live": False, "remote": True, "pub": True, "probing": False,
+                                         "plan": "unknown", "marks": "a2", "tasks": "task:aaaaaaaa", "items": 4})
+        self.assertEqual([done["events"], done["fab"], done["syncbox"], done["syncBtn"]], [["ready"], True, True, False])
+        self.assertEqual(done["kept"]["at"], {"remote": True, "public": True})
+        self.assertEqual([sorted(done["kept"]["marks"]), sorted(done["kept"]["tasks"])], [["a2"], ["task:aaaaaaaa"]])
+        self.assertTrue(done["placed"])
+        self.assertEqual(done["errors"], [])
+
+    def test_a_later_visit_is_drawn_at_once_and_not_again(self):
+        out = boot(BOOT_COPY, BOOT_SEEN + BOOT_ANSWERED)
+        start, done = out["atStart"], out["answered"]
+        full = {"data": "G1", "write": "local", "live": False, "remote": True, "pub": True, "probing": True,
+                "plan": "unknown", "marks": "a2", "tasks": "task:aaaaaaaa", "items": 4}
+        # Before any answer: the ✓ buttons, the tasks, the + button, and the planner told to start.
+        self.assertEqual(start["draws"], 1)
+        self.assertEqual(start["shown"], full)
+        self.assertEqual([start["events"], start["fab"], start["syncbox"], start["syncBtn"]], [["ready"], True, True, False])
+        # The server is asked all the same (never less than a first visit asks).
+        self.assertEqual(start["asked"], ["GET platform.json", "GET api/marks", "GET api/tasks"])
+        # Its answer is the copy: nothing is drawn again, and the planner is not told twice.
+        self.assertEqual(done["draws"], 1)
+        self.assertEqual(done["events"], ["ready"])
+        self.assertTrue(done["placed"])
+        self.assertEqual(done["later"], [3000, 0])  # the tidying, and the data kept, once the page is up
+
+    def test_a_copy_that_is_behind_gives_way_in_place(self):
+        out = boot(BOOT_COPY + """
+there.marks.a3 = MARK('S2'); delete there.marks.a2;
+there.tasks['task:bbbbbbbb'] = TASK('task:bbbbbbbb', 'Added on the phone');
+""", "drawerId = 'task:aaaaaaaa';" + BOOT_SEEN + BOOT_ANSWERED + "out.drawer = [drawerId, closed];")
+        self.assertEqual(out["atStart"]["shown"]["marks"], "a2")
+        done = out["answered"]
+        # Drawn once more with what the server has, by the page's own redraw: no load, the open
+        # drawer stays (its item is still there), and the copy is the server's now.
+        self.assertEqual(done["draws"], 2)
+        self.assertEqual([done["shown"]["marks"], done["shown"]["tasks"]], ["a3", "task:aaaaaaaa task:bbbbbbbb"])
+        self.assertEqual(done["events"], ["ready"])
+        self.assertEqual([sorted(done["kept"]["marks"]), sorted(done["kept"]["tasks"])], [["a3"], ["task:aaaaaaaa", "task:bbbbbbbb"]])
+        self.assertEqual(out["drawer"], ["task:aaaaaaaa", 0])
+
+    def test_the_drawer_closes_only_when_its_task_is_gone(self):
+        out = boot(BOOT_COPY + "there.tasks = {};", "drawerId = 'task:aaaaaaaa';" + BOOT_ANSWERED + "out.drawer = [drawerId, closed];")
+        self.assertEqual(out["drawer"], [None, 1])
+
+    def test_the_place_is_the_servers_not_the_copys(self):
+        # Kept as the public copy, answered as this Mac (the same address run another way): the
+        # page is drawn again with files and Sync now, and that is what is kept.
+        out = boot(BOOT_COPY + "there.platform = {status: 204};", BOOT_SEEN + BOOT_ANSWERED)
+        self.assertEqual([out["atStart"]["shown"]["pub"], out["atStart"]["syncBtn"]], [True, False])
+        done = out["answered"]
+        self.assertEqual(done["draws"], 2)
+        self.assertEqual([done["shown"]["live"], done["shown"]["remote"], done["shown"]["pub"], done["syncBtn"]], [True, False, False, True])
+        self.assertEqual(done["kept"]["at"], {"remote": False, "public": False})
+        # And the other way round: Sync now goes.
+        out = boot(BOOT_SERVER + "there.platform = {status: 204}; keep('state', {at: {remote: false, public: false}, marks: there.marks, tasks: there.tasks});"
+                   + "there.platform = {status: 200, body: {apps: [], public: true}};", BOOT_SEEN + BOOT_ANSWERED)
+        self.assertEqual([out["atStart"]["shown"]["live"], out["atStart"]["syncBtn"]], [True, True])
+        self.assertEqual([out["answered"]["shown"]["live"], out["answered"]["syncBtn"], out["answered"]["draws"]], [False, False, 2])
+
+    def test_a_change_made_before_the_answer_waits_and_then_lands(self):
+        out = boot(BOOT_COPY, """
+toggleMark('a3');                              // the ✓ on HW 3, in the page's first moment
+await settle();
+out.held = {posts: posts(), shown: shown().marks, toast: toasts[toasts.length - 1]};
+await answerNow(q => q.method === 'GET');      // the server's answers, which do not hold it yet
+out.afterAnswer = {shown: shown().marks, marks: Object.keys(marks).sort().join(' '), posts: posts(), draws: draws.length};
+await answerNow();                             // the save's own answer
+await Promise.all(steps.undo.map(s => s.settled));
+out.saved = {there: Object.keys(there.marks).sort().join(' '), shown: shown().marks, kept: Object.keys(keptNow('state').marks).sort().join(' '), steps: steps.undo.map(s => s.label), toasts};
+""")
+        # Shown at once, sent only once the server has said where the page saves.
+        self.assertEqual(out["held"], {"posts": [], "shown": "a2 a3", "toast": "Marked “HW 3” done [Undo]"})
+        # The server's marks did not hold it: it stays on the page all the same, and then it is sent.
+        self.assertEqual(out["afterAnswer"]["marks"], "a2 a3")
+        self.assertEqual(out["afterAnswer"]["posts"], ["POST api/mark"])
+        self.assertEqual(out["afterAnswer"]["draws"], 2)      # the first, and the ✓: none for the answer
+        self.assertEqual(out["saved"], {"there": "a2 a3", "shown": "a2 a3", "kept": "a2 a3", "steps": ["marked “HW 3” done"], "toasts": ["Marked “HW 3” done [Undo]"]})
+
+    def test_a_change_made_before_a_different_answer_keeps_both(self):
+        out = boot(BOOT_COPY + "there.marks.a1 = MARK('S9');", """
+toggleMark('a3');
+await answerNow(q => q.method === 'GET');
+out.afterAnswer = shown().marks;
+await answerNow();
+out.saved = [Object.keys(there.marks).sort().join(' '), shown().marks];
+toggleMark('a2');                              // and one taken away the same way, later
+await settle();
+out.unmarkShown = shown().marks;
+await answerNow();
+out.unmarked = [Object.keys(there.marks).sort().join(' '), shown().marks];
+""")
+        self.assertEqual(out["afterAnswer"], "a1 a2 a3")
+        self.assertEqual(out["saved"], ["a1 a2 a3", "a1 a2 a3"])
+        self.assertEqual(out["unmarkShown"], "a1 a3")
+        self.assertEqual(out["unmarked"], ["a1 a3", "a1 a3"])
+
+    def test_no_answer_after_a_copy_is_a_page_that_does_not_save(self):
+        out = boot(BOOT_COPY + "there.down = true;", BOOT_SEEN + """
+toggleMark('a3');
+await settle();
+out.clicked = shown().marks;
+""" + BOOT_ANSWERED + """
+await Promise.all(steps.undo.map(s => s.settled)).catch(() => {});
+await settle();
+out.after = {shown: shown(), posts: posts(), toasts, steps: steps.undo.length, plan: plannerState, waiting: net.waiting.length};
+""")
+        self.assertEqual(out["atStart"]["shown"]["write"], "local")
+        self.assertEqual(out["clicked"], "a2 a3")
+        done, after = out["answered"], out["after"]
+        # As the page is without a copy when the server does not answer: the last sync's marks and
+        # tasks, no ✓ buttons, no + button, no planner. The change was never sent; it is put back,
+        # says so, and is no step. The copy goes.
+        self.assertEqual(after["shown"], {"data": "G1", "write": None, "live": False, "remote": False, "pub": False, "probing": False,
+                                          "plan": "off", "marks": "a1", "tasks": None, "items": 3})
+        self.assertEqual([done["fab"], done["syncBtn"], after["plan"]], [False, False, "off"])
+        self.assertEqual(after["posts"], [])
+        self.assertEqual(after["toasts"][-1], "Couldn't save. Check your connection and try again.")
+        self.assertEqual(after["steps"], 0)
+        self.assertIsNone(done["kept"])
+        self.assertEqual(done["events"], ["ready"])
+        self.assertFalse(done["placed"])
+
+    def test_no_answer_on_a_first_visit_is_as_before(self):
+        out = boot(BOOT_SERVER + "there.down = true;", BOOT_SEEN + BOOT_ANSWERED)
+        done = out["answered"]
+        self.assertEqual(done["draws"], 2)
+        self.assertEqual(done["shown"], {"data": "G1", "write": None, "live": False, "remote": False, "pub": False, "probing": False,
+                                         "plan": "unknown", "marks": "a1", "tasks": None, "items": 3})
+        self.assertEqual([done["events"], done["fab"], done["syncbox"]], [["ready"], False, True])
+        self.assertIsNone(done["kept"])
+
+    def test_the_tasks_not_answering_alone_leaves_the_last_syncs(self):
+        out = boot(BOOT_SERVER, "await answerNow(q => q.url !== 'api/tasks'); net.waiting.forEach(q => q.rej(new Error('x'))); net.waiting = []; await settle();"
+                   + "out.shown = shown(); out.kept = keptNow('state');")
+        self.assertEqual([out["shown"]["write"], out["shown"]["marks"], out["shown"]["tasks"]], ["local", "a2", None])
+        self.assertIsNone(out["kept"])      # only both together are kept
+
+    def test_the_phone_site_starts_the_same_way(self):
+        phone = "PHONE = true; location.pathname = '/k/'; window.SCHOOL_DATA = DATA; there.marks = {a2: MARK('S1')}; there.tasks = {'task:aaaaaaaa': TASK('task:aaaaaaaa', 'Buy milk')};\n"
+        first = boot(phone, BOOT_SEEN + "await answerNow(); out.answered = {draws: draws.length, shown: shown(), events: [...events], fab: !els['#fab'].hidden, kept: keptNow('state', 'phone', '/k/')};")
+        self.assertEqual(first["atStart"]["asked"], ["GET /api/state/"])
+        self.assertEqual([first["atStart"]["shown"]["write"], first["atStart"]["shown"]["probing"], first["atStart"]["events"], first["atStart"]["fab"]], [None, False, ["ready"], False])
+        self.assertEqual([first["answered"]["shown"]["write"], first["answered"]["shown"]["marks"], first["answered"]["fab"], first["answered"]["draws"]], ["cloud", "a2", True, 2])
+        self.assertEqual(first["answered"]["events"], ["ready"])
+        self.assertEqual(first["answered"]["kept"], {"at": None, "marks": {"a2": {"marked_at": "S1", "name": None, "course": None}},
+                                                     "tasks": {"task:aaaaaaaa": first["answered"]["kept"]["tasks"]["task:aaaaaaaa"]}})
+        later = boot(phone + "keep('state', {at: null, marks: there.marks, tasks: there.tasks}, {place: 'phone', path: '/k/'});", BOOT_SEEN + """
+toggleMark('a3');
+await settle();
+out.held = posts();
+await answerNow(q => q.method === 'GET');
+out.sent = [posts(), draws.length, shown().marks];
+await answerNow();
+out.saved = [Object.keys(there.marks).sort().join(' '), Object.keys(keptNow('state', 'phone', '/k/').marks).sort().join(' ')];
+""")
+        self.assertEqual([later["atStart"]["shown"]["write"], later["atStart"]["shown"]["marks"], later["atStart"]["fab"]], ["cloud", "a2", True])
+        self.assertEqual(later["held"], [])
+        self.assertEqual(later["sent"], [["POST /api/state/"], 2, "a2 a3"])
+        self.assertEqual(later["saved"], ["a2 a3", "a2 a3"])
+        # A server's copy at the same path is not the phone site's, and the cloud not answering
+        # after a copy leaves the read-only page it always was.
+        other = boot(phone + "keep('state', {at: {remote: false, public: false}, marks: there.marks, tasks: there.tasks}, {path: '/k/'});", BOOT_SEEN)
+        self.assertEqual(other["atStart"]["shown"]["write"], None)
+        down = boot(phone + "keep('state', {at: null, marks: there.marks, tasks: there.tasks}, {place: 'phone', path: '/k/'}); there.down = true;",
+                    "await answerNow(); out.shown = shown(); out.fab = !els['#fab'].hidden; out.kept = keptNow('state', 'phone', '/k/');")
+        self.assertEqual([down["shown"]["write"], down["shown"]["marks"], down["shown"]["tasks"], down["fab"], down["kept"]], [None, "a1", None, False, None])
+
+    def test_from_disk_nothing_is_asked_or_kept(self):
+        out = boot("LOCAL_FILES = true; window.SCHOOL_DATA = DATA; keep('state', {at: {remote: false, public: false}, marks: {}, tasks: {}}); keep('data', {...DATA, generated_at: 'OLD'});",
+                   BOOT_SEEN + "later.forEach(l => l.fn()); await settle(); out.kept = [...stored.keys()].sort(); out.draws = draws.length;")
+        self.assertEqual(out["atStart"]["asked"], [])
+        self.assertEqual([out["atStart"]["shown"]["data"], out["atStart"]["shown"]["write"], out["atStart"]["events"]], ["G1", None, ["ready"]])
+        self.assertEqual(out["draws"], 1)
+        self.assertEqual(len(out["kept"]), 2)      # (the two this test put there; tidying leaves them their time)
+
+    def test_the_page_starts_without_storage(self):
+        for how in ("gone", "deny", "quota"):
+            with self.subTest(storage=how):
+                out = boot(BOOT_COPY + f"broken = '{how}';", BOOT_SEEN + """
+toggleMark('a3');
+await answerNow(); await answerNow();
+later.forEach(l => l.fn());
+await settle();
+out.end = {shown: shown(), there: Object.keys(there.marks).sort().join(' '), errors, events, state: stored.has('sh:kept:1:state:server:/school/')};
+""")
+                # Unreadable storage: a first visit. A full one: the copy is read, then goes, since
+                # the newer answer could not be kept in its place.
+                self.assertEqual(out["atStart"]["shown"]["write"], "local" if how == "quota" else None)
+                self.assertEqual([out["end"]["shown"]["write"], out["end"]["shown"]["marks"], out["end"]["there"]], ["local", "a2 a3", "a2 a3"])
+                self.assertEqual(out["end"]["errors"], [])
+                self.assertEqual(out["end"]["events"], ["ready"])
+                self.assertEqual(out["end"]["state"], how != "quota")
+
+    def test_coming_back_to_the_tab_draws_only_what_changed(self):
+        out = boot(BOOT_COPY, """
+await answerNow();
+const n = draws.length;
+// Nothing changed: nothing is drawn, and "Synced … ago" is said for now.
+let back = reloadState(); await settle(); await answerNow(); await answerNow(); await back;
+out.same = [draws.length - n, synced, events.filter(e => e === 'reload').length];
+// A mark made on another device: drawn once.
+there.marks.a1 = MARK('S7');
+back = reloadState(); await settle(); await answerNow(); await answerNow(); await back;
+out.changed = [draws.length - n, shown().marks, synced];
+// Marks read before a save of this page reached the server come back after the save's own
+// answer: they are older, and are not taken.
+back = reloadState(); await settle();
+const read = net.waiting.find(q => q.url === 'api/marks'), old = copy(there.marks);
+net.waiting = net.waiting.filter(q => q !== read);
+toggleMark('a3');
+await settle();
+await answerNow(q => q.method === 'POST');
+out.saved = [posts().length, Object.keys(unsavedMark).length];
+read.res({ok: true, status: 200, json: async () => old});
+await settle(); await answerNow(); await back;
+out.stale = [shown().marks, Object.keys(there.marks).sort().join(' ')];
+""")
+        self.assertEqual(out["same"], [0, 1, 1])
+        self.assertEqual(out["changed"], [1, "a1 a2", 1])
+        self.assertEqual(out["saved"], [1, 0])      # the save is answered and done with before the old read comes in
+        self.assertEqual(out["stale"], ["a1 a2 a3", "a1 a2 a3"])
+
+
+# The last sync's data: data.js when it is here, else the copy kept of it.
+DATA_SEEN = "out.atStart = {draws: draws.length, shown: shown() || null, waitsFor: [Object.keys(script.on).sort(), Object.keys(window.on)], main: els['#main'].innerHTML, errors: [...errors]};\n"
+DATA_ARRIVES = """
+const arrive = async (data, by = () => script.on.load()) => { window.SCHOOL_DATA = data; by(); later.splice(0).forEach(l => l.fn()); await settle(); };
+"""
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class BootDataTest(unittest.TestCase):
+    """data.js no longer holds the page up: here already, the page starts from it; not yet, from the
+    copy kept of it; with neither, when it arrives. dashboard.js's own code under Node."""
+
+    def test_here_already_the_page_starts_from_it_and_keeps_it(self):
+        out = boot(BOOT_SERVER, DATA_SEEN + "later.forEach(l => l.fn()); out.kept = keptNow('data'); out.draws = draws.length;")
+        self.assertEqual([out["atStart"]["draws"], out["atStart"]["shown"]["data"], out["atStart"]["waitsFor"]], [1, "G1", [[], []]])
+        self.assertEqual(out["kept"]["generated_at"], "G1")
+        self.assertEqual(out["draws"], 1)
+
+    def test_not_here_yet_the_copy_is_drawn_and_the_same_data_changes_nothing(self):
+        out = boot("there.marks = {}; keep('data', DATA);", DATA_SEEN + DATA_ARRIVES + """
+const before = stored.get('sh:kept:1:data:server:/school/');
+await arrive(copy(DATA));
+out.same = {draws: draws.length, shown: shown().data, keptAgain: stored.get('sh:kept:1:data:server:/school/') !== before};
+""")
+        self.assertEqual([out["atStart"]["draws"], out["atStart"]["shown"]["data"], out["atStart"]["shown"]["marks"]], [1, "G1", "a1"])
+        self.assertEqual(out["atStart"]["waitsFor"], [["error", "load"], ["load"]])
+        self.assertEqual(out["same"], {"draws": 1, "shown": "G1", "keptAgain": False})
+
+    def test_a_newer_sync_takes_the_copys_place_on_the_page(self):
+        out = boot(BOOT_COPY.replace("window.SCHOOL_DATA = DATA;", "") + "keep('data', DATA);", DATA_ARRIVES + """
+await answerNow();
+drawerId = 'a3';
+const n = draws.length;
+const next = copy(DATA); next.generated_at = 'G2'; next.courses[0].assignments = next.courses[0].assignments.filter(a => a.id !== 'a3').concat({id: 'a4', name: 'HW 4'});
+await arrive(next);
+out.newer = {draws: draws.length - n, shown: shown(), kept: keptNow('data').generated_at, drawer: [drawerId, closed], events};
+""")
+        newer = out["newer"]
+        # Drawn once more, with the server's marks and tasks as they were; "Synced" follows the data.
+        self.assertEqual(newer["draws"], 1)
+        self.assertEqual([newer["shown"]["data"], newer["shown"]["marks"], newer["shown"]["tasks"], newer["shown"]["write"]], ["G2", "a2", "task:aaaaaaaa", "local"])
+        self.assertEqual(newer["kept"], "G2")
+        self.assertEqual(newer["drawer"], [None, 1])     # its item is not in the new sync
+        self.assertEqual(newer["events"], ["ready"])
+
+    def test_with_no_server_the_last_syncs_marks_follow_the_data(self):
+        out = boot("there.down = true; keep('data', DATA);", DATA_ARRIVES + """
+await answerNow();
+const next = copy(DATA); next.generated_at = 'G2'; next.courses[0].assignments[1].marked_done = 'M1';
+await arrive(next);
+out.shown = shown();
+""")
+        self.assertEqual([out["shown"]["data"], out["shown"]["write"], out["shown"]["marks"]], ["G2", None, "a1 a2"])
+
+    def test_a_first_visit_waits_for_data_js_as_it_always_did(self):
+        out = boot("there.marks = {a2: MARK('S1')};", DATA_SEEN + DATA_ARRIVES + """
+out.asked = [...net.log];
+await arrive(DATA);
+out.started = {draws: draws.length, shown: shown(), asked: [...net.log], kept: keptNow('data')?.generated_at};
+""")
+        self.assertEqual([out["atStart"]["draws"], out["atStart"]["shown"], out["asked"]], [0, None, []])
+        self.assertEqual([out["started"]["draws"], out["started"]["shown"]["data"], out["started"]["shown"]["probing"]], [1, "G1", True])
+        self.assertEqual(out["started"]["asked"], ["GET platform.json", "GET api/marks", "GET api/tasks"])
+        self.assertEqual(out["started"]["kept"], "G1")
+
+    def test_its_arrival_is_not_missed(self):
+        # The script's own events may have passed before this file ran: the window's load tells too.
+        out = boot("", DATA_ARRIVES + "await arrive(DATA, () => window.on.load()); out.draws = draws.length; script.on.load(); script.on.error(); await settle(); out.again = draws.length;")
+        self.assertEqual([out["draws"], out["again"]], [1, 1])
+
+    def test_no_data_at_all_says_what_to_do(self):
+        out = boot("", DATA_ARRIVES + "window.SCHOOL_DATA = undefined; script.on.error(); await settle(); out.main = els['#main'].innerHTML; out.draws = draws.length; out.asked = net.log;")
+        self.assertEqual(out["main"], '<p class="empty">No data yet. Run <code>python3 sync.py</code> in the SchoolHub folder.</p>')
+        self.assertEqual([out["draws"], out["asked"]], [0, []])
+        # With a copy on show, the copy stays, under its own sync time.
+        out = boot("there.marks = {}; keep('data', DATA);", "script.on.error(); await settle(); out.main = els['#main'].innerHTML; out.draws = draws.length; out.shown = shown().data; out.kept = !!keptNow('data');")
+        self.assertEqual([out["main"], out["draws"], out["shown"], out["kept"]], ["", 1, "G1", True])
+
+    def test_a_copy_that_is_old_misplaced_or_broken_is_not_drawn(self):
+        cases = {"old": "keep('data', DATA, {age: 3.5});", "other path": "keep('data', DATA, {path: '/'});", "phone's": "keep('data', DATA, {place: 'phone'});",
+                 "cut short": "keep('data', null, {text: JSON.stringify(DATA).slice(0, 80)});", "not data": "keep('data', {generated_at: 'G1', courses: 'none'});"}
+        for name, setup in cases.items():
+            with self.subTest(copy=name):
+                out = boot(setup, DATA_SEEN)
+                self.assertEqual([out["atStart"]["draws"], out["atStart"]["waitsFor"]], [0, [["error", "load"], ["load"]]])
+                # Left alone for what it is, not tried and found undrawable.
+                self.assertEqual(out["atStart"]["errors"], [])
+
+    def test_a_copy_that_cannot_be_drawn_is_dropped(self):
+        # The data's copy: the page waits for data.js, as on a first visit.
+        out = boot("keep('data', {...DATA, generated_at: 'BAD'}); cannotDraw = () => D.generated_at === 'BAD';", DATA_SEEN + DATA_ARRIVES + """
+out.dropped = [keptNow('data'), errors.length > 0, net.log.length];
+await arrive(DATA);
+out.started = [draws.length, shown().data, keptNow('data').generated_at];
+""")
+        self.assertEqual(out["atStart"]["draws"], 0)
+        self.assertEqual(out["dropped"], [None, True, 0])
+        self.assertEqual(out["started"], [1, "G1", "G1"])
+        # The marks' and tasks' copy: the page starts without it, as on a first visit.
+        out = boot(BOOT_COPY + "cannotDraw = () => WRITE === 'local' && !placed;", BOOT_SEEN + BOOT_ANSWERED)
+        self.assertEqual([out["atStart"]["draws"], out["atStart"]["shown"]["write"], out["atStart"]["events"]], [1, None, []])
+        self.assertEqual([out["answered"]["shown"]["write"], out["answered"]["events"]], ["local", ["ready"]])
+
+    def test_data_too_long_to_keep_leaves_no_copy(self):
+        out = boot("keep('data', DATA); window.SCHOOL_DATA = {...DATA, generated_at: 'G2', pad: 'x'.repeat(1500000)};",
+                   "later.forEach(l => l.fn()); out.kept = keptNow('data'); out.shown = shown().data;")
+        self.assertEqual([out["kept"], out["shown"]], [None, "G2"])
+
+
+# The planner's plan with dashboard.js's namespace, its copies and /api/plan stood in for. gate, when
+# set, is what a request waits for; timers lists what the planner asked to do later.
+PLAN_COPY_PAGE = """
+const store = {};
+let down = false, refuse = false, missing = false, renders = 0, unlocks = 0, planner = 'unknown', saves = 'local', gate = null;
+const copy = v => v == null ? null : JSON.parse(JSON.stringify(v));
+const realTimeout = globalThis.setTimeout;
+const timers = [];
+const setTimeout = (fn, ms) => { timers.push({fn, ms, on: true}); return timers.length; };
+const clearTimeout = id => { if (timers[id - 1]) timers[id - 1].on = false; };
+const keptPlan = {text: null, writes: 0, drops: 0};
+const SH = {same, addStep, offerStep, toast, get plannerState(){ return planner; }, setPlanner(next){ planner = next; }, get mode(){ return {WRITE: saves}; },
+  kept: {read: () => { try { return JSON.parse(keptPlan.text); } catch { return null; } },
+    write: (what, text) => { keptPlan.text = text; keptPlan.writes++; return true; }, drop: () => { keptPlan.text = null; keptPlan.drops++; }},
+  api: async (path, body) => {
+    if (down || refuse) throw new Error('refused');
+    if (body.value === null) delete store[body.key]; else store[body.key] = copy(body.value);
+    return {key: body.key, value: copy(body.value)};
+  }};
+const fetch = async () => {
+  if (gate) await gate;
+  if (down) throw new Error('down');
+  if (missing) return {ok: false, status: 404, json: async () => ({})};
+  const days = {}, week = {};
+  for (const k of Object.keys(store)) if (k.startsWith('day:')) days[k.slice(4)] = copy(store[k]);
+  for (const wd of WD) week[wd] = copy(store['week:' + wd]);
+  return {ok: true, status: 200, json: async () => ({settings: copy(store.settings), week, days})};
+};
+function render(){ renders++; }
+function unlock(){ unlocks++; }
+const entriesOn = d => (plan.days[d]?.blocks || []).map(b => b.title);
+const focusLost = () => false, refSel = ref => ref, refocus = () => {};
+function setDate(d){ shown = d; }
+"""
+PLAN_COPY_BODY = """
+const T = todayIso(), Y = addDays(T, -1);
+const idle = async () => { while (pending) await chain; for (let i = 0; i < 4; i++) await new Promise(r => realTimeout(r, 0)); };
+const LAB = {id: 'blockaaaa1', type: 'deep', title: 'Lab', start: '09:00', end: '10:00', items: []};
+const GYM = {id: 'blockbbbb2', type: 'other', title: 'Gym', start: '18:00', end: '19:00', items: []};
+// The copy a visit leaves of a day that holds these blocks (as keepPlan writes it).
+const copyOf = (blocks, {from = addDays(T, -7), to = addDays(T, 7), day = T} = {}) =>
+  JSON.stringify({from, to, plan: {settings: {day_start: 5, day_end: 24}, week: Object.fromEntries(WD.map(wd => [wd, cleanWeek(null)])), days: {[day]: {blocks}}}});
+const state = () => ({plan: !!plan, copied, waiting, editable: editable(), planner, renders, unlocks, today: plan ? entriesOn(T) : null, failed: loadFailed});
+const out = {};
+"""
+
+
+def plan_copy(body):
+    """One visit of the planner: body runs after planner.js's own plan code is in place."""
+    pure = PLANNER[PLANNER.index(PLAN_START):PLANNER.index(PLAN_END)]
+    kept = PLANNER[PLANNER.index(PLAN_KEPT_START):PLANNER.index(PLAN_KEPT_END)]
+    return run_node("const backend = {};\nasync function setMark(){ return true; }\n" + UNDO_PAGE + undo_section() + pure + PLAN_COPY_PAGE + kept
+                    + PLAN_COPY_BODY + "(async () => {\n" + body + "\nconsole.log(JSON.stringify(out));\n})();\n")
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class PlanCopyTest(unittest.TestCase):
+    """The planner is drawn from the plan kept at the last visit and takes the server's quietly:
+    planner.js's own load, save and copy code under Node. A copy is read, never changed."""
+
+    def test_the_plan_is_kept_as_the_server_has_it(self):
+        out = plan_copy("""
+store['day:' + T] = {blocks: [LAB]};
+await load(T);
+out.loaded = [JSON.parse(keptPlan.text), keptPlan.writes];
+// A change that went through is kept too; one that did not leaves what the server has.
+record('renamed', T, 'block:blockaaaa1', () => editDay(T, v => { v.blocks[0].title = 'Lab report'; }));
+await idle();
+out.saved = JSON.parse(keptPlan.text).plan.days[T].blocks[0].title;
+refuse = true;
+record('renamed', T, 'block:blockaaaa1', () => editDay(T, v => { v.blocks[0].title = 'Never saved'; }));
+await idle();
+refuse = false;
+out.refused = JSON.parse(keptPlan.text).plan.days[T].blocks[0].title;
+// Dates that do not hold today are no use to the next visit: the copy stays as it was.
+const far = addDays(T, 30), n = keptPlan.writes;
+shown = far; await load(far);
+out.far = [keptPlan.writes - n, JSON.parse(keptPlan.text).from];
+""")
+        kept, writes = out["loaded"]
+        today = date.today()
+        self.assertEqual(writes, 1)
+        self.assertEqual([kept["from"], kept["to"]], [date.fromordinal(today.toordinal() - 7).isoformat(), date.fromordinal(today.toordinal() + 7).isoformat()])
+        self.assertEqual(kept["plan"]["settings"], {"day_start": 5, "day_end": 24})
+        self.assertEqual(sorted(kept["plan"]["week"]), ["fri", "mon", "sat", "sun", "thu", "tue", "wed"])
+        self.assertEqual(kept["plan"]["days"], {today.isoformat(): {"blocks": [{"id": "blockaaaa1", "type": "deep", "title": "Lab", "start": "09:00", "end": "10:00", "items": []}]}})
+        self.assertEqual([out["saved"], out["refused"]], ["Lab report", "Lab report"])
+        self.assertEqual(out["far"], [0, kept["from"]])
+
+    def test_a_copy_is_drawn_at_once_and_the_same_answer_draws_nothing(self):
+        out = plan_copy("""
+store['day:' + T] = {blocks: [LAB]};
+keptPlan.text = copyOf([LAB]);
+let free; gate = new Promise(r => { free = r; });
+showKept(); const loading = load(shown);
+out.shown = {...state(), timers: timers.filter(t => t.on).map(t => t.ms)};
+// + Block pressed, and Plan it waiting, while the copy shows.
+let pressed = 0; afterCopy(() => { pressed++; });
+const waited = loadedPlan().then(() => 'loaded');
+out.pressedEarly = pressed;
+free(); await loading; await idle();
+out.answered = {...state(), pressed, waited: await waited, timers: timers.filter(t => t.on).length, keptAgain: keptPlan.writes};
+afterCopy(() => { pressed++; });
+out.pressedLater = pressed;
+""")
+        # Drawn before the answer, not editable; it looks like the plan for 1.2 s.
+        self.assertEqual(out["shown"], {"plan": True, "copied": True, "waiting": False, "editable": False, "planner": "on", "renders": 1, "unlocks": 0,
+                                        "today": ["Lab"], "failed": False, "timers": [1200]})
+        self.assertEqual(out["pressedEarly"], 0)
+        # The server has the same: not drawn again, only made editable; what was pressed is done.
+        self.assertEqual(out["answered"], {"plan": True, "copied": False, "waiting": False, "editable": True, "planner": "on", "renders": 1, "unlocks": 1,
+                                           "today": ["Lab"], "failed": False, "pressed": 1, "waited": "loaded", "timers": 0, "keptAgain": 1})
+        self.assertEqual(out["pressedLater"], 2)
+
+    def test_a_different_answer_takes_the_copys_place(self):
+        out = plan_copy("""
+store['day:' + T] = {blocks: [LAB, GYM]};
+keptPlan.text = copyOf([LAB]);
+showKept();
+out.shown = entriesOn(T);
+await load(shown);
+out.answered = state();
+out.kept = JSON.parse(keptPlan.text).plan.days[T].blocks.map(b => b.title);
+""")
+        self.assertEqual(out["shown"], ["Lab"])
+        self.assertEqual(out["answered"], {"plan": True, "copied": False, "waiting": False, "editable": True, "planner": "on", "renders": 2, "unlocks": 0,
+                                           "today": ["Lab", "Gym"], "failed": False})
+        self.assertEqual(out["kept"], ["Lab", "Gym"])
+
+    def test_a_slow_answer_shows_the_copy_is_waiting(self):
+        out = plan_copy("""
+store['day:' + T] = {blocks: [LAB]};
+keptPlan.text = copyOf([LAB]);
+let free; gate = new Promise(r => { free = r; });
+showKept(); const loading = load(shown);
+timers[0].fn();                                 // 1.2 s on
+out.slow = state();
+free(); await loading; await idle();
+out.answered = state();
+timers[0].fn();                                 // (the timer itself changes nothing once the plan is here)
+out.after = state();
+""")
+        self.assertEqual([out["slow"]["waiting"], out["slow"]["copied"], out["slow"]["editable"], out["slow"]["renders"]], [True, True, False, 2])
+        self.assertEqual([out["answered"]["waiting"], out["answered"]["editable"], out["answered"]["unlocks"]], [False, True, 1])
+        self.assertEqual(out["after"], out["answered"])
+
+    def test_yesterdays_copy_shows_today_never_yesterday(self):
+        out = plan_copy("""
+store['day:' + T] = {blocks: [GYM]};
+// Kept yesterday, around yesterday, with a block on yesterday and nothing yet for today.
+keptPlan.text = copyOf([LAB], {from: addDays(Y, -7), to: addDays(Y, 7), day: Y});
+let free; gate = new Promise(r => { free = r; });
+showKept(); const loading = load(shown);
+out.shown = {date: shown === T, today: entriesOn(T), yesterday: entriesOn(Y), copied};
+free(); await loading;
+out.answered = {today: entriesOn(T), renders, unlocks, range: [loaded.from === addDays(T, -7), loaded.to === addDays(T, 7)]};
+""")
+        self.assertEqual(out["shown"], {"date": True, "today": [], "yesterday": ["Lab"], "copied": True})
+        self.assertEqual(out["answered"], {"today": ["Gym"], "renders": 2, "unlocks": 0, "range": [True, True]})
+
+    def test_a_copy_that_does_not_hold_today_or_is_not_a_plan_is_not_drawn(self):
+        out = plan_copy("""
+const tries = {
+  past: copyOf([LAB], {from: addDays(T, -20), to: addDays(T, -1)}), ahead: copyOf([LAB], {from: addDays(T, 1), to: addDays(T, 15)}),
+  noDates: JSON.stringify({plan: JSON.parse(copyOf([LAB])).plan}), oddDates: copyOf([LAB], {from: 'last week', to: 'next week'}), numbers: copyOf([LAB], {from: 0, to: 99999999}),
+  noPlan: JSON.stringify({from: addDays(T, -7), to: addDays(T, 7)}), planList: JSON.stringify({from: addDays(T, -7), to: addDays(T, 7), plan: []}),
+  notJson: '{"from":', nothing: null, list: '[1,2]',
+};
+for (const [name, text] of Object.entries(tries)) { keptPlan.text = text; showKept(); out[name] = [!!plan, copied, planner, renders, timers.length]; }
+// One whose days cannot be read is dropped, and the planner starts as without it.
+keptPlan.text = JSON.stringify({from: addDays(T, -7), to: addDays(T, 7), plan: {days: {[T]: {blocks: 'none'}}}});
+showKept();
+out.unreadable = [!!plan, copied, planner, keptPlan.text, keptPlan.drops];
+// A good one is drawn; a second call changes nothing.
+keptPlan.text = copyOf([LAB]); showKept(); showKept();
+out.good = [!!plan, copied, planner, renders, timers.length];
+""")
+        for name in ("past", "ahead", "noDates", "oddDates", "numbers", "noPlan", "planList", "notJson", "nothing", "list"):
+            self.assertEqual(out[name], [False, False, "unknown", 0, 0], name)
+        self.assertEqual(out["unreadable"], [False, False, "unknown", None, 1])
+        self.assertEqual(out["good"], [True, True, "on", 1, 1])
+
+    def test_no_answer_takes_the_copy_off_the_page(self):
+        out = plan_copy("""
+keptPlan.text = copyOf([LAB]);
+down = true;
+showKept();
+let pressed = 0; afterCopy(() => { pressed++; });
+const waited = loadedPlan().then(() => 'over');
+await load(shown);
+out.down = {...state(), pressed, waited: await waited, kept: !!keptPlan.text};
+""")
+        # "Couldn't load the plan. Try again", as without a copy; the copy itself stays for a later visit.
+        self.assertEqual(out["down"], {"plan": False, "copied": False, "waiting": False, "editable": False, "planner": "on", "renders": 2, "unlocks": 0,
+                                       "today": None, "failed": True, "pressed": 0, "waited": "over", "kept": True})
+        out = plan_copy("keptPlan.text = copyOf([LAB]); missing = true; showKept(); await load(shown); out.missing = state();")
+        self.assertEqual([out["missing"]["plan"], out["missing"]["copied"], out["missing"]["planner"]], [False, False, "off"])
+
+    def test_a_page_that_turned_out_not_to_save_keeps_the_planner_off(self):
+        # dashboard.js drew from its copy, the server did not answer, and it took the planner away:
+        # the plan's own answer, or the lack of one, does not bring it back.
+        for server in ("", "down = true;"):
+            with self.subTest(server=server or "answers"):
+                out = plan_copy("keptPlan.text = copyOf([LAB]); let free; gate = new Promise(r => { free = r; }); showKept(); const loading = load(shown);"
+                                + "saves = null; planner = 'off'; const n = renders;" + server + "free(); await loading; out.end = [planner, renders - n, unlocks, keptPlan.writes];")
+                self.assertEqual(out["end"], ["off", 0, 0, 0])
+
+    def test_nothing_is_saved_from_a_copy(self):
+        self.assertIn("const editable = () => !!plan && inRange(shown) && !copied;", PLANNER)
+        # Every way to change the plan from the page asks editable() first (or is one of the forms,
+        # which open only when it is): the planner's handlers that reach record().
+        section = PLANNER[PLANNER.index(PLAN_COPY_START):]
+        self.assertGreaterEqual(section.count("editable()"), 12)
+        for guard in ("if (drag || !editable() || (e.pointerType === 'mouse' && e.button !== 0)) return;", "if (!hasItem(e) || !editable()) return;",
+                      "if (back && editable()) {", "if (again && editable()) {", "if (!editable() || !F.blockDialog) return;", "if (!editable() || !F.weekDialog) return;",
+                      "if (!box || !det || !editable()) return;", "if (!editable()) return SH.toast(\"Couldn't load the plan\");"):
+            self.assertIn(guard, section)
+        # The card's own buttons are off while nothing can be changed.
+        self.assertIn('data-pd-edit="1"${can ? \'\' : \' disabled\'}', PLANNER)
+        self.assertIn('data-pd-del="1"${can ? \'\' : \' disabled\'}', PLANNER)
+        # Plan it waits for the plan itself.
+        self.assertRegex(PLANNER, r"while \(pending\) await chain;\n    await loadedPlan\(\);\n    if \(!plan\) return SH\.toast\(\"Couldn't load the plan\"\);")

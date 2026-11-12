@@ -28,6 +28,8 @@ put them yourself, and writes a static page you open in your browser. Everything
 - **Undo and redo** for everything you change: **Cmd+Z** (or Ctrl+Z) takes back the last change to a
   ✓, a task or the day planner, and **Shift+Cmd+Z** (Shift+Ctrl+Z, or Ctrl+Y) makes it again, about a
   hundred steps back for as long as the page is open. See [Undo and redo](#undo-and-redo).
+- **Opens at once** when you come back to it: the page is drawn from what the server said last
+  time, kept in the browser, and asks again quietly. See [Opening at once](#opening-at-once).
 - **Tells you what changed**: due dates that moved, newly posted assignments, work due within 36
   hours that isn't done, and anything newly missing.
 - **Fails loudly**: if a course website changes shape, the parser refuses to guess — it reports the
@@ -154,6 +156,41 @@ not data, so they are not steps.
 (a UTC time that is not in the future; anything else is stamped now, as before). The Mac app's Edit
 menu can ask the page with `SchoolHub.undo()` and `SchoolHub.redo()`: each answers `true` when the
 page took the request and `false` when it belongs to the field being typed in.
+
+## Opening at once
+
+Coming back to the page is a page load, and a load used to wait for its answers one after another:
+`data.js`, then where the page is and your marks, then your tasks and the plan. Where the server is
+not this Mac (a hosted copy) each took most of a second, and the list, the ✓ buttons and the planner
+each appeared in turn.
+
+Now the page keeps the last answers in the browser (`localStorage`) and starts from them: the list,
+the ✓ buttons, your tasks and the planner are drawn at once, and the same requests as before go out
+behind them, all together.
+
+- **The same answer changes nothing on the page.** A different one (a ✓ made on your phone, a new
+  sync) is taken in place: the list is drawn again where it is, an open drawer stays open where you
+  were reading, and the undo history stays.
+- **A copy is only shown, never saved from.** A ✓ made in the first moment shows at once and is
+  sent when the server has answered; a task's form waits for the same answer before it saves and
+  closes. The planner can be read from its copy and changed once
+  the server's plan is here, usually well under a second; if that takes more than 1.2 s the day dims
+  as it does whenever it loads. If the server does not answer at all, the page becomes the read-only
+  view it always was then, and says a change could not be saved.
+- **What is kept:** the last sync's data (what `data.js` holds), your marks and tasks with where the
+  page saves, and the planner's two weeks around today. One set per address and path, and per kind of
+  site (the phone view has its own). Each copy carries the time it was kept and is ignored after 3
+  days, or if it is not what it should be; the plan's copy is used only if it covers today, and
+  shows each date as it was stored, so yesterday's blocks never show as today's. "Synced 5h ago"
+  is always the time of the data on show.
+- **Limits.** Data over 1.5 million characters is not kept (the page then waits for `data.js` as
+  before). A browser that keeps nothing (a private window, site data blocked, a full disk) gives the
+  page as it was before: every visit a first visit. Opened from disk nothing is kept. The copies hold
+  your assignments, grades and feedback, in that browser, like the page itself does while open:
+  clear the site's data to remove them.
+
+Nothing else changed about what is asked from where: no service worker, no new file, and `data.js`
+is still never cached by the browser (it is only no longer waited for: `<script async>`).
 
 ## Light and dark
 

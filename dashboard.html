@@ -791,7 +791,9 @@ dialog.task .wk-hours label{flex:1 1 160px}
 <dialog class="pdetail" id="planDetail" aria-labelledby="pdTitle"></dialog>
 <div class="ptip" id="planTip" role="tooltip" hidden></div>
 
-<script src="data.js"></script>
+<!-- The last sync's data is asked for without holding the page up (async): dashboard.js starts from
+     it when it is here, else from the copy it kept at the last visit, and takes it in when it comes. -->
+<script src="data.js" async fetchpriority="high"></script>
 <script src="dashboard.js"></script>
 <script src="planner.js"></script>
 </body>
