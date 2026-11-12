@@ -664,16 +664,23 @@
   // ---- drawing ----
   const root = $('#planner');
   if (!root) return;
+  // ---- style-b (markup only): the header is the date as a heading, the buttons with an icon each,
+  // then the week as a strip of day chips between the day arrows. Icons are inline SVG in currentColor.
+  const svg = d => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="${d}"/></svg>`;
+  const ICON = {prev: svg('M10 3.5 5.5 8l4.5 4.5'), next: svg('M6 3.5 10.5 8 6 12.5'), plus: svg('M8 3.2v9.6M3.2 8h9.6'),
+    today: svg('M4.5 3.5h7a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM2.5 7h11M5.5 2v3M10.5 2v3'),
+    week: svg('M3 6.5A3.5 3.5 0 0 1 6.5 3H12m0 0-2-2m2 2-2 2M13 9.5A3.5 3.5 0 0 1 9.5 13H4m0 0 2 2m-2-2 2-2')};
   root.innerHTML = `<div class="ph">
-      <div class="ph-nav">
-        <button type="button" class="ph-step" data-pstep="-1" aria-label="Previous day" title="Previous day ([)">‹</button>
-        <h2 class="ph-date" id="planDate" aria-live="polite"></h2>
-        <button type="button" class="ph-step" data-pstep="1" aria-label="Next day" title="Next day (])">›</button>
-      </div>
+      <h2 class="ph-date" id="planDate" aria-live="polite"></h2>
       <div class="ph-actions">
-        <button type="button" class="btn small" id="planToday" hidden>Today</button>
-        <button type="button" class="btn small" id="planWeek" title="Meals and repeating blocks for every week" disabled>Week…</button>
-        <button type="button" class="btn small primary" id="planAdd" disabled>+ Block</button>
+        <button type="button" class="btn small" id="planToday" title="Back to today" hidden>${ICON.today}Today</button>
+        <button type="button" class="btn small" id="planWeek" title="Meals and repeating blocks for every week" disabled>${ICON.week}Week…</button>
+        <button type="button" class="btn small primary" id="planAdd" aria-label="Add a block" disabled>${ICON.plus}Block</button>
+      </div>
+      <div class="ph-nav">
+        <button type="button" class="ph-step" data-pstep="-1" aria-label="Previous day" title="Previous day ([)">${ICON.prev}</button>
+        <div class="ph-week" id="planDays" role="group" aria-label="The week of this day"></div>
+        <button type="button" class="ph-step" data-pstep="1" aria-label="Next day" title="Next day (])">${ICON.next}</button>
       </div>
     </div>
     <div class="pstrip" id="planStrip" role="group" aria-label="Also on this day" hidden></div>
@@ -685,13 +692,23 @@
       </div>
     </div>`;
   const els = {date: $('#planDate'), today: $('#planToday'), week: $('#planWeek'), add: $('#planAdd'), strip: $('#planStrip'),
-    scroll: $('#planScroll'), msg: $('#planMsg'), time: $('#planTime'), hours: $('#planHours'), grid: $('#planGrid')};
+    scroll: $('#planScroll'), msg: $('#planMsg'), time: $('#planTime'), hours: $('#planHours'), grid: $('#planGrid'), days: $('#planDays')};
   const grid = els.grid;
-  const drawDate = () => { els.date.innerHTML = `<span class="long">${esc(longDate(shown))}</span><span class="short">${esc(shortDate(shown))}</span>`; };
+  // ---- style-b (markup only): the week strip, Sunday to Saturday around the day on show. A chip is
+  // a button to that day (.on: the day on show, .today), read out as its full date.
+  const drawWeek = () => {
+    const sun = addDays(shown, -fromIso(shown).getDay());
+    els.days.innerHTML = WD.map((_, i) => {
+      const d = addDays(sun, i), on = d === shown, today = isToday(d);
+      return `<button type="button" class="pday${on ? ' on' : ''}${today ? ' today' : ''}" data-pday="${d}" aria-pressed="${on}" aria-label="${esc(longDate(d))}${today ? ', today' : ''}"><span>${WD_NAME[i].slice(0, 3)}</span><b>${fromIso(d).getDate()}</b></button>`;
+    }).join('');
+  };
+  // ---- end style-b ----
+  const drawDate = () => { els.date.innerHTML = `<span class="long">${esc(longDate(shown))}</span><span class="short">${esc(shortDate(shown))}</span>`; drawWeek(); };
   drawDate();
 
   // The focused control, found again once the planner is drawn anew.
-  const FOCUS_KEYS = ['data-open-ref', 'data-pitem', 'data-plan-due', 'data-pedit', 'data-pmeal-on', 'data-prepeat-on', 'data-plan-retry', 'id'];
+  const FOCUS_KEYS = ['data-open-ref', 'data-pitem', 'data-plan-due', 'data-pedit', 'data-pmeal-on', 'data-prepeat-on', 'data-plan-retry', 'data-pday', 'id'];
   function focusKey(){
     const el = document.activeElement;
     if (!el || !root.contains(el)) return null;
@@ -764,6 +781,11 @@
       list = list ? `<ul class="pb-items">${list}</ul>` : '';
       if (rest > 0 && !after) more = `<div class="pb-more" aria-hidden="true">+${rest} more</div>`;
     }
+    // ---- style-b (markup only): a chip at the end of the block's head saying how many of its items
+    // are done. The head is the first <div> of the body and holds only spans.
+    if (items.length && form !== 'nar' && form !== 'xs')
+      body = body.replace('</div>', `<span class="pb-st">${items.filter(it => it.done || listDone(it)).length} of ${items.length} done</span></div>`);
+    // ---- end style-b ----
     const left = e.col / e.cols * 100, width = 100 / e.cols;
     const cls = ['pblock', 'k-' + e.kind, form, e.cutTop && 'cut-top', e.cutBottom && 'cut-bottom', det?.ref === e.ref && 'shown'].filter(Boolean).join(' ');
     // Where words are cut short, the whole of them is in the preview shown while the pointer rests on
@@ -809,10 +831,19 @@
   function placeNow(){
     const line = grid.querySelector('.pnow'), s = settings(), m = minutesNow();
     const on = isToday(shown) && m >= s.day_start * 60 && m <= s.day_end * 60;
+    // ---- style-b (markup only): where today's hatching of the hours gone by ends (--now), the
+    // blocks that are on now (.now shows a "Now" chip), and the hour label the now line's pill
+    // would half cover (.near-now hides it).
+    if (on) grid.style.setProperty('--now', nowTop() + 'px'); else grid.style.removeProperty('--now');
+    const live = new Set(on ? entriesOn(shown).filter(e => !e.off && !e.skip && e.start <= m && m < e.end).map(e => e.ref) : []);
+    for (const b of grid.querySelectorAll('.pblock[data-ref]')) b.classList.toggle('now', live.has(b.dataset.ref));
+    for (const h of els.hours.children) h.classList.toggle('near-now', on && Math.abs(parseFloat(h.style.top) - nowTop()) < 15);
+    // ---- end style-b ----
     if (!on) return line?.remove();
     const el = line || grid.appendChild(Object.assign(document.createElement('div'), {className: 'pnow'}));
     el.setAttribute('aria-hidden', 'true');
     el.style.top = nowTop() + 'px';
+    el.dataset.now = clock(m, false);   // style-b: the time on the now line's pill
   }
 
   let scrolledFor = null;        // the date the timeline was last scrolled for
@@ -1246,6 +1277,8 @@
     const step = t.closest('[data-pstep]');
     if (step) return setDate(addDays(shown, +step.dataset.pstep));
     if (t.closest('#planToday')) { scrolledFor = null; return setDate(todayIso()); }
+    const day = t.closest('[data-pday]');   // style-b: a chip of the week strip shows its day
+    if (day) { scrolledFor = null; return setDate(day.dataset.pday); }
     if (t.closest('#planWeek')) return afterCopy(openWeek);
     if (t.closest('#planAdd')) return afterCopy(newBlockAt);
     if (t.closest('[data-plan-retry]')) { loadFailed = false; render(); return load(shown); }

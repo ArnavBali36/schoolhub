@@ -343,10 +343,57 @@ class PlannerPageTest(unittest.TestCase):
         self.assertIn("else if (meal && e.placeChanged) notes.push(`Place changed for ${thisDay(shown)} only`);", PLANNER)
 
     def test_block_kinds_use_the_theme_tokens(self):
-        for kind, fill, edge in (("meal", "--warn-soft", "--warn"), ("deep", "--accent-soft", "--accent"),
-                                 ("social", "--good-soft", "--good"), ("other", "--surface-3", "--border-strong")):
-            self.assertIn(f".k-{kind}{{--pb-fill:var({fill});--pb-edge:var({edge})}}", HTML)
-        self.assertIn("border-top:2px solid var(--bad)", HTML)  # the now line
+        # Soft cells, vivid bars (2026-11-11): each kind of block is a bar in its own gradient with
+        # its own ink, an edge colour and an icon, all from the theme's tokens.
+        for kind in ("meal", "deep", "social", "other"):
+            panel = "--k-deep-panel" if kind == "deep" else "--k-panel"
+            self.assertIn(f".k-{kind}{{--pb-a:var(--k-{kind}-a);--pb-b:var(--k-{kind}-b);--pb-ink:var(--k-{kind}-ink);"
+                          f"--pb-ink2:var(--k-{kind}-ink2);--pb-edge:var(--k-{kind}-edge);--pb-panel:var({panel});--pb-icon:var(--ic-{kind})}}", HTML)
+        block = re.search(r"\.pblock\{[^}]*\}", HTML).group(0)
+        self.assertIn("background:var(--pb-gloss),linear-gradient(100deg,var(--pb-a),var(--pb-b));color:var(--pb-ink);", block)
+        # Nothing a drag moves every frame is blurred.
+        self.assertNotIn("backdrop-filter", block)
+        self.assertNotIn("blur(", block)
+        # The now line: dashed, in the accent, under the bars, from a pill that says the time.
+        self.assertIn(".pnow{position:absolute;left:0;right:0;z-index:-1;height:2px;margin-top:-1px;border-radius:1px;"
+                      "background:repeating-linear-gradient(90deg,var(--accent) 0 7px,transparent 7px 12px);", HTML)
+        self.assertIn(".pnow::before{content:attr(data-now);", HTML)
+        self.assertIn("el.dataset.now = clock(m, false);", PLANNER)
+
+    def test_the_hours_are_soft_cells_and_the_past_is_hatched(self):
+        # A cell an hour, from gradients alone, in the theme's --cell; the same shape masks the
+        # hatching of today's hours gone by, which ends at --now (set with the now line, today only).
+        self.assertIn("background:var(--cell-shape);", HTML)
+        self.assertIn("calc(100% - 2px - var(--cr)),transparent 0) 0 0/100% var(--hour,48px),", HTML)   # the band between the corners
+        self.assertEqual(HTML.count(" var(--hour,48px) repeat-y"), 5)   # the band between the sides, and four corners
+        self.assertIn("height:min(var(--now,0px),100%)", HTML)
+        self.assertIn("-webkit-mask:var(--cell-shape);mask:var(--cell-shape)", HTML)
+        self.assertIn("if (on) grid.style.setProperty('--now', nowTop() + 'px'); else grid.style.removeProperty('--now');", PLANNER)
+        # The block that is on now says so, each minute.
+        self.assertIn("for (const b of grid.querySelectorAll('.pblock[data-ref]')) b.classList.toggle('now', live.has(b.dataset.ref));", PLANNER)
+        self.assertIn('.pblock.now .pb-head::after{content:"\\2022\\00a0Now";margin-left:auto}', HTML)
+        # The hour label under the now line's pill gives way to it.
+        self.assertIn("h.classList.toggle('near-now', on && Math.abs(parseFloat(h.style.top) - nowTop()) < 15);", PLANNER)
+        self.assertIn(".phour.near-now{visibility:hidden}", HTML)
+
+    def test_the_week_strip_shows_and_picks_a_day(self):
+        self.assertIn('<div class="ph-week" id="planDays" role="group" aria-label="The week of this day"></div>', PLANNER)
+        self.assertIn("const sun = addDays(shown, -fromIso(shown).getDay());", PLANNER)
+        self.assertIn('data-pday="${d}" aria-pressed="${on}"', PLANNER)
+        self.assertIn("if (day) { scrolledFor = null; return setDate(day.dataset.pday); }", PLANNER)
+        # A chip keeps the focus when the planner is drawn anew, and today is marked by more than colour.
+        self.assertIn("'data-pday', 'id'];", PLANNER)
+        self.assertIn('.pday.today::after{content:"";', HTML)
+        # The same controls as before, each still a button with its name.
+        for control in ('data-pstep="-1" aria-label="Previous day"', 'data-pstep="1" aria-label="Next day"', 'id="planToday"',
+                        'id="planWeek"', 'id="planAdd" aria-label="Add a block"', 'id="planDate" aria-live="polite"'):
+            self.assertIn(control, PLANNER)
+
+    def test_the_two_apps_cross_fade(self):
+        self.assertIn("@view-transition { navigation: auto; }", HTML)
+        self.assertIn("view-transition-name: app-bar", HTML)
+        self.assertIn("::view-transition-old(root),::view-transition-new(root){animation-duration:160ms}", HTML)
+        self.assertIn("@media (prefers-reduced-motion: reduce){@view-transition { navigation: none; }}", HTML)
 
 
 def _lum(hex6):
@@ -360,6 +407,66 @@ def _lum(hex6):
 def _contrast(a, b):
     x, y = sorted((_lum(a), _lum(b)), reverse=True)
     return (x + 0.05) / (y + 0.05)
+
+
+def _rgba(value):
+    """A token's colour as (r, g, b, alpha): #rrggbb or rgb(r g b / a)."""
+    value = value.strip()
+    if value.startswith("#"):
+        return (*(int(value[i:i + 2], 16) for i in (1, 3, 5)), 1.0)
+    r, g, b, a = re.fullmatch(r"rgb\((\d+) (\d+) (\d+)(?: / ([\d.]+))?\)", value).groups()
+    return int(r), int(g), int(b), float(a or 1)
+
+
+def _over(top, bottom):
+    """top (with its alpha) drawn over an opaque bottom, as a hex string."""
+    a = top[3]
+    return "".join(f"{round(t * a + b * (1 - a)):02x}" for t, b in zip(top[:3], bottom[:3]))
+
+
+def _theme_tokens(theme):
+    """Every --token of a theme: light's, with the theme's own on top."""
+    light = HTML[HTML.index(":root{"):HTML.index(':root[data-theme="dark"]{')]
+    text = light
+    if theme != "light":
+        start = HTML.index(f':root[data-theme="{theme}"]{{')
+        text += HTML[start:HTML.index("\n}", start)]
+    return {name: value.strip() for name, value in re.findall(r"--([\w-]+):([^;]+);", text)}
+
+
+class BarColorsTest(unittest.TestCase):
+    """Soft cells, vivid bars (2026-11-11): in light, dark and red, what is written on a bar keeps
+    4.5:1 on both ends of its gradient, under the sheen at its strongest and on its nested panel."""
+
+    def test_ink_stays_readable_on_every_bar(self):
+        for theme in ("light", "dark", "red"):
+            t = _theme_tokens(theme)
+            gloss = re.search(r"rgb\([^)]*\)", t["pb-gloss"])
+            gloss = _rgba(gloss.group(0)) if gloss else (0, 0, 0, 0.0)
+            for kind in ("meal", "deep", "social", "other"):
+                panel = _rgba(t["k-deep-panel" if kind == "deep" else "k-panel"])
+                for end in ("a", "b"):
+                    fill = _rgba(t[f"k-{kind}-{end}"])
+                    grounds = {"fill": _over(fill, fill), "sheen": _over(gloss, fill), "panel": _over(panel, fill)}
+                    for ink in ("ink", "ink2"):
+                        color = t[f"k-{kind}-{ink}"].lstrip("#")
+                        for where, ground in grounds.items():
+                            self.assertGreaterEqual(_contrast(color, ground), 4.5, (theme, kind, end, ink, where))
+            # The chip on a bar, the day on show in the week strip, and the hour labels on the tray.
+            self.assertGreaterEqual(_contrast(t["pb-chip-ink"].lstrip("#"), t["pb-chip"].lstrip("#")), 4.5, theme)
+            self.assertGreaterEqual(_contrast(t["on-ink-pill"].lstrip("#"), t["ink-pill"].lstrip("#")), 4.5, theme)
+            for text in ("text", "muted"):
+                for ground in ("tray", "cell"):
+                    self.assertGreaterEqual(_contrast(t[text].lstrip("#"), t[ground].lstrip("#")), 4.5, (theme, text, ground))
+
+    def test_red_bars_have_no_blue(self):
+        t = _theme_tokens("red")
+        mine = [name for name in t if name.startswith(("k-", "pb-", "cell", "hatch", "tray", "neu", "ink-pill", "on-ink-pill"))]
+        self.assertGreater(len(mine), 35)
+        for name in mine:
+            for value in re.findall(r"#[0-9a-f]{6}|rgb\([^)]*\)", t[name]):
+                self.assertEqual(_rgba(value)[2], 0, (name, value))
+            self.assertNotIn("white", t[name])
 
 
 class NightThemeTest(unittest.TestCase):

@@ -45,7 +45,7 @@
      only cue. Your own tasks are grey. */
   --course-1:#2f6fdf;--course-2:#cf3f36;--course-3:#23895c;--course-4:#8f55cc;--course-5:#c2650a;
   --course-6:#0f8299;--course-7:#c23c7c;--course-8:#8a8400;--course-9:#8a5a2e;--course-10:#8b4b88;--course-personal:#646a76;
-  --radius-xs:6px;--radius-sm:10px;--radius:16px;--radius-md:18px;--radius-lg:22px;
+  --radius-xs:6px;--radius-sm:12px;--radius:18px;--radius-md:20px;--radius-lg:26px;
   /* The page column and the app bar match QuantPrep's, so the app switch stays put between apps. */
   --content:1040px;--gutter:24px;--bar-height:56px;
   --font-text:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
@@ -54,6 +54,24 @@
   /* Motion: short and eased, and off under prefers-reduced-motion. */
   --ease-out:cubic-bezier(.22,1,.36,1);--ease-sheet:cubic-bezier(.32,.72,0,1);--ease-spring:cubic-bezier(.34,1.56,.64,1);
   --dur-1:140ms;--dur-2:220ms;--dur-3:340ms;
+  /* Direction B, "soft cells, vivid bars" (2026-11-11). The planner is a tray (--tray) of soft cells
+     (--cell), today's hours gone by hatched; panes and rows sit on a soft two-sided shadow (--neu).
+     Each kind of block is a bar in a gradient (-a to -b) with its own ink (-ink, and -ink2 for its
+     second line), both at least 4.5:1 on both ends of the gradient under the sheen (--pb-gloss), and
+     an edge colour for its hairline, a cut end and the drag ghost. */
+  --tray:#eceff5;--cell:#ffffff;--cell-line:rgb(15 23 42 / .16);--hatch:rgb(15 23 42 / .075);--hatch-fill:rgb(15 23 42 / .028);
+  --neu:-4px -4px 10px rgb(255 255 255 / .85),5px 8px 20px -6px rgb(24 39 75 / .13),0 1px 2px rgb(24 39 75 / .05);
+  --neu-sm:-2px -2px 6px rgb(255 255 255 / .8),2px 4px 10px -3px rgb(24 39 75 / .1),0 1px 1.5px rgb(24 39 75 / .04);
+  --k-meal-a:#ffc670;--k-meal-b:#ff9d5c;--k-meal-ink:#3a1a00;--k-meal-ink2:#562a05;--k-meal-edge:#b85a00;
+  --k-deep-a:#5f3fdc;--k-deep-b:#4a2cc4;--k-deep-ink:#ffffff;--k-deep-ink2:#efeaff;--k-deep-edge:#cdc2ff;
+  --k-social-a:#5cdba5;--k-social-b:#2dbf83;--k-social-ink:#03301c;--k-social-ink2:#083c24;--k-social-edge:#0f7a4e;
+  --k-other-a:#d3e2ff;--k-other-b:#a9c4ff;--k-other-ink:#10255c;--k-other-ink2:#263d7c;--k-other-edge:#4a74dc;
+  --k-panel:rgb(255 255 255 / .3);--k-deep-panel:rgb(24 10 96 / .26);
+  --pb-gloss:linear-gradient(180deg,rgb(255 255 255 / .1),rgb(255 255 255 / 0) 26px);--pb-rim:rgb(255 255 255 / .4);
+  --pb-bubble:rgb(255 255 255 / .24);--pb-bubble-rim:rgb(255 255 255 / .5);--pb-shade:rgb(24 39 75 / .12);--pb-lift:rgb(24 39 75 / .32);
+  --pb-chip:#ffffff;--pb-chip-ink:#1b2130;--ink-pill:#14161c;--on-ink-pill:#ffffff;
+  /* Icons, as masks that take the colour of what they sit on: the kinds of block, and the stat tiles. */
+  --ic-meal:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 3v18M4 3v5a3 3 0 0 0 6 0V3M17 21v-8h-3.5v-2c0-4 1.3-6.8 3.5-8z'/%3E%3C/svg%3E");--ic-deep:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 6.5C10 5.2 7.5 4.7 4 5v13c3.5-.3 6 .2 8 1.5 2-1.3 4.5-1.8 8-1.5V5c-3.5-.3-6 .2-8 1.5zM12 6.5v13'/%3E%3C/svg%3E");--ic-social:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3.5 19c.6-3 2.7-4.5 5.5-4.5s4.9 1.5 5.5 4.5M16 5.2a3 3 0 0 1 0 5.6M17.5 14.7c1.7.6 2.7 2 3 4.3'/%3E%3C/svg%3E");--ic-other:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7.5A2.5 2.5 0 0 1 7.5 5h9A2.5 2.5 0 0 1 19 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 5 16.5zM9 10h6M9 14h3.5'/%3E%3C/svg%3E");--ic-alert:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7.5v5.5M12 16.4v.1'/%3E%3C/svg%3E");--ic-clock:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7.5V12l3 2'/%3E%3C/svg%3E");--ic-cal:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 5 17.5zM5 9.5h14M9 2.5v3M15 2.5v3'/%3E%3C/svg%3E");--ic-file:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 3h7l4 4v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v4h4'/%3E%3C/svg%3E");
   color-scheme:light;
 }
 :root[data-theme="dark"]{
@@ -80,6 +98,12 @@
   --titlebar:#17181e;
   --course-1:#5b8ef7;--course-2:#f0706a;--course-3:#3fbf80;--course-4:#b18cf2;--course-5:#ec9440;
   --course-6:#2bb5cc;--course-7:#e874a8;--course-8:#c4bc2a;--course-9:#b9875a;--course-10:#d7a2d5;--course-personal:#8c93a0;
+  --tray:#0e1014;--cell:#1a1d24;--cell-line:rgb(255 255 255 / .13);--hatch:rgb(255 255 255 / .075);--hatch-fill:rgb(0 0 0 / .32);
+  --neu:-3px -3px 8px rgb(255 255 255 / .022),5px 8px 20px -6px rgb(0 0 0 / .6),0 1px 2px rgb(0 0 0 / .4);
+  --neu-sm:-2px -2px 5px rgb(255 255 255 / .018),2px 4px 10px -3px rgb(0 0 0 / .5),0 1px 1.5px rgb(0 0 0 / .35);
+  --k-meal-a:#f7bb62;--k-meal-b:#f0905a;--k-social-a:#56d39e;--k-social-b:#28b47a;--k-other-a:#bdd0fb;--k-other-b:#93b2f6;
+  --pb-rim:rgb(255 255 255 / .3);--pb-shade:rgb(0 0 0 / .4);--pb-lift:rgb(0 0 0 / .7);
+  --ink-pill:#e8eaee;--on-ink-pill:#0b0d11;
   color-scheme:dark;
 }
 /* Night, from 9 PM to midnight (bar.js): every color a shade of red, with no blue in any of them,
@@ -112,6 +136,17 @@
   --titlebar:#150100;
   --course-1:#ff2400;--course-2:#ff5000;--course-3:#ff7800;--course-4:#e03400;--course-5:#ff9a00;
   --course-6:#d42400;--course-7:#ff6400;--course-8:#e84a00;--course-9:#ffae00;--course-10:#c83c00;--course-personal:#c03800;
+  /* Direction B in red: the bars are dark, each kind in its own shade from red to amber with its
+     own bright ink, and the chip takes the place of white. Nothing here has blue. */
+  --tray:#0b0000;--cell:#170100;--cell-line:rgb(255 60 0 / .24);--hatch:rgb(255 60 0 / .17);--hatch-fill:rgb(0 0 0 / .4);
+  --neu:0 1px 2px rgb(0 0 0 / .55),0 0 0 1px rgb(255 40 0 / .06);--neu-sm:0 1px 2px rgb(0 0 0 / .6);
+  --k-meal-a:#3a1600;--k-meal-b:#2b0f00;--k-meal-ink:#ff8a00;--k-meal-ink2:#ff7400;--k-meal-edge:#ff7400;
+  --k-deep-a:#4a0a00;--k-deep-b:#350600;--k-deep-ink:#ff5e00;--k-deep-ink2:#ff5200;--k-deep-edge:#ff5200;
+  --k-social-a:#3d2000;--k-social-b:#2e1700;--k-social-ink:#ffa000;--k-social-ink2:#ff8c00;--k-social-edge:#ff8c00;
+  --k-other-a:#340500;--k-other-b:#290300;--k-other-ink:#ff4a00;--k-other-ink2:#ff4000;--k-other-edge:#ff4000;
+  --k-panel:rgb(0 0 0 / .3);--k-deep-panel:rgb(0 0 0 / .3);
+  --pb-gloss:none;--pb-rim:rgb(255 72 0 / .14);--pb-bubble:rgb(255 72 0 / .16);--pb-bubble-rim:rgb(255 72 0 / .32);--pb-shade:rgb(0 0 0 / .5);--pb-lift:rgb(0 0 0 / .75);
+  --pb-chip:#ff5a00;--pb-chip-ink:#0b0000;--ink-pill:#ff4800;--on-ink-pill:#0b0000;
   color-scheme:dark;
   scrollbar-color:var(--border-strong) var(--bg);
 }
@@ -145,7 +180,7 @@
 :root.reduce-transparency,:root.reduce-transparency[data-theme]{--glass:var(--surface);--glass-thick:var(--surface);--glass-blur:none;--glass-blur-thick:none}
 *{box-sizing:border-box}
 /* Room for the bar above and the + button below a link or field the page scrolls to or focuses. */
-html{scroll-padding-top:calc(var(--bar-height) + 16px);scroll-padding-bottom:calc(96px + env(safe-area-inset-bottom))}
+html{scroll-padding-top:calc(var(--bar-height) + 16px);scroll-padding-bottom:calc(96px + env(safe-area-inset-bottom));color:var(--text)}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--font-text);-webkit-font-smoothing:antialiased}
 /* A faint tint of the accent at the top of the page, on a fixed layer that never repaints on scroll. */
 body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
@@ -159,11 +194,15 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline;tex
 .muted{color:var(--muted)}
 .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 [hidden]{display:none!important}
+/* Going between QuantPrep and SchoolHub in a browser, the page cross-fades and the bar stays put. */
+@view-transition { navigation: auto; }
+::view-transition-old(root),::view-transition-new(root){animation-duration:160ms}
+@media (prefers-reduced-motion: reduce){@view-transition { navigation: none; }}
 
 /* The app bar, laid out like QuantPrep's so the two read as one product: glass the page scrolls
    under, with a hairline below, the same height, the title (or the app switch) at the left,
    SchoolHub's two views as its nav, and the theme button at the right end of the page column. */
-.topbar{position:sticky;top:0;z-index:5;background:var(--glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);border-bottom:1px solid var(--glass-edge)}
+.topbar{position:sticky;top:0;z-index:5;view-transition-name: app-bar;background:var(--glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);border-bottom:1px solid var(--glass-edge)}
 .bar{display:flex;align-items:center;gap:20px;max-width:calc(var(--content) + 2 * var(--gutter));height:var(--bar-height);margin:0 auto;padding:0 var(--gutter)}
 .brand-slot{display:flex;align-items:center;flex:none;min-width:0}
 .brand{margin:0;font-size:15px;line-height:32px;font-weight:650;letter-spacing:-.01em;color:var(--text);white-space:nowrap}
@@ -218,10 +257,11 @@ dialog.task :is(input,select,textarea){padding:0 11px;height:36px;border:1px sol
 dialog.task :is(input,select,textarea):focus-visible{box-shadow:var(--input-inset),0 0 0 3px var(--ring)}
 input::placeholder,textarea::placeholder{color:var(--faint);opacity:1}
 input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:7px 16px;border-radius:18px;border:1px solid var(--border);background:var(--btn-bg);color:var(--text);box-shadow:var(--btn-shadow);cursor:pointer;font-size:14px;font-weight:560;line-height:1.3;white-space:nowrap;transition:background-color var(--dur-1) var(--ease-out),box-shadow var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:7px 16px;border-radius:18px;border:1px solid var(--border-strong);background:var(--btn-bg);color:var(--text);box-shadow:var(--btn-shadow);cursor:pointer;font-size:14px;font-weight:560;line-height:1.3;white-space:nowrap;transition:background-color var(--dur-1) var(--ease-out),box-shadow var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out)}
 .btn:hover{background:var(--btn-bg-hover);text-decoration:none}
 .btn:active{background:var(--btn-bg-hover);transform:scale(.97)}
-.btn.small{min-height:30px;padding:4px 12px;border-radius:15px;font-size:13px}
+.btn.small{min-height:30px;padding:4px 12px;border-radius:15px;gap:6px;font-size:13px}
+.btn svg{flex:none;width:14px;height:14px}
 .btn.primary{background:var(--sheen),var(--accent);border-color:var(--accent);color:var(--on-accent);
   box-shadow:inset 0 1px 0 var(--sheen-edge),0 1px 2px color-mix(in srgb,var(--accent) 40%,transparent),0 4px 12px -4px color-mix(in srgb,var(--accent) 55%,transparent)}
 .btn.primary:hover,.btn.primary:active{background:var(--sheen),var(--accent-hover);border-color:var(--accent-hover)}
@@ -237,16 +277,24 @@ input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 .errors ul{margin:4px 0 0;padding-left:18px}
 
 /* Stats, lists and the course materials sit on panes. */
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-bottom:24px}
-.stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shine),var(--shadow);padding:14px 18px}
-.stat b{display:block;font:600 28px/1.2 var(--font-rounded);letter-spacing:-.01em;font-variant-numeric:tabular-nums}
-.stat span{color:var(--muted);font-size:12.5px}
+/* The four tiles: a very large light figure, its label under it, and an icon in a bubble at the corner. */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px;margin-bottom:28px}
+.stat{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shine),var(--neu);padding:15px 18px 14px}
+.stat b{display:block;font:300 46px/1.05 var(--font-rounded);letter-spacing:-.035em;font-variant-numeric:tabular-nums}
+.stat span{display:block;margin-top:5px;color:var(--muted);font-size:12.5px}
 .stat.red b{color:var(--bad)}.stat.amber b{color:var(--warn)}
-.group{margin-bottom:24px}
-.group h2,.sub{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 8px;font-weight:600}
-.list{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shine),var(--shadow);overflow:hidden}
-.row{display:grid;grid-template-columns:120px minmax(0,1fr) auto 150px 104px 28px;gap:14px;align-items:center;padding:10px 18px;border-top:1px solid var(--border);cursor:pointer;font-size:14px;line-height:1.45;transition:background-color var(--dur-1) var(--ease-out)}
-.row:first-child{border-top:0}.row:hover{background:var(--hover-fill)}
+.stat::before,.stat::after{content:"";position:absolute;top:13px;right:13px;width:30px;height:30px;border-radius:50%}
+.stat::before{background:var(--tray)}
+.stat::after{background:var(--muted);-webkit-mask:var(--stat-icon) center/15px 15px no-repeat;mask:var(--stat-icon) center/15px 15px no-repeat}
+.stat:nth-child(1){--stat-icon:var(--ic-alert)}.stat:nth-child(2){--stat-icon:var(--ic-clock)}.stat:nth-child(3){--stat-icon:var(--ic-cal)}.stat:nth-child(4){--stat-icon:var(--ic-file)}
+.stat.red::before{background:var(--bad-soft)}.stat.red::after{background:var(--bad)}
+.stat.amber::before{background:var(--warn-soft)}.stat.amber::after{background:var(--warn)}
+.group{margin-bottom:26px}
+.group h2,.sub{margin:0 0 10px 4px;font:400 19px/1.3 var(--font-rounded);letter-spacing:-.012em;color:var(--text)}
+/* Each row is a soft cell of its own. */
+.list{display:grid;gap:8px}
+.row{display:grid;grid-template-columns:120px minmax(0,1fr) auto 150px 104px 28px;gap:14px;align-items:center;padding:11px 18px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shine),var(--neu-sm);cursor:pointer;font-size:14px;line-height:1.45;transition:box-shadow var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out)}
+.row:hover{border-color:var(--border-strong);box-shadow:var(--shine),var(--neu);transform:translateY(-1px)}
 .chip{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--dot)}
 /* The name is a button, so the drawer opens from the keyboard too; it reads as text. */
@@ -255,11 +303,13 @@ input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 .plat{font-size:11.5px;color:var(--muted);border:1px solid var(--border-strong);border-radius:999px;padding:0 8px;line-height:18px;white-space:nowrap}
 .due{font-size:12.5px;color:var(--muted);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 /* Status pills, soft like QuantPrep's state tags, with a hairline of their own colour. */
-.pill{box-shadow:inset 0 0 0 1px color-mix(in srgb,currentColor 14%,transparent);font-size:12px;font-weight:580;line-height:18px;padding:1px 8px;border-radius:999px;border:1px solid transparent;white-space:nowrap;text-align:center;font-variant-numeric:tabular-nums}
+.pill{box-shadow:inset 0 0 0 1px color-mix(in srgb,currentColor 14%,transparent);font-size:12px;font-weight:580;line-height:18px;padding:1px 9px 1px 8px;border-radius:999px;border:1px solid transparent;white-space:nowrap;text-align:center;font-variant-numeric:tabular-nums}
+/* A dot of the status's own colour before its words, as on the planner's chips. */
+.pill::before{content:"";display:inline-block;position:relative;top:-1px;width:5px;height:5px;margin-right:5px;border-radius:50%;background:currentColor;vertical-align:middle}
 .s-missing,.s-overdue{background:var(--bad-soft);color:var(--bad)}.s-soon,.s-flagged,.s-check{background:var(--warn-soft);color:var(--warn)}
 .s-todo{background:var(--surface-3);color:var(--text)}.s-submitted{background:var(--accent-soft);color:var(--accent)}
 .s-graded,.s-marked{background:var(--good-soft);color:var(--good)}.s-offline,.s-excused,.s-expired{background:var(--surface-3);color:var(--muted)}
-.check{width:26px;height:26px;border-radius:50%;border:1.5px solid var(--border-input);background:var(--surface);color:transparent;cursor:pointer;display:grid;place-items:center;font-size:13px;font-weight:700;padding:0;transition:background-color var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),transform var(--dur-2) var(--ease-spring)}
+.check{width:26px;height:26px;border-radius:50%;border:1.5px solid var(--border-input);background:var(--surface);box-shadow:var(--neu-sm);color:transparent;cursor:pointer;display:grid;place-items:center;font-size:13px;font-weight:700;padding:0;transition:background-color var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),transform var(--dur-2) var(--ease-spring)}
 .check:hover{border-color:var(--good);color:var(--good)}
 .check:active{transform:scale(.92)}
 .check.on{background:var(--good);border-color:var(--good);color:var(--surface);transform:scale(1.04)}
@@ -267,15 +317,15 @@ input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 /* A course's own list leaves out the course column: every row is that course. */
 .courses .row{grid-template-columns:minmax(0,1fr) auto 150px 104px 28px}
 .courses .row .chip{display:none}
-.clist{display:flex;flex-direction:column;gap:2px;position:sticky;top:calc(var(--bar-height) + 17px);align-self:start;padding:6px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shine),var(--shadow)}
-.clist button{text-align:left;border:0;background:none;color:var(--muted);font-size:14px;font-weight:520;padding:7px 10px;border-radius:var(--radius-sm);cursor:pointer;display:flex;gap:8px;align-items:center;transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out)}
+.clist{display:flex;flex-direction:column;gap:2px;position:sticky;top:calc(var(--bar-height) + 17px);align-self:start;padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shine),var(--neu)}
+.clist button{text-align:left;border:0;background:none;color:var(--muted);font-size:14px;font-weight:520;padding:7px 10px;border-radius:14px;cursor:pointer;display:flex;gap:8px;align-items:center;transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out)}
 .clist button:hover{background:var(--hover-fill);color:var(--text)}
 .clist button.on{background:var(--current-fill);color:var(--text)}
 .clist .n{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 .chead{display:flex;align-items:baseline;gap:14px;margin-bottom:14px;flex-wrap:wrap}
-.chead h2{margin:0;font-size:22px;font-weight:700;letter-spacing:-.02em}
-.sub{margin-top:26px}
-.mat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shine),var(--shadow);padding:4px 18px;font-size:14px}
+.chead h2{margin:0;font:350 28px/1.2 var(--font-rounded);letter-spacing:-.022em}
+.sub{margin-top:28px}
+.mat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shine),var(--neu);padding:6px 20px;font-size:14px}
 details.mod{border-top:1px solid var(--border);padding:9px 0}details.mod:first-child{border-top:0}
 details.mod summary{cursor:pointer;font-weight:560}
 details.mod ul{margin:6px 0 2px;padding-left:20px}details.mod li{margin:3px 0}
@@ -289,12 +339,12 @@ aside{position:fixed;top:10px;right:10px;bottom:10px;width:min(580px,calc(100% -
 @keyframes sh-drawer-in{from{opacity:0;transform:translateX(24px)}}
 aside:focus{outline:none}
 aside{--btn-bg:var(--btn-bg-inset);--btn-bg-hover:var(--btn-bg-inset-hover)}
-aside h3{margin:6px 40px 8px 0;font-size:22px;font-weight:700;letter-spacing:-.02em}
+aside h3{margin:8px 40px 10px 0;font:350 28px/1.18 var(--font-rounded);letter-spacing:-.022em}
 aside .meta{color:var(--muted);font-size:13px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
-aside h4{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:22px 0 6px;font-weight:600}
+aside h4{margin:24px 0 8px;font:400 17px/1.3 var(--font-rounded);letter-spacing:-.01em;color:var(--text)}
 .note{font-size:13px;color:var(--muted);margin-top:10px}.note.warn{color:var(--warn)}
-.files a,.files .offsite{display:flex;gap:8px;padding:7px 0;border-top:1px solid var(--border)}
-.files a:first-child,.files .offsite:first-child{border-top:0}
+.files{display:grid;gap:6px}
+.files a,.files .offsite{display:flex;gap:8px;padding:9px 12px;border-radius:var(--radius-sm);background:var(--surface-2)}
 .offsite{color:var(--muted)}
 /* A folder named where it cannot be opened from here (another device): "On your Mac: ~/…". */
 .where{color:var(--muted);font-size:13px;overflow-wrap:anywhere;min-width:0}
@@ -303,7 +353,7 @@ a.dl::after{content:"\2193";content:"\2193" / "";display:inline-block;margin-lef
 .files a.dl::after{margin-left:0}
 .files .sz{margin-left:auto;color:var(--muted);font-size:12px}
 .actions{display:flex;gap:8px;flex-wrap:wrap}
-.comment{background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;margin:6px 0;font-size:13px;white-space:pre-wrap}
+.comment{background:var(--surface-2);border:0;border-radius:var(--radius-sm);padding:10px 12px;margin:6px 0;font-size:13px;white-space:pre-wrap}
 .doc{font-size:14.5px;line-height:1.6}
 .doc img{max-width:100%;height:auto;border-radius:6px}
 .doc p{margin:9px 0}.doc ul,.doc ol{margin:9px 0;padding-left:22px}.doc li{margin:4px 0}
@@ -352,7 +402,7 @@ dialog.task::backdrop{background:var(--scrim);-webkit-backdrop-filter:blur(3px);
 dialog.task{scroll-padding-bottom:96px}
 dialog.task.week{scroll-padding-top:76px}
 dialog.task form{padding:24px;display:grid;gap:16px}
-dialog.task h3{margin:0;font-size:20px;font-weight:700;letter-spacing:-.018em}
+dialog.task h3{margin:0;font:350 26px/1.2 var(--font-rounded);letter-spacing:-.022em}
 dialog.task label{display:grid;gap:6px;font-size:13px;font-weight:520;color:var(--muted)}
 dialog.task label.pin-check{grid-template-columns:auto 1fr;align-items:center;column-gap:8px;color:var(--text)}
 dialog.task label.pin-check input{width:16px;height:16px;margin:0}
@@ -377,7 +427,7 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
    from disk, or with a server too old to keep a plan), data-view which view is on show. While it is
    still unknown the planner's column is kept, so the list does not jump sideways once it is on. */
 .left{min-width:0;container-type:inline-size}
-.planner{display:flex;flex-direction:column;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shine),var(--shadow);overflow:hidden;container:planner / inline-size}
+.planner{display:flex;flex-direction:column;min-width:0;background:var(--tray);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--neu);overflow:hidden;container:planner / inline-size}
 .page:not([data-plan="on"],[data-plan="unknown"]) .planner{display:none}
 @media (min-width:1100px){
   .page:is([data-plan="on"],[data-plan="unknown"]){max-width:calc(1440px + 2 * var(--gutter))}
@@ -410,7 +460,7 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
    narrow window, or beside the planner. The column's width decides, not the window's. */
 @container (max-width:880px){
   .row,.courses .row{grid-template-columns:minmax(0,1fr) auto 32px;grid-template-areas:"name pill check" "chip due check";
-       row-gap:3px;column-gap:10px;padding:11px 14px}
+       row-gap:4px;column-gap:10px;padding:12px 14px 12px 16px}
   .row .name{grid-area:name;white-space:normal;line-height:1.3}
   .row .pill{grid-area:pill;align-self:start}
   .row .chip{grid-area:chip}
@@ -426,7 +476,7 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 }
 /* An open row can be dragged onto the planner: a grip shows on hover. */
 .row{position:relative}
-.grip{position:absolute;left:2px;top:50%;display:grid;place-items:center;width:12px;height:22px;margin-top:-11px;color:var(--faint);opacity:0;cursor:grab;transition:opacity 120ms ease}
+.grip{position:absolute;left:3px;top:50%;display:grid;place-items:center;width:12px;height:22px;margin-top:-11px;color:var(--faint);opacity:0;cursor:grab;transition:opacity 120ms ease}
 .grip svg{width:6px;height:14px}
 .row:hover .grip{opacity:1}
 .row.drag-src{opacity:.55}
@@ -434,22 +484,47 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 .done-toggle{display:inline-block;margin:-12px 0 0;padding:4px 2px;border:0;background:none;color:var(--muted);font-size:13px;cursor:pointer}
 .done-toggle:hover{color:var(--text);text-decoration:underline;text-underline-offset:2px}
 
-/* The planner: a header with the date, a strip for what has no time on it (one line, its chips
-   cut short and then scrolling sideways, so it never takes the day's room), and the timeline. The
-   whole day fits under the header: planner.js sets the hour's height (--hour) from the room there,
-   never under 22 px (only then does it scroll). Each kind of block has its own colors from the
-   theme, and its name written on it. */
-.ph{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;padding:10px 12px 10px 8px;border-bottom:1px solid var(--border)}
-.ph-nav{display:flex;align-items:center;gap:2px;flex:1 1 auto;min-width:0}
-.ph-step{display:grid;place-items:center;flex:none;width:30px;height:30px;padding:0;border:0;border-radius:15px;background:none;color:var(--muted);font-size:20px;line-height:1;cursor:pointer;transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out)}
-.ph-step:hover{background:var(--hover-fill);color:var(--text)}
-.ph-date{margin:0 4px;font-size:17px;font-weight:700;letter-spacing:-.015em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+/* The planner (direction B, "soft cells, vivid bars"): a tray holding a white header card (the
+   date, the buttons, the week as a strip of day chips), a strip for what has no time on it (one
+   line, its chips cut short and then scrolling sideways, so it never takes the day's room), and the
+   timeline, drawn as a row of soft cells, one an hour. The whole day fits under the header:
+   planner.js sets the hour's height (--hour) from the room there, never under 22 px (only then does
+   it scroll). Each kind of block is a gradient bar with its own ink, its icon in a bubble at the
+   left and its name written on it or in the chip at the right. */
+.ph{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:6px 6px 0;padding:11px 11px 11px 15px;border-radius:calc(var(--radius-lg) - 6px);background:var(--surface);box-shadow:var(--shine),var(--neu-sm)}
+.ph-date{flex:1 1 auto;margin:0;font:350 20px/1.2 var(--font-rounded);letter-spacing:-.015em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .ph-date .short{display:none}
-@container planner (max-width:460px){.ph-date .long{display:none}.ph-date .short{display:inline}}
+@container planner (max-width:520px){.ph-date .long{display:none}.ph-date .short{display:inline}}
+/* A phone: Today and Week… are their words alone, so the three still fit on the date's line. */
+@container planner (max-width:400px){#planWeek svg,#planToday svg{display:none}}
 .ph-actions{display:flex;align-items:center;gap:6px;flex:none;margin-left:auto}
-.pstrip{display:flex;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--surface-2);overflow-x:auto;scrollbar-width:thin;overscroll-behavior-x:contain}
-.pchip{flex:0 1 auto;min-width:min(9em,100%);display:inline-flex;align-items:center;gap:6px;max-width:100%;min-height:26px;padding:2px 10px;border:1px solid var(--border-strong);border-radius:999px;background:var(--surface);color:var(--text);font-size:12.5px;line-height:1.3;cursor:pointer;transition:background-color 120ms ease}
-.pchip:hover{background:var(--surface-3)}
+/* The week of the day on show: a chip a day (the weekday over the date), with the day before and
+   after on the round buttons at its ends. The day on show is solid: in the accent when it is today
+   (which also has a dot under its date), in ink when it is another day. */
+.ph-nav{display:flex;align-items:center;gap:6px;flex:1 0 100%;min-width:0;margin-left:-4px}
+.ph-step{display:grid;place-items:center;flex:none;width:30px;height:30px;padding:0;border:1px solid var(--border);border-radius:50%;background:var(--btn-bg);color:var(--muted);box-shadow:var(--btn-shadow);cursor:pointer;transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out)}
+.ph-step svg{width:14px;height:14px}
+.ph-step:hover{background:var(--btn-bg-hover);color:var(--text)}
+.ph-week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px;flex:1;min-width:0}
+.pday{display:grid;justify-items:center;align-content:center;gap:1px;min-width:0;height:46px;padding:0;border:0;border-radius:15px;background:var(--tray);color:var(--muted);font-size:11px;line-height:1.2;cursor:pointer;transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),box-shadow var(--dur-1) var(--ease-out)}
+.pday b{font:500 15px/1.2 var(--font-rounded);color:var(--text);font-variant-numeric:tabular-nums}
+.pday:hover{background:var(--surface-3)}
+.pday.today{background:var(--accent-soft);color:var(--accent)}
+.pday.today b{color:inherit}
+.pday.today::after{content:"";width:4px;height:4px;border-radius:50%;background:currentColor}
+.pday.on{background:var(--ink-pill);color:var(--on-ink-pill)}
+.pday.on b{color:inherit}
+.pday.on.today{background:var(--sheen),var(--accent);color:var(--on-accent);box-shadow:inset 0 1px 0 var(--sheen-edge),0 5px 12px -5px color-mix(in srgb,var(--accent) 65%,transparent)}
+/* A short window gives the day the room: the chips take one line ("Wed 11"). */
+@media (max-height:780px){
+  .ph{gap:8px;padding-top:8px;padding-bottom:8px}
+  .pday{grid-auto-flow:column;justify-content:center;align-items:center;gap:4px;height:30px}
+  .pday b{font-size:13px}
+  .pday.today::after{width:3px;height:3px;margin-left:-1px}
+}
+.pstrip{display:flex;gap:6px;padding:8px 12px 1px;overflow-x:auto;scrollbar-width:thin;overscroll-behavior-x:contain}
+.pchip{flex:0 1 auto;min-width:min(9em,100%);display:inline-flex;align-items:center;gap:6px;max-width:100%;min-height:26px;padding:2px 10px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--text);box-shadow:var(--btn-shadow);font-size:12.5px;line-height:1.3;cursor:pointer;transition:background-color 120ms ease}
+.pchip:hover{background:var(--surface-2)}
 .pchip > span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .pchip.done > span{color:var(--muted);text-decoration:line-through}
 .pchip b{font-weight:600;color:var(--accent)}
@@ -460,64 +535,139 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
    would cover the last hour. */
 .ptime{position:relative;margin:7px 0}
 .phours{position:absolute;left:0;top:0;bottom:0;width:58px}
-.phour{position:absolute;right:10px;transform:translateY(-50%);font-size:11.5px;line-height:1;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
-/* A line at each hour, a fainter one at each half hour. Vertical drags on empty time scroll on a
-   touch screen (planner.js makes blocks there on a long press), so only pan-y is left to the
+.phour{position:absolute;right:10px;transform:translateY(-50%);font-size:11px;line-height:1;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+/* The label the now line's pill would half cover gives way to it. */
+.phour.near-now{visibility:hidden}
+/* A soft cell for each hour, as tall as the hour less 2 px (a block of an hour covers it): --cell-shape
+   draws a rounded rectangle on every --hour from gradients alone (two bands and four corners), so it
+   takes the theme's --cell and also masks the hatching below. Vertical drags on empty time scroll on
+   a touch screen (planner.js makes blocks there on a long press), so only pan-y is left to the
    browser. */
-.pgrid{position:relative;margin:0 12px 0 58px;border-bottom:1px solid var(--border);background:linear-gradient(var(--border) 1px,transparent 1px) 0 0/100% var(--hour,48px);
-       touch-action:pan-y;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;cursor:crosshair}
-.pgrid::before{content:"";position:absolute;inset:0;background:linear-gradient(var(--border) 1px,transparent 1px) 0 calc(var(--hour,48px) / 2)/100% var(--hour,48px);opacity:.55;pointer-events:none}
+.pgrid{position:relative;isolation:isolate;margin:0 10px 0 58px;--cr:9px;
+  --cell-shape:linear-gradient(transparent var(--cr),var(--cell) 0,var(--cell) calc(100% - 2px - var(--cr)),transparent 0) 0 0/100% var(--hour,48px),
+    linear-gradient(var(--cell) calc(100% - 2px),transparent 0) var(--cr) 0/calc(100% - 2 * var(--cr)) var(--hour,48px) repeat-y,
+    radial-gradient(circle var(--cr) at 100% var(--cr),var(--cell) 96%,transparent) 0 0/var(--cr) var(--hour,48px) repeat-y,
+    radial-gradient(circle var(--cr) at 100% calc(100% - 2px - var(--cr)),var(--cell) 96%,transparent) 0 0/var(--cr) var(--hour,48px) repeat-y,
+    radial-gradient(circle var(--cr) at 0 var(--cr),var(--cell) 96%,transparent) 100% 0/var(--cr) var(--hour,48px) repeat-y,
+    radial-gradient(circle var(--cr) at 0 calc(100% - 2px - var(--cr)),var(--cell) 96%,transparent) 100% 0/var(--cr) var(--hour,48px) repeat-y;
+  background:var(--cell-shape);touch-action:pan-y;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;cursor:crosshair}
+.pgrid.dense{--cr:6px}
+/* A dotted line at each half hour, inside the cell. */
+.pgrid::before{content:"";position:absolute;inset:0 14px;z-index:-2;pointer-events:none;background:repeating-linear-gradient(90deg,var(--cell-line) 0 2px,transparent 2px 7px);
+  -webkit-mask:linear-gradient(#000 1px,transparent 1px) 0 calc(var(--hour,48px) / 2)/100% var(--hour,48px);mask:linear-gradient(#000 1px,transparent 1px) 0 calc(var(--hour,48px) / 2)/100% var(--hour,48px)}
 .pgrid.dense::before{display:none}
+/* Today's hours gone by are hatched, down to the now line (planner.js sets --now on today). */
+.pgrid::after{content:"";position:absolute;left:0;right:0;top:0;height:min(var(--now,0px),100%);z-index:-2;pointer-events:none;
+  background:repeating-linear-gradient(135deg,var(--hatch) 0 1.5px,transparent 1.5px 7px),var(--hatch-fill);-webkit-mask:var(--cell-shape);mask:var(--cell-shape)}
 .pgrid.loading{opacity:.55;pointer-events:none}
-.pblock{position:absolute;padding:3px 6px 3px 8px;border-radius:8px;border-left:3px solid var(--pb-edge);background:var(--pb-fill);color:var(--text);box-shadow:0 0 0 1px var(--surface),inset 0 0 0 .5px color-mix(in srgb,var(--pb-edge) 30%,transparent);
-        overflow:hidden;font-size:12.5px;line-height:1.35;cursor:grab;transition:box-shadow var(--dur-1) var(--ease-out)}
-.pblock:hover{box-shadow:0 0 0 1px var(--surface),inset 0 0 0 .5px color-mix(in srgb,var(--pb-edge) 45%,transparent),var(--shadow-sm)}
-.k-meal{--pb-fill:var(--warn-soft);--pb-edge:var(--warn)}
-.k-deep{--pb-fill:var(--accent-soft);--pb-edge:var(--accent)}
-.k-social{--pb-fill:var(--good-soft);--pb-edge:var(--good)}
-.k-other{--pb-fill:var(--surface-3);--pb-edge:var(--border-strong)}
+/* A block: a bar in its kind's gradient under a faint sheen, with a hairline of its edge colour and
+   a soft shadow of its own colour. It is a container, so its decorations can go where it is narrow.
+   No blur and no backdrop-filter here: a drag moves it every frame. */
+.pblock{position:absolute;container-type:inline-size;padding:3px 8px 3px 7px;border-radius:12px;background:var(--pb-gloss),linear-gradient(100deg,var(--pb-a),var(--pb-b));color:var(--pb-ink);
+        box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pb-edge) 36%,transparent),inset 0 1px 0 var(--pb-rim),0 1px 2px var(--pb-shade),0 6px 12px -7px color-mix(in srgb,var(--pb-b) 75%,transparent);
+        overflow:hidden;font-size:12.5px;line-height:1.35;cursor:grab;transition:box-shadow var(--dur-1) var(--ease-out),transform var(--dur-2) var(--ease-out),opacity var(--dur-1) var(--ease-out)}
+.pblock:hover{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pb-edge) 55%,transparent),inset 0 1px 0 var(--pb-rim),0 2px 4px var(--pb-shade),0 10px 18px -8px color-mix(in srgb,var(--pb-b) 85%,transparent)}
+.k-meal{--pb-a:var(--k-meal-a);--pb-b:var(--k-meal-b);--pb-ink:var(--k-meal-ink);--pb-ink2:var(--k-meal-ink2);--pb-edge:var(--k-meal-edge);--pb-panel:var(--k-panel);--pb-icon:var(--ic-meal)}
+.k-deep{--pb-a:var(--k-deep-a);--pb-b:var(--k-deep-b);--pb-ink:var(--k-deep-ink);--pb-ink2:var(--k-deep-ink2);--pb-edge:var(--k-deep-edge);--pb-panel:var(--k-deep-panel);--pb-icon:var(--ic-deep)}
+.k-social{--pb-a:var(--k-social-a);--pb-b:var(--k-social-b);--pb-ink:var(--k-social-ink);--pb-ink2:var(--k-social-ink2);--pb-edge:var(--k-social-edge);--pb-panel:var(--k-panel);--pb-icon:var(--ic-social)}
+.k-other{--pb-a:var(--k-other-a);--pb-b:var(--k-other-b);--pb-ink:var(--k-other-ink);--pb-ink2:var(--k-other-ink2);--pb-edge:var(--k-other-edge);--pb-panel:var(--k-panel);--pb-icon:var(--ic-other)}
+/* The kind's icon in a round bubble at the left (the icon is a mask, so it takes the block's ink):
+   26 px on a tall block, 20 px on one line, the icon alone on the shortest, nothing on a column too
+   narrow for words. */
+.pblock::before,.pblock::after{content:"";position:absolute;left:7px;top:5px;width:26px;height:26px;border-radius:50%;pointer-events:none}
+.pblock::before{background:var(--pb-bubble);box-shadow:inset 0 0 0 1px var(--pb-bubble-rim)}
+.pblock::after{background:currentColor;-webkit-mask:var(--pb-icon) center/14px 14px no-repeat;mask:var(--pb-icon) center/14px 14px no-repeat}
+.pblock.md::before,.pblock.md::after{top:2px;width:20px;height:20px}
+.pblock.sm::before,.pblock.sm::after{top:50%;width:20px;height:20px;margin-top:-10px}
+.pblock:is(.md,.sm)::after{-webkit-mask-size:12px 12px;mask-size:12px 12px}
+.pblock.xs::before,.pblock.nar::before,.pblock.nar::after{display:none}
+.pblock.xs::after{left:6px;top:50%;width:12px;height:12px;margin-top:-6px;border-radius:0;-webkit-mask-size:12px 12px;mask-size:12px 12px}
 /* The block's button lies under its text and opens its details; the text lets the pointer through,
    except the items' checkboxes. */
 .pb-open{position:absolute;inset:0;width:100%;padding:0;border:0;border-radius:inherit;background:none;cursor:inherit}
-.pb-open:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.pb-open:focus-visible{outline:2px solid var(--pb-ink);outline-offset:-3px}
 .pb-body{position:relative;pointer-events:none;min-width:0}
+.pb-body,.pb-more{margin-left:33px}
+.pblock:is(.md,.sm) :is(.pb-body,.pb-more){margin-left:27px}
+.pblock.xs .pb-body{margin-left:17px}
 .pb-head{display:flex;align-items:baseline;gap:6px;min-width:0}
-.pb-title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.pb-title i{font-style:normal;font-weight:500;color:var(--muted)}
-.pb-kind{margin-left:auto;flex:none;font-size:10.5px;font-weight:650;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
-.pb-time{display:block;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.pb-title{font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.pb-title i{font-style:normal;font-weight:500;color:var(--pb-ink2)}
+.pb-time{display:block;color:var(--pb-ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
 /* Where the title and the time share a line, the title gives way first (planner.js shows the time
    only where it fits beside the start of the title), and the time is cut only after that. */
 .pb-head .pb-title{flex:0 1000 auto;min-width:2.5em}
 .pb-head .pb-time{flex:0 1 auto;min-width:0}
-/* A block's kind as its initial, before the title, where its name does not fit on the line. */
-.pb-ki{flex:none;align-self:center;min-width:15px;padding:0 3px;border:1px solid var(--pb-edge);border-radius:4px;background:var(--surface);color:var(--text);font-size:9.5px;font-weight:700;line-height:13px;text-align:center}
-.pb-kind + .pb-n{margin-left:0}
-/* Short blocks: one line, "Lunch · Chipotle · 4–5 PM", cut with an ellipsis, and "+N" for items. */
+/* The title gives way so much sooner that the time loses no part of a pixel (and so no "…") before the title is at its least. */
+.pb-head .pb-title{flex-shrink:999999}
+/* One chip at the right of the head, white on the bar: "Now" while the block is on (planner.js marks
+   it .now each minute), else how many of its items are done, else the kind's name where the title
+   does not say it, else "+N" for items not shown. */
+.pb-kind,.pb-n,.pb-st,.pblock.now .pb-head::after{flex:none;align-self:center;padding:0 7px;border-radius:999px;background:var(--pb-chip);color:var(--pb-chip-ink);box-shadow:0 1px 2px var(--pb-shade);font-size:10.5px;font-weight:650;line-height:16px;white-space:nowrap}
+.pb-head > :is(.pb-kind,.pb-n,.pb-st){margin-left:auto}
+.pb-head > :is(.pb-kind,.pb-n,.pb-st) ~ :is(.pb-n,.pb-st){margin-left:0}
+.pb-kind::before,.pb-st::before{content:"";display:inline-block;position:relative;top:-1px;width:4px;height:4px;margin-right:4px;border-radius:50%;background:currentColor;vertical-align:middle}
+.pb-head:has(.pb-st) :is(.pb-kind,.pb-n){display:none}
+.pblock.now .pb-head::after{content:"\2022\00a0Now";margin-left:auto}
+.pblock.now .pb-head :is(.pb-kind,.pb-n,.pb-st){display:none}
+/* A block's kind as its initial, before the title: only where the block is too narrow for the bubble. */
+.pb-ki{display:none;flex:none;align-self:center;min-width:15px;padding:0 3px;border-radius:4px;background:var(--pb-chip);color:var(--pb-chip-ink);font-size:9.5px;font-weight:700;line-height:14px;text-align:center}
+/* Short blocks: one line, "Lunch · Chipotle · 4–5 PM", cut with an ellipsis, in the middle of the
+   bar; so is the one line of a taller block that shows no items. */
+.pblock:is(.sm,.xs),.pblock.md:not(:has(.pb-items,.pb-more)){display:flex;align-items:center}
+.pblock:is(.sm,.xs,.md) .pb-body{flex:1}
+.pblock.md:not(:has(.pb-items,.pb-more))::before,.pblock.md:not(:has(.pb-items,.pb-more))::after{top:50%;margin-top:-10px}
 .pblock.sm{padding-top:2px;padding-bottom:2px;font-size:12px}
-.pblock.xs{padding:1px 5px 1px 7px;font-size:11px;line-height:16px}
+.pblock.xs{padding:1px 6px 1px 6px;border-radius:9px;font-size:11px;line-height:16px}
 .pblock:is(.xs,.sm) .pb-head{align-items:center}
-.pb-n{flex:none;margin-left:auto;padding:0 5px;border-radius:999px;background:var(--surface);color:var(--muted);font-size:10.5px;font-weight:650;line-height:15px}
+.pblock.xs :is(.pb-kind,.pb-n,.pb-st),.pblock.xs.now .pb-head::after{padding:0 6px;font-size:9.5px;line-height:14px;box-shadow:none}
 /* A column too narrow for words: the kind's initial, and its colour (the name is in the label). */
-.pblock.nar{padding:0;text-align:center}
+.pblock.nar{padding:0;border-radius:9px;text-align:center}
+.pblock.nar .pb-body{margin-left:0}
 .pb-ini{display:block;font-size:12px;font-weight:700;line-height:18px}
 /* A block running past the hours shown is cut at their edge, which shows as a dashed line. */
 .pblock.cut-top{border-top:2px dashed var(--pb-edge);border-top-left-radius:0;border-top-right-radius:0}
 .pblock.cut-bottom{border-bottom:2px dashed var(--pb-edge);border-bottom-left-radius:0;border-bottom-right-radius:0}
-.pb-items{position:relative;list-style:none;margin:3px 0 0;padding:0;pointer-events:none}
+/* A tall block's items sit on a nested panel, a shade off the bar. */
+.pb-items{position:relative;list-style:none;margin:3px -2px 0 27px;padding:0 6px;border-radius:9px;background:var(--pb-panel);pointer-events:none}
+.pblock.md .pb-items{margin-left:21px}
 .pb-item{display:flex;align-items:center;gap:6px;max-width:100%;height:21px;width:fit-content;pointer-events:auto;cursor:pointer}
-.pb-item input{flex:none;width:13px;height:13px;margin:0;cursor:pointer}
+.pb-item input{appearance:none;-webkit-appearance:none;display:inline-grid;place-content:center;flex:none;width:14px;height:14px;margin:0;border:1.5px solid var(--pb-ink);border-radius:5px;background:none;cursor:pointer}
+.pb-item input:checked{background:var(--pb-ink)}
+.pb-item input:checked::before{content:"";width:7px;height:4px;margin-top:-2px;border:solid var(--pb-b);border-width:0 0 2px 2px;transform:rotate(-45deg)}
+.pb-item input:focus-visible{outline:2px solid var(--pb-ink);outline-offset:1px;box-shadow:none;border-color:var(--pb-ink)}
 .pb-item span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.pb-item.done span{color:var(--muted);text-decoration:line-through}
-.pb-item small{flex:none;color:var(--good);font-weight:600}
-.pb-more{position:relative;color:var(--muted);font-size:11.5px;pointer-events:none}
+.pb-item.done span{color:var(--pb-ink2);text-decoration:line-through}
+.pb-item small{flex:none;color:var(--pb-ink);font-weight:700}
+.pb-more{position:relative;color:var(--pb-ink2);font-size:11.5px;pointer-events:none}
+/* A half-width block keeps its line for the title and the time: the icon without its bubble, and no
+   chip but "+N" (the now line and its pill still say which block is on). */
+@container (max-width:260px){
+  .pb-st,.pb-kind,.pblock.now .pb-head::after{display:none}
+  .pb-head:has(.pb-st) .pb-n,.pblock.now .pb-head .pb-n{display:block}
+  .pblock:is(.md,.sm)::before{display:none}
+  .pblock:is(.md,.sm)::after{left:6px;width:12px;height:12px;border-radius:0}
+  .pblock.md::after{top:6px}
+  .pblock.sm::after,.pblock.md:not(:has(.pb-items,.pb-more))::after{top:50%;margin-top:-6px}
+  .pblock:is(.md,.sm) :is(.pb-body,.pb-more){margin-left:17px}
+  .pblock.md .pb-items{margin-left:11px}
+}
+/* A narrow block gives its width to its words: no bubble, no chip, the kind as its initial. */
+@container (max-width:150px){
+  .pblock:not(.nar)::before,.pblock:not(.nar)::after{display:none}
+  .pblock:not(.nar) :is(.pb-body,.pb-more){margin-left:0}
+  .pblock:not(.nar) .pb-items{margin-left:-6px}
+  .pb-ki{display:block}
+}
 .pb-rs{position:absolute;left:0;right:0;z-index:2;height:7px;cursor:ns-resize}
 .pb-rs.top{top:0}.pb-rs.bottom{bottom:0}
-.pb-rs::after{content:"";position:absolute;left:50%;width:18px;height:3px;margin-left:-9px;border-radius:2px;background:var(--pb-edge);opacity:0;transition:opacity 120ms ease}
+.pb-rs::after{content:"";position:absolute;left:50%;width:22px;height:3px;margin-left:-11px;border-radius:2px;background:var(--pb-ink);opacity:0;transition:opacity 120ms ease}
 .pb-rs.top::after{top:2px}.pb-rs.bottom::after{bottom:2px}
-.pblock:hover .pb-rs::after{opacity:.8}
+.pblock:hover .pb-rs::after{opacity:.4}
 .pblock:is(.xs,.nar) .pb-rs{height:4px}.pblock:is(.xs,.nar) .pb-rs::after{display:none}
-.pblock.dragging,.pblock.armed{z-index:4;box-shadow:var(--shadow-md);cursor:grabbing}
+/* Picked up, the bar lifts off the cells, turns a little see-through with a bright rim, and tilts. */
+.pblock.dragging,.pblock.armed{z-index:4;cursor:grabbing;opacity:.93;transform:rotate(-1.1deg) scale(1.012);will-change:transform;
+  box-shadow:inset 0 0 0 1.5px var(--pb-bubble-rim),inset 0 1px 0 var(--pb-rim),0 3px 6px var(--pb-shade),0 20px 32px -12px var(--pb-lift)}
 .pblock.ghost{z-index:4;opacity:.9;pointer-events:none;outline:1.5px dashed var(--pb-edge);outline-offset:-1.5px}
 .pblock.shown{z-index:3;outline:2px solid var(--accent);outline-offset:1px}
 .pblock.drop-hit{z-index:3;outline:2px solid var(--accent);outline-offset:1px}
@@ -525,19 +675,22 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
    name shows too while one is pointed at or focused, over the blocks. */
 .pflag-wrap{position:absolute;right:2px;z-index:3;max-width:calc(var(--lane, 92px) - 4px);transform:translateY(-50%)}
 .pflag-wrap:is(:hover,:focus-within){z-index:5;max-width:min(64%,320px)}
-.pflag{display:flex;align-items:center;gap:5px;max-width:100%;height:22px;padding:0 7px 0 6px;border:1px solid var(--border-strong);border-radius:999px;background:var(--surface-raised);color:var(--text);box-shadow:var(--shadow-sm);font-size:11.5px;cursor:pointer}
+.pflag{display:flex;align-items:center;gap:5px;max-width:100%;height:22px;padding:0 8px 0 7px;border:1px solid var(--border);border-radius:999px;background:var(--surface-raised);color:var(--text);box-shadow:var(--neu-sm);font-size:11.5px;cursor:pointer}
 .pflag > span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.pflag b{font-weight:500;font-variant-numeric:tabular-nums}
+.pflag b{font-weight:560;font-variant-numeric:tabular-nums}
 .pflag .pf-name{display:none}
 .pflag-wrap:is(:hover,:focus-within) .pf-name{display:inline}
 .pflag.done span{color:var(--muted);text-decoration:line-through}
 .pflag:hover{background:var(--surface-2)}
-.pnow{position:absolute;left:-5px;right:0;z-index:3;height:0;border-top:2px solid var(--bad);pointer-events:none}
-.pnow::before{content:"";position:absolute;left:0;top:-6px;width:10px;height:10px;border-radius:50%;background:var(--bad);box-shadow:0 0 0 2px var(--surface)}
+/* Now: a dashed line in the accent across the cells, from a small solid pill in the hour rail that
+   says the time (planner.js writes it in data-now). The line runs under the bars, so it never
+   crosses their words: the bar that is on says "Now", and the pill marks the minute beside it. */
+.pnow{position:absolute;left:0;right:0;z-index:-1;height:2px;margin-top:-1px;border-radius:1px;background:repeating-linear-gradient(90deg,var(--accent) 0 7px,transparent 7px 12px);pointer-events:none}
+.pnow::before{content:attr(data-now);position:absolute;right:calc(100% + 3px);top:-8px;height:18px;padding:0 7px;border-radius:9px;background:var(--sheen),var(--accent);color:var(--on-accent);box-shadow:0 2px 6px -2px color-mix(in srgb,var(--accent) 60%,transparent);font-size:10.5px;font-weight:700;line-height:18px;white-space:nowrap;font-variant-numeric:tabular-nums}
 /* A block's details: a card beside the block (planner.js places it), or a sheet at the bottom of a
    narrow screen. */
-dialog.pdetail{position:fixed;inset:auto;left:8px;top:8px;z-index:12;margin:0;width:min(340px,calc(100vw - 16px));max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px);overflow:auto;
-  padding:16px 18px 14px;border:1px solid var(--glass-edge);border-radius:var(--radius-md);background:var(--glass-thick);-webkit-backdrop-filter:var(--glass-blur-thick);backdrop-filter:var(--glass-blur-thick);color:var(--text);box-shadow:var(--glass-rim),var(--shadow-lg);overscroll-behavior:contain}
+dialog.pdetail{position:fixed;inset:auto;left:8px;top:8px;z-index:12;margin:0;width:min(350px,calc(100vw - 16px));max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px);overflow:auto;
+  padding:18px 20px 16px;border:1px solid var(--glass-edge);border-radius:var(--radius-lg);background:var(--glass-thick);-webkit-backdrop-filter:var(--glass-blur-thick);backdrop-filter:var(--glass-blur-thick);color:var(--text);box-shadow:var(--glass-rim),var(--shadow-lg);overscroll-behavior:contain}
 dialog.pdetail[open]{animation:sh-pop-in var(--dur-2) var(--ease-out)}
 @keyframes sh-pop-in{from{opacity:0;transform:scale(.96)}}
 dialog.pdetail:focus{outline:none}
@@ -549,14 +702,17 @@ dialog.pdetail::backdrop{background:var(--scrim)}
    links (--bad, --accent) keep 4.5:1. */
 :root:is([data-theme="dark"],[data-theme="red"]) dialog.pdetail{background:var(--surface)}
 :root:is([data-theme="dark"],[data-theme="red"]) dialog.pdetail{-webkit-backdrop-filter:none;backdrop-filter:none}
-dialog.pdetail .close{top:10px;right:10px}
-.pd-kind{display:flex;align-items:center;gap:7px;margin-right:40px;font-size:11.5px;font-weight:650;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
-.pd-kind i{width:12px;height:12px;border-radius:3px;background:var(--pb-fill);border-left:3px solid var(--pb-edge);box-shadow:inset 0 0 0 1px var(--border)}
-#pdTitle{margin:6px 40px 6px 0;font-size:17px;font-weight:650;letter-spacing:-.01em;line-height:1.3;overflow-wrap:anywhere}
+dialog.pdetail .close{top:12px;right:12px}
+/* The kind, as a small bar of its own: its icon in a bubble, then its name. */
+.pd-kind{display:inline-flex;align-items:center;gap:6px;max-width:calc(100% - 44px);padding:3px 11px 3px 4px;border-radius:999px;background:var(--pb-gloss),linear-gradient(100deg,var(--pb-a),var(--pb-b));color:var(--pb-ink);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--pb-edge) 36%,transparent);font-size:12px;font-weight:650;line-height:20px}
+.pd-kind i{position:relative;flex:none;width:20px;height:20px;border-radius:50%;background:var(--pb-bubble);box-shadow:inset 0 0 0 1px var(--pb-bubble-rim)}
+.pd-kind i::after{content:"";position:absolute;inset:0;background:currentColor;-webkit-mask:var(--pb-icon) center/12px 12px no-repeat;mask:var(--pb-icon) center/12px 12px no-repeat}
+#pdTitle{margin:10px 40px 6px 0;font:400 23px/1.2 var(--font-rounded);letter-spacing:-.02em;overflow-wrap:anywhere}
 .pd-line{margin:2px 0;font-size:13.5px;color:var(--muted);overflow-wrap:anywhere}
 .pd-time{color:var(--text);font-variant-numeric:tabular-nums}
-.pd-sec{margin:14px 0 8px;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
-.pd-items{display:grid;gap:10px;margin:0;padding:0;list-style:none}
+.pd-sec{margin:16px 0 8px;font-size:13px;font-weight:560;color:var(--muted)}
+.pd-items{display:grid;gap:6px;margin:0;padding:0;list-style:none}
+.pd-item{padding:9px 11px;border-radius:13px;background:var(--surface-2)}
 .pd-check{display:flex;align-items:flex-start;gap:8px;font-size:14px;line-height:1.35;cursor:pointer}
 .pd-check input{flex:none;width:16px;height:16px;margin:1px 0 0;cursor:pointer}
 .pd-text{overflow-wrap:anywhere;min-width:0}
@@ -564,7 +720,7 @@ dialog.pdetail .close{top:10px;right:10px}
 .pd-work{display:flex;flex-wrap:wrap;align-items:center;gap:3px 8px;margin:3px 0 0 24px;font-size:12.5px;color:var(--muted)}
 .pd-work .linkish{font-size:12.5px}
 .pd-st{font-weight:600}.pd-st.good{color:var(--good)}.pd-st.bad{color:var(--bad)}.pd-st.warn{color:var(--warn)}
-.pd-none{margin:0;font-size:13px;color:var(--muted)}
+.pd-none{margin:0;padding:10px 12px;border-radius:13px;background:var(--surface-2);font-size:13px;color:var(--muted)}
 .pd-buttons{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px}
 .pd-buttons .grow{flex:1}
 /* The preview of a block, or of something due, while the pointer rests on it or it has the
@@ -608,7 +764,7 @@ dialog.task .buttons .grow{flex:1}
 .kind-fixed{display:grid;gap:6px;margin:0;font-size:13px;font-weight:520;color:var(--muted)}
 .kind-fixed b{font-size:14.5px;font-weight:400;line-height:36px;color:var(--text)}
 .form-err{margin:0;color:var(--bad);font-size:13px}
-.b-changed{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin:0;padding:8px 10px;border-radius:var(--radius-sm);background:var(--surface-2);font-size:13px;color:var(--muted)}
+.b-changed{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin:0;padding:9px 12px;border-radius:var(--radius-sm);background:var(--surface-2);font-size:13px;color:var(--muted)}
 .linkish{padding:0;border:0;background:none;color:var(--accent);font:inherit;font-weight:560;cursor:pointer}
 .linkish:hover{text-decoration:underline;text-underline-offset:2px}
 .btn.danger{color:var(--bad)}
@@ -635,7 +791,9 @@ dialog.task .b-item label.pin-check{flex:1;min-width:0;font-weight:400;font-size
 dialog.task.week{width:min(980px,calc(100% - 32px))}
 .wk-head,.wk-row{display:grid;grid-template-columns:92px repeat(3,minmax(0,1fr));gap:12px;align-items:start}
 .wk-head{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}
-.wk-row{padding-top:10px;border-top:1px solid var(--border)}
+/* Each weekday is a soft cell of its own. */
+.wk-head{padding:0 12px}
+.wk-row{margin-top:8px;padding:10px 12px;border-radius:var(--radius);background:var(--surface-2)}
 .wk-day{padding-top:8px;font-size:14px;font-weight:600}
 .wk-meal{display:grid;gap:6px;min-width:0}
 .wk-meal-name{display:none;font-size:12.5px;color:var(--muted);font-weight:520}
@@ -666,11 +824,11 @@ dialog.task .wk-hours label{flex:1 1 160px}
   dialog.task .buttons{margin-bottom:calc(-20px - env(safe-area-inset-bottom));padding-bottom:calc(14px + env(safe-area-inset-bottom))}
   dialog.task{scroll-padding-bottom:calc(96px + env(safe-area-inset-bottom))}
   dialog.task :is(input,select,textarea){font-size:16px}
-  .stats{grid-template-columns:1fr 1fr;gap:12px}.stat{padding:12px}.stat b{font-size:21px}.stat span{font-size:12px}
+  .stats{grid-template-columns:1fr 1fr;gap:10px}.stat{padding:12px 14px}.stat b{font-size:34px}.stat span{font-size:12px}.stat::before,.stat::after{top:10px;right:10px;width:26px;height:26px}
   /* Filling the screen, the drawer is an opaque sheet: nothing beside it would show the glass. */
   aside{inset:0;width:100%;border:0;border-radius:0;padding:18px 16px calc(50px + env(safe-area-inset-bottom));
         background:var(--surface);-webkit-backdrop-filter:none;backdrop-filter:none}
-  aside h3{font-size:18px}
+  aside h3{font-size:22px}
   .close{width:34px;height:34px}
   .toast{left:12px;right:12px;width:auto;max-width:none;margin:0;border-radius:var(--radius-md);bottom:calc(86px + env(safe-area-inset-bottom))}
 }
@@ -689,14 +847,16 @@ dialog.task .wk-hours label{flex:1 1 160px}
   /* A phone's Day view gives the day every pixel it can. */
   .page[data-view="day"]{padding-top:14px;padding-bottom:8px}
   .page[data-view="day"] .syncrow{margin-bottom:10px}
-  .ph{padding-top:7px;padding-bottom:7px}
-  .pstrip{padding-top:6px;padding-bottom:6px}
+  .ph{padding:9px 9px 9px 12px;gap:8px}
+  .pday{height:42px}
+  .pstrip{padding-top:6px}
+  .pgrid{margin-right:8px}
 }
 /* Nothing moves for those who ask for less motion. */
 @media (prefers-reduced-motion:reduce){
   aside,dialog.task[open],dialog.pdetail[open],.ptip{animation:none}
-  .btn,.fab,.check,.pblock,.app-seg a,.views button,.theme-btn,.close,.ph-step,.row,.clist button{transition:none}
-  .btn:active,.fab:hover,.fab:active,.check:active,.check.on{transform:none}
+  .btn,.fab,.check,.pblock,.app-seg a,.views button,.theme-btn,.close,.ph-step,.pday,.row,.clist button{transition:none}
+  .btn:active,.fab:hover,.fab:active,.check:active,.check.on,.row:hover,.pblock.dragging,.pblock.armed{transform:none}
 }
 </style>
 </head>
