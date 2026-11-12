@@ -137,8 +137,8 @@ deleted, its items, a meal changed or skipped for a day, an assignment dropped o
 it**, the weekly form and the hours shown). **Cmd+Z** or **Ctrl+Z** takes the last step back;
 **Shift+Cmd+Z**, **Shift+Ctrl+Z** or **Ctrl+Y** makes it again. One action is one step even when it
 saves several things, a new change clears what could be redone, and the page keeps about a hundred
-steps until it is closed or reloaded (a finished **Sync now** reloads it). The view and the theme are
-not data, so they are not steps.
+steps until it is closed or reloaded (a finished **Sync now** reloads it; a sync that runs by itself
+does not). The view and the theme are not data, so they are not steps.
 
 - A toast names what happened, "Undid: moved Lunch to 3:00 PM", with **Redo** (or **Undo**) on it.
   Deleting a task or a block offers **Undo** on its own toast, as before.
@@ -146,7 +146,7 @@ not data, so they are not steps.
   block, the week) and you are not typing, they do nothing, so nothing changes underneath the form.
 - What you deleted comes back as it was: a task under its own id with its fields, its ✓ and the time
   it was made; a block with its items, their ticks and its place; a ✓ with the time it was made, so
-  the nightly check's answer for it still applies. The server stamps every save of a task
+  the last sync's answer for it still applies. The server stamps every save of a task
   (`updated_at`), so that one field is new.
 - An undo saves through the same requests as the change itself, so it works the same on the Mac and
   on a hosted copy. It first asks the server what is stored now. If that is no longer what the step
@@ -295,6 +295,26 @@ failure), `settling` (just awake), `due` (at the next look), `offline` (due, wai
 network), `running` or `off`. `next_at` is when the next sync may start, or null when no time can be
 given (`running`, `offline`, `off`). `last_good_at` is null when there has been no good sync, or the
 latest one left something unread.
+
+**What an open page does with it.** Where the Mac's own server answers the page (on the Mac, or from
+another device through a platform; never a public copy, never the phone view), the page asks
+`/api/sync` when it opens, about once a minute while it is on show, and when it comes back into view.
+A hidden page asks nothing and runs no timer.
+
+- **One quiet line says when the next sync is**: "Syncs by itself every 12 hours · next around
+  9:34 PM", "Last sync didn't finish · trying again at 9:41 PM", "Syncing in a moment" or "Will sync
+  when the network is back". It is in the tooltip of "Synced 2h ago", and it shows under **Sync now**
+  while the pointer rests on that button or the keyboard's focus is on it; a screen reader reads it
+  with the button. Nothing is said where the server does not sync by itself.
+- **While a sync runs**, whoever started it, **Sync now** reads "Syncing…".
+- **New data is taken in place.** When the `data.js` on the Mac is no longer the one on the page
+  (`data_at` differs), the page fetches `data.js` again and draws from it without loading again:
+  where you had scrolled to, an open assignment, an open form and the undo history stay as they were.
+  Only if that `data.js` cannot be read does the page stay as it is and show "New data · Refresh"
+  above the list. The page never reloads by itself for a sync it did not start; **Sync now** pressed
+  on that page still ends with a reload, to say how the sync went.
+- **A page brought back by the browser's Back or Forward button** (from its back/forward cache) asks
+  for your marks, tasks and plan again, as a tab that comes back into view does.
 
 **While the lid is closed** the Mac is asleep and runs nothing, this server included: the sync
 happens once the Mac is next awake. Making it happen during sleep means changing macOS's own power

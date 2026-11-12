@@ -215,7 +215,7 @@ class ServerTest(unittest.TestCase):
         return status, json.loads(data) if status == 200 else data
 
     def test_a_mark_put_back_keeps_the_time_it_was_made(self):
-        # The page's undo of taking a mark away sends the mark's own time, so the nightly check's
+        # The page's undo of taking a mark away sends the mark's own time, so the last sync's
         # answer for that mark (data.js's marked_done) still applies to it.
         made = "2026-10-07T12:00:00.123456+00:00"
         status, marks = self.post("/api/mark", {"id": "canvas:77", "done": True, "name": "HW 7", "course": "15-122", "marked_at": made})

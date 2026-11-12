@@ -885,7 +885,7 @@
       els.strip.hidden = els.time.hidden = true;
       els.msg.hidden = false;
       els.msg.innerHTML = loadFailed ? `Couldn't load the plan.<br><button type="button" class="btn small" data-plan-retry="1">Try again</button>` : 'Loading the plan…';
-      if (key) root.querySelector(key)?.focus();
+      if (key) root.querySelector(key)?.focus({preventScroll: true});
       return;
     }
     els.msg.hidden = true;
@@ -957,7 +957,10 @@
     if (onScreen && !wasShown) scrolledFor = null;
     wasShown = onScreen;
     if (scrolledFor !== shown && scrollToStart()) scrolledFor = shown;
-    if (key) root.querySelector(key)?.focus();
+    // Focus goes back where it was, and nothing scrolls for it: drawn anew while the page is
+    // scrolled (new data from a sync, a ✓ from another device), a plain focus() on a control of
+    // this pane, which sticks under the bar, sent the window to the end of the page.
+    if (key) root.querySelector(key)?.focus({preventScroll: true});
     syncDetails();
     syncTip();
   }

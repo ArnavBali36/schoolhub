@@ -390,10 +390,31 @@ class PlannerPageTest(unittest.TestCase):
             self.assertIn(control, PLANNER)
 
     def test_the_two_apps_cross_fade(self):
-        self.assertIn("@view-transition { navigation: auto; }", HTML)
-        self.assertIn("view-transition-name: app-bar", HTML)
-        self.assertIn("::view-transition-old(root),::view-transition-new(root){animation-duration:160ms}", HTML)
-        self.assertIn("@media (prefers-reduced-motion: reduce){@view-transition { navigation: none; }}", HTML)
+        # QuantPrep's three rules exactly (its styles.css, and its docs/13 section 5.1.2), so the two
+        # pages pair up: only for those who have not asked for less motion, and one copy of each.
+        block = re.search(r"^@media \(prefers-reduced-motion: no-preference\)\{\n(.*?)\n\}$", HTML, re.M | re.S).group(1)
+        self.assertEqual([line.strip() for line in block.splitlines()], [
+            "@view-transition{navigation:auto}",
+            ".topbar{view-transition-name:app-bar}",
+            "::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation-duration:160ms}"])
+        self.assertEqual(HTML.count("@view-transition"), 1)
+        self.assertEqual(HTML.count("view-transition-name"), 1)
+        self.assertEqual(HTML.count("::view-transition-"), 3)
+        self.assertNotIn("navigation: none", HTML)
+        # The bar that holds still is the page's one header.
+        self.assertEqual(HTML.count('<header class="topbar">'), 1)
+
+    def test_the_bar_sits_where_preps_does(self):
+        # Prep always keeps the scroll bar's room; without the same rule a School page too short to
+        # scroll would sit half a scroll bar off Prep's bar where scroll bars take room.
+        self.assertRegex(HTML, r"(?m)^html\{overflow-y:scroll;")
+
+    def test_the_grid_keeps_the_border_the_fit_counts(self):
+        # planner.js fits the day into the room less TIME_PAD: the timeline's two margins and the
+        # grid's 1 px border, which is not drawn.
+        self.assertIn("const TIME_PAD = 15;           // the timeline's margins above and below (.ptime) and the grid's border", PLANNER)
+        self.assertIn(".ptime{position:relative;margin:7px 0}", HTML)
+        self.assertRegex(HTML, r"(?m)^\.pgrid\{[^}]*;border-bottom:1px solid transparent;")
 
 
 def _lum(hex6):
@@ -912,63 +933,228 @@ Promise.all([
         self.assertNotIn("href", json.dumps(public[SHARED]))
 
 
+# The page's sync controls with the page stood in for: Sync now and its line, the label, timers
+# that are listed instead of run (later), and api/sync answering what the test says (answers).
+SYNC_PAGE = """
+const control = () => ({hidden: true, onclick: null, disabled: false, textContent: '', title: '', attrs: {}, on: {}, focusVisible: false, style: {}, dataset: {},
+  classList: {toggle(){}}, addEventListener(type, fn){ this.on[type] = fn; }, setAttribute(k, v){ this.attrs[k] = v; }, removeAttribute(k){ delete this.attrs[k]; },
+  matches(sel){ return sel === ':focus-visible' && this.focusVisible; }, getBoundingClientRect: () => ({left: 1150, right: 1234, top: 12, bottom: 44})});
+const els = {'#syncBtn': control(), '#fab': control(), '#sync': control(), '#syncNote': Object.assign(control(), {offsetWidth: 300, offsetHeight: 40})};
+const $ = s => els[s] || null;
+const later = [];
+let timers = 0;
+const setTimeout = (fn, ms) => { later.push({fn, ms, id: ++timers}); return timers; };
+const clearTimeout = id => { const i = later.findIndex(l => l.id === id); if (i >= 0) later.splice(i, 1); };
+const page = {hidden: false, on: {}};
+const document = {get hidden(){ return page.hidden; }, documentElement: {clientWidth: 1280}, addEventListener(type, fn){ (page.on[type] = page.on[type] || []).push(fn); }};
+const window = {innerHeight: 800, on: {}, addEventListener(type, fn){ this.on[type] = fn; }};
+const calls = [], toasts = [];
+let answers = {running: false}, kept = null;
+const getJson = path => { calls.push('GET ' + path); return Promise.resolve(path === 'api/tasks' ? {tasks: {}} : JSON.parse(JSON.stringify(answers))); };
+const api = path => { calls.push('POST ' + path); return Promise.resolve({}); };
+const toast = m => toasts.push(m), refreshTasks = () => {};
+const sessionStorage = {getItem: () => kept, setItem(){}, removeItem(){}};
+const location = {reload(){ calls.push('load'); }};
+const settle = async () => { for (let i = 0; i < 6; i++) await new Promise(r => globalThis.setTimeout(r, 0)); };
+let LIVE = true, PUBLIC = false, PHONE = false, D = {generated_at: '2026-11-10T12:00:00+00:00'}, dataSeen = true;
+const holds = [], now = new Date('2026-11-10T14:00:00Z'), ago = () => '2h ago';
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+const asLine = text => text ? '<div class="pd-line">' + text + '</div>' : '';
+"""
+
+
+def sync_page(body):
+    """dashboard.js's own Sync now section and the label's drawing, on that page."""
+    return run_node(SYNC_PAGE + source_of("function showSynced(){") + "\n" + JS[JS.index(SYNC_START):JS.index(SYNC_END)]
+                    + "\nconst out = {};\n(async () => {\n" + body + "\nconsole.log(JSON.stringify(out));\n})();\n")
+
+
 @unittest.skipUnless(NODE, "Node is not installed")
 class SyncNowTest(unittest.TestCase):
     """dashboard.js's Sync now, run under Node with the page's elements and requests stood in for."""
 
     @classmethod
     def setUpClass(cls):
-        start, end = JS.index(SYNC_START), JS.index(SYNC_END)
-        script = f"""
-const els = {{'#syncBtn': {{hidden: true, disabled: false, textContent: 'Sync now', onclick: null}}, '#fab': {{hidden: true}}}};
-const $ = s => els[s];
-const calls = [];
-const getJson = path => {{ calls.push('GET ' + path); return Promise.resolve(path === 'api/tasks' ? {{tasks: {{}}}} : {{running: false}}); }};
-const api = path => {{ calls.push('POST ' + path); return Promise.resolve({{}}); }};
-const toast = () => {{}}, refreshTasks = () => {{}};
-const sessionStorage = {{getItem: () => null, setItem(){{}}, removeItem(){{}}}};
-let PUBLIC;
-{JS[start:end]}
-const out = {{}};
-for (const [name, pub] of [['mac', false], ['public', true]]) {{
-  PUBLIC = pub;
+        cls.out = sync_page("""
+for (const [name, pub] of [['mac', false], ['public', true]]) {
+  PUBLIC = pub; LIVE = !pub;
   calls.length = 0;
-  Object.assign(els['#syncBtn'], {{hidden: true, onclick: null}});
+  Object.assign(els['#syncBtn'], {hidden: true, onclick: null});
   els['#fab'].hidden = true;
   enableServerFeatures();
-  out[name] = {{syncShown: !els['#syncBtn'].hidden, syncClick: !!els['#syncBtn'].onclick, fabShown: !els['#fab'].hidden, calls: [...calls]}};
-}}
-console.log(JSON.stringify(out));
-"""
-        cls.out = run_node(script)
+  out[name] = {syncShown: !els['#syncBtn'].hidden, syncClick: !!els['#syncBtn'].onclick, fabShown: !els['#fab'].hidden, calls: [...calls]};
+  await settle();
+  out[name].later = later.map(l => l.ms);
+  later.length = 0;
+}
+""")
 
     def test_on_the_mac_and_from_another_device_as_before(self):
         # (The tasks are asked for with the marks, at the start: see BootTest.)
         self.assertEqual(self.out["mac"], {"syncShown": True, "syncClick": True, "fabShown": True,
-                                           "calls": ["GET api/sync"]})
+                                           "calls": ["GET api/sync"], "later": [60000]})
 
     def test_a_public_copy_has_no_sync_now(self):
-        # Marks and tasks work (the + button, the tasks); nothing asks for a sync or its state.
+        # Marks and tasks work (the + button, the tasks); nothing asks for a sync or its state, then
+        # or later.
         self.assertEqual(self.out["public"], {"syncShown": False, "syncClick": False, "fabShown": True,
-                                              "calls": []})
+                                              "calls": [], "later": []})
 
     def test_a_failed_sync_points_to_the_sync_log(self):
         # The server adds each sync's output to state/sync.log (server.py run_sync); the toast says so.
-        start, end = JS.index(SYNC_START), JS.index(SYNC_END)
-        script = f"""
-const els = {{'#syncBtn': {{hidden: true, disabled: false, textContent: 'Sync now', onclick: null}}, '#fab': {{hidden: true}}}};
-const $ = s => els[s];
-const getJson = path => Promise.resolve(path === 'api/tasks' ? {{tasks: {{}}}} : {{running: false}});
-const api = () => Promise.resolve({{}});
-const toasts = [];
-const toast = m => toasts.push(m), refreshTasks = () => {{}};
-const sessionStorage = {{getItem: () => JSON.stringify({{ok: false, output: 'Traceback: boom'}}), setItem(){{}}, removeItem(){{}}}};
-const PUBLIC = false;
-{JS[start:end]}
-enableServerFeatures();
-console.log(JSON.stringify(toasts));
-"""
-        self.assertEqual(run_node(script), ["Sync failed. See state/sync.log"])
+        out = sync_page("kept = JSON.stringify({ok: false, output: 'Traceback: boom'}); enableServerFeatures(); out.toasts = toasts;")
+        self.assertEqual(out["toasts"], ["Sync failed. See state/sync.log"])
+
+    def test_sync_now_waits_for_its_sync_and_then_loads_the_page(self):
+        # The one load the page makes without being asked to: after Sync now, pressed on this page.
+        out = sync_page("""
+enableServerFeatures(); await settle();
+later.length = 0; calls.length = 0;
+els['#syncBtn'].onclick(); await settle();
+out.pressed = {calls: [...calls], later: later.map(l => l.ms), button: [els['#syncBtn'].disabled, els['#syncBtn'].textContent]};
+// Its own wait is the only one asking from here on: the minute's look stands down.
+answers = {running: true};
+later.shift().fn(); await settle();
+out.running = {calls: [...calls], later: later.map(l => l.ms)};
+answers = {running: false, ok: true, output: '[schoolhub] 3 new'};
+later.shift().fn(); await settle();
+out.done = {calls: [...calls], later: later.map(l => l.ms)};
+""")
+        self.assertEqual(out["pressed"], {"calls": ["POST api/sync"], "later": [1500], "button": [True, "Syncing…"]})
+        self.assertEqual(out["running"], {"calls": ["POST api/sync", "GET api/sync"], "later": [2000]})
+        self.assertEqual(out["done"], {"calls": ["POST api/sync", "GET api/sync", "GET api/sync", "load"], "later": []})
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class NextSyncNoteTest(unittest.TestCase):
+    """One quiet line says when the Mac syncs next by itself (api/sync's `auto`): in the tooltip of
+    "Synced 2h ago", and under Sync now for the pointer, the keyboard and a screen reader."""
+
+    AT = "2026-11-10T21:34:00+00:00"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.out = sync_page("""
+const AT = '2026-11-10T21:34:00+00:00';
+out.time = new Date(AT).toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'});
+const auto = (state, next_at = null) => ({running: state === 'running', data_at: D.generated_at, auto: {on: state !== 'off', every_hours: 12, state, next_at, last_good_at: null, failures: 0}});
+out.lines = {};
+for (const state of ['waiting', 'retrying', 'settling', 'due', 'offline', 'running', 'off', 'something new']) out.lines[state] = nextSyncNote(auto(state, ['waiting', 'retrying', 'settling', 'due'].includes(state) ? AT : null));
+// A server from before it said (no auto), and a time that cannot be read.
+out.lines.none = [nextSyncNote({running: false}), nextSyncNote(null), nextSyncNote(undefined)];
+out.lines.noTime = [nextSyncNote(auto('waiting')), nextSyncNote(auto('retrying', 'soon'))];
+
+// On the page: asked with the first look, said in the label's tooltip and for the button.
+const btn = els['#syncBtn'], tip = els['#syncNote'], label = els['#sync'];
+answers = auto('waiting', AT);
+enableServerFeatures(); await settle();
+const line = out.lines.waiting;
+out.said = {title: label.title.split('\\n'), label: label.textContent, describes: btn.attrs['aria-describedby'], tipText: tip.innerHTML === asLine(line), tipHidden: tip.hidden};
+// The keyboard's focus shows it at once, under the button and inside the window; Esc, and the focus leaving, send it away.
+btn.focusVisible = true; btn.on.focus();
+out.focused = {hidden: tip.hidden, text: tip.innerHTML === asLine(line), left: tip.style.left, top: tip.style.top, side: tip.dataset.side, maxWidth: tip.style.maxWidth};
+page.on.keydown.forEach(fn => fn({key: 'a'})); out.otherKey = tip.hidden;
+page.on.keydown.forEach(fn => fn({key: 'Escape'})); out.esc = tip.hidden;
+btn.on.focus(); btn.on.blur(); out.blurred = tip.hidden;
+// Focus a click gave is not the keyboard's.
+btn.focusVisible = false; btn.on.focus(); out.clicked = tip.hidden;
+// The pointer rests a moment first; leaving sooner shows nothing; a touch never does.
+const n = later.length;
+btn.on.pointerenter({pointerType: 'mouse'});
+out.rest = [later.slice(n).map(l => l.ms), tip.hidden];
+later.pop().fn(); out.rested = tip.hidden;
+btn.on.pointerleave(); out.left = tip.hidden;
+btn.on.pointerenter({pointerType: 'mouse'}); btn.on.pointerleave(); out.leftEarly = [later.slice(n).map(l => l.ms), tip.hidden];
+btn.on.pointerenter({pointerType: 'touch'}); out.touch = later.slice(n).map(l => l.ms);
+// A press, a scroll and the window's size changing send it away too.
+for (const [name, go] of [['click', () => btn.on.click()], ['scroll', () => window.on.scroll()], ['resize', () => window.on.resize()]]) { btn.focusVisible = true; btn.on.focus(); const shown = !tip.hidden; go(); out[name] = [shown, tip.hidden]; }
+// Near the window's edges it stays inside; with no room under the button it goes over it.
+btn.getBoundingClientRect = () => ({left: 20, right: 104, top: 760, bottom: 792});
+btn.on.focus(); out.edge = {left: tip.style.left, top: tip.style.top, side: tip.dataset.side}; btn.on.blur();
+
+// Each look says it anew: another state, another line; none while a sync runs or where it is off.
+const look = async a => { answers = a; later.splice(0).filter(l => l.ms >= 3000).forEach(l => l.fn()); await settle(); return {title: label.title.split('\\n').length, tipText: tip.innerHTML, describes: btn.attrs['aria-describedby'] || null}; };
+out.retrying = await look(auto('retrying', AT));
+btn.on.focus(); out.running = [!tip.hidden, await look(auto('running')), tip.hidden, btn.disabled];
+out.off = await look(auto('off'));
+btn.on.focus(); out.offFocus = tip.hidden;
+// Never on a public copy or the phone site, even with a line in hand.
+out.waitingAgain = await look(auto('waiting', AT));
+PUBLIC = true; LIVE = false; showSynced(); btn.on.focus(); out.publicCopy = [label.title.split('\\n').length, tip.hidden];
+PUBLIC = false; LIVE = false; PHONE = true; showSynced(); btn.on.focus(); out.phone = [label.title.split('\\n').length, tip.hidden];
+""")
+
+    def test_the_line_for_each_state(self):
+        lines, t = self.out["lines"], self.out["time"]
+        self.assertRegex(t, r"^\d{1,2}:34")
+        self.assertEqual(lines["waiting"], f"Syncs by itself every 12 hours · next around {t}")
+        self.assertEqual(lines["retrying"], f"Last sync didn't finish · trying again at {t}")
+        self.assertEqual([lines["settling"], lines["due"]], ["Syncing in a moment"] * 2)
+        self.assertEqual(lines["offline"], "Will sync when the network is back")
+        # Nothing where the server does not sync by itself, while a sync runs (the button says so),
+        # for a state the page does not know, or with a server that says nothing of it.
+        self.assertEqual([lines["off"], lines["running"], lines["something new"], lines["none"]], ["", "", "", ["", "", ""]])
+        self.assertEqual(lines["noTime"], ["Syncs by itself every 12 hours", "Last sync didn't finish · trying again soon"])
+
+    def test_it_is_said_with_the_label_and_for_the_button(self):
+        said, line = self.out["said"], self.out["lines"]["waiting"]
+        # The label reads as before; its tooltip keeps the time itself and adds the line.
+        self.assertEqual(said["label"], "Synced 2h ago")
+        self.assertEqual(len(said["title"]), 2)
+        self.assertEqual(said["title"][1], line)
+        # Sync now is described by the line's own element (a screen reader reads it with the
+        # button), which holds the line though it does not show: one line of the previews' kind.
+        self.assertIn("const noteHtml = note => note ? `<div class=\"pd-line\">${esc(note)}</div>` : '';", JS)
+        self.assertIn(".ptip .pd-line{margin:1px 0;font-size:12.5px}", HTML)
+        self.assertEqual([said["describes"], said["tipText"], said["tipHidden"]], ["syncNote", True, True])
+        self.assertIn('<div class="ptip" id="syncNote" role="tooltip" hidden></div>', HTML)
+        self.assertIn('<span id="sync" class="sync"></span><button type="button" class="btn small" id="syncBtn" hidden>Sync now</button>', HTML)
+
+    def test_the_keyboard_and_the_pointer_both_show_it(self):
+        out = self.out
+        # Under the button, their right edges in line (1234 - 300), 8 px below it (44 + 8).
+        self.assertEqual(out["focused"], {"hidden": False, "text": True, "left": "934px", "top": "52px", "side": "below", "maxWidth": "calc(100vw - 16px)"})
+        self.assertEqual([out["otherKey"], out["esc"], out["blurred"], out["clicked"]], [False, True, True, True])
+        self.assertEqual(out["rest"], [[350], True])
+        self.assertEqual([out["rested"], out["left"]], [False, True])
+        self.assertEqual(out["leftEarly"], [[], True])
+        self.assertEqual(out["touch"], [])
+        for name in ("click", "scroll", "resize"):
+            self.assertEqual(out[name], [True, True], name)
+        # At the left edge and the bottom of the window: 8 px in, and over the button (760 - 8 - 40).
+        self.assertEqual(out["edge"], {"left": "8px", "top": "712px", "side": "above"})
+
+    def test_it_follows_each_answer_and_goes_where_there_is_none(self):
+        out, t = self.out, self.out["time"]
+        self.assertEqual(out["retrying"], {"title": 2, "tipText": f"""<div class="pd-line">Last sync didn't finish · trying again at {t}</div>""", "describes": "syncNote"})
+        # A sync running: the line goes (shown or not), and the button says Syncing…
+        self.assertEqual(out["running"], [True, {"title": 1, "tipText": "", "describes": None}, True, True])
+        self.assertEqual(out["off"], {"title": 1, "tipText": "", "describes": None})
+        self.assertTrue(out["offFocus"])
+
+    def test_never_on_a_public_copy_or_the_phone_site(self):
+        self.assertEqual(self.out["waitingAgain"]["title"], 2)
+        self.assertEqual(self.out["publicCopy"], [1, True])
+        self.assertEqual(self.out["phone"], [1, True])
+        # Neither asks api/sync at all: only enableServerFeatures starts the looks, it stops at a
+        # public copy, and the phone site never calls it.
+        self.assertIn("  if (PUBLIC || syncBtn.onclick) return;", JS)
+        self.assertIn("if (PHONE) $('#fab').hidden = false; else enableServerFeatures();", JS)
+        self.assertIn("const watches = () => LIVE && !PUBLIC && !PHONE && !pressed && !document.hidden;", JS)
+        self.assertIn("const noteHere = () => LIVE && !PUBLIC && !PHONE ? syncNote : '';", JS)
+
+
+class SyncWordsTest(unittest.TestCase):
+    """The sync runs by itself every 12 hours, and whenever you ask: nothing calls it nightly."""
+
+    def test_nothing_says_nightly(self):
+        for name in ("dashboard.js", "planner.js", "bar.js", "dashboard.html", "server.py", "README.md"):
+            self.assertNotIn("nightly", (REPO / name).read_text(encoding="utf-8").lower(), name)
+
+    def test_marks_speak_of_the_last_and_the_next_sync(self):
+        self.assertIn("flagged: 'Marked done by you. The last sync found no submission, which is fine if it was handed in another way',", JS)
+        self.assertIn("""return '<div class="note">Confirmed by the last sync.</div>';""", JS)
+        self.assertIn("The next sync will double-check ${esc(a.platform)} for your submission.</div>`;", JS)
 
 
 if __name__ == "__main__":
@@ -977,7 +1163,7 @@ if __name__ == "__main__":
 
 @unittest.skipUnless(NODE, "needs Node to run dashboard.js")
 class MarkTest(unittest.TestCase):
-    """A ✓ the nightly check could not confirm still counts as done, not as needing attention."""
+    """A ✓ the last sync could not confirm still counts as done, not as needing attention."""
 
     def test_an_unconfirmed_mark_counts_as_done(self):
         want = ("const SOURCE_DONE", "const past", "function eff", "const isDone", "const needsAttention")
@@ -2229,6 +2415,7 @@ console.log(JSON.stringify(out));
 KEPT_START, KEPT_END = "// ---- kept for the next visit ----", "// ---- end of kept for the next visit ----"
 ASK_START, ASK_END = "// ---- asking and saving ----", "// ---- end of asking and saving ----"
 BOOT_START = "// ---- starting ----"
+BACK_START, BACK_END = "// ---- back on show ----", "// ---- end of back on show ----"
 PLAN_COPY_START = "  // ---- the copy kept from the last visit ----"
 
 
@@ -2251,7 +2438,9 @@ class KeptSourceTest(unittest.TestCase):
 
     def test_nothing_new_is_fetched_and_no_service_worker(self):
         # The same requests to the same places as before the copies: only when they are made changed.
-        self.assertEqual(sorted(re.findall(r"fetch\(([^,)]+)", JS)), ["'/api/state/'", "'platform.json'", "path", "path"])
+        # (One more since: data.js again, on the Mac only, once a sync has run while the page was
+        # open. See WatchSyncTest.)
+        self.assertEqual(sorted(re.findall(r"fetch\(([^,)]+)", JS)), ["'/api/state/'", "'data.js'", "'platform.json'", "path", "path"])
         self.assertEqual(sorted(set(re.findall(r"getJson\('([^']+)'\)", JS))), ["api/marks", "api/sync", "api/tasks"])
         self.assertEqual(re.findall(r"fetch\(([^,)]+)", PLANNER), ["`api/plan?from=${from}&to=${to}`"] * 2)
         self.assertEqual(re.findall(r"fetch\(([^,)]+)", BAR), ["'platform.json'"])
@@ -2313,8 +2502,10 @@ class KeptSourceTest(unittest.TestCase):
         # The drawer stays where it was read when it is drawn again for the same item.
         self.assertIn("const top = drawerId === id ? drawer.scrollTop : 0;", JS)
         self.assertIn("drawer.scrollTop = top;", JS)
-        # No page load in any of it.
-        self.assertEqual(JS.count("location.reload()"), 1)   # after Sync now, as before
+        # No page load in any of it: only after Sync now, as before, and when you press Refresh.
+        self.assertEqual(JS.count("location.reload()"), 2)
+        self.assertIn("  try { sessionStorage.setItem('sh:synced', JSON.stringify({ok: s.ok, output: s.output})); } catch {}\n  location.reload();\n}", JS)
+        self.assertIn("  if (e.target.closest('#newData')) return location.reload();", JS)
 
     def test_synced_ago_is_the_datas_own_time(self):
         start = JS.index("function showSynced(){")
@@ -2520,22 +2711,32 @@ BOOT_PAGE = STORAGE_PAGE + """
 const realTimeout = globalThis.setTimeout;
 const tick = () => new Promise(r => realTimeout(r, 0));
 const later = [];
-const setTimeout = (fn, ms) => { later.push({fn, ms}); return later.length; };
-const clearTimeout = () => {};
+let timers = 0;
+const setTimeout = (fn, ms) => { later.push({fn, ms, id: ++timers}); return timers; };
+const clearTimeout = id => { const i = later.findIndex(l => l.id === id); if (i >= 0) later.splice(i, 1); };
 const copy = v => v == null ? v : JSON.parse(JSON.stringify(v));
 const SITE_KEY = 'k';
 const els = {};
-for (const sel of ['#fab', '#syncbox', '#syncBtn']) els[sel] = {hidden: true, onclick: null, disabled: false, textContent: ''};
+// A control of the page: what the page sets on it, and the listeners it adds (on).
+const control = () => ({hidden: true, onclick: null, disabled: false, textContent: '', attrs: {}, on: {}, focusVisible: false,
+  addEventListener(type, fn){ this.on[type] = fn; }, setAttribute(k, v){ this.attrs[k] = v; }, removeAttribute(k){ delete this.attrs[k]; },
+  matches(sel){ return sel === ':focus-visible' && this.focusVisible; }, getBoundingClientRect: () => ({left: 1150, right: 1234, top: 12, bottom: 44})});
+for (const sel of ['#fab', '#syncbox', '#syncBtn']) els[sel] = control();
 els['#main'] = {innerHTML: ''};
+els['#syncNote'] = {hidden: true, innerHTML: '', style: {}, dataset: {}, offsetWidth: 300, offsetHeight: 40};
+const esc = s => String(s);
 const $ = sel => els[sel] || null;
 const toasts = [];
 let toastTimer = null;
 const toast = (msg, action, o = {}) => { toasts.push(msg + (action ? ' [' + (o.label || 'Undo') + ']' : '')); };
 const script = {on: {}, addEventListener(type, fn){ this.on[type] = fn; }};
-const page = {focus: {tagName: 'BODY'}, on: {}};
-const document = {readyState: 'loading', get activeElement(){ return page.focus; }, body: {tagName: 'BODY'}, addEventListener(){},
+const page = {focus: {tagName: 'BODY'}, on: {}, hidden: false};
+const document = {readyState: 'loading', get activeElement(){ return page.focus; }, body: {tagName: 'BODY'}, documentElement: {clientWidth: 1280},
+  get hidden(){ return page.hidden; }, addEventListener(type, fn){ (page.on[type] = page.on[type] || []).push(fn); },
   querySelector: sel => sel === 'script[src="data.js"]' ? script : null};
-const window = {on: {}, addEventListener(type, fn){ this.on[type] = fn; }, SCHOOL_DATA: undefined};
+const window = {on: {}, innerHeight: 800, addEventListener(type, fn){ this.on[type] = fn; }, SCHOOL_DATA: undefined};
+// The page goes out of view, or comes back into it.
+const show = on => { page.hidden = !on; for (const fn of page.on.visibilitychange || []) fn(); };
 const CSS = {escape: s => s};
 const errors = [];
 const console = {error: e => errors.push(String(e && e.message || e)), log: (...a) => globalThis.console.log(...a)};
@@ -2547,7 +2748,9 @@ const MARK = at => ({marked_at: at, name: null, course: null});
 const TASK = (id, name) => ({id, name, course_id: 'personal', due_at: null, all_day: false, pinned: true, notes: '', created_at: 'C', updated_at: 'U'});
 
 // The stand-in server, and every request made to it.
-const there = {marks: {}, tasks: {}, platform: {status: 204}, down: false};
+const there = {marks: {}, tasks: {}, platform: {status: 204}, down: false, sync: {running: false}, dataJs: null};
+// data.js as sync.py writes it.
+const asDataJs = data => 'window.SCHOOL_DATA = ' + JSON.stringify(data) + ';\\n';
 const net = {log: [], waiting: []};
 let stamp = 0;
 function serve(q){
@@ -2557,7 +2760,8 @@ function serve(q){
   if (q.url === 'platform.json') return q.res({ok: there.platform.status === 200, status: there.platform.status, json: async () => copy(there.platform.body)});
   if (q.url === 'api/marks') return ok(there.marks);
   if (q.url === 'api/tasks') return ok({tasks: there.tasks});
-  if (q.url === 'api/sync') return ok({running: false});
+  if (q.url === 'api/sync') return ok(there.sync);
+  if (q.url === 'data.js') return q.res({ok: there.dataJs != null, status: there.dataJs != null ? 200 : 404, text: async () => there.dataJs});
   const mark = () => { if (b.done) there.marks[b.id] = MARK(b.marked_at || 'T' + (++stamp)); else delete there.marks[b.id]; };
   if (q.url === 'api/mark') { mark(); return ok(there.marks); }
   if (q.url === '/api/state/') { if (q.method === 'POST' && b.action === 'mark') mark(); return ok({marks: there.marks, tasks: there.tasks}); }
@@ -2607,7 +2811,8 @@ def boot_sections():
         "let D = window.SCHOOL_DATA || null;", kept_section(), JS[JS.index(ASK_START):JS.index(ASK_END)], source_of("const backend = {"),
         source_of("async function platformMode(r){"), marks, source_of("function refreshTasks(next){"), source_of("function took(m, t){"),
         source_of("async function setMark(id, done, as){"), source_of("const unsavedMark = {};"), undo_section(),
-        JS[JS.index(SYNC_START):JS.index(SYNC_END)], source_of("async function reloadState(){"), JS[JS.index(BOOT_START):]])
+        JS[JS.index(SYNC_START):JS.index(SYNC_END)], source_of("async function reloadState(){"), JS[JS.index(BACK_START):JS.index(BACK_END)],
+        JS[JS.index(BOOT_START):]])
 
 
 def boot(setup, body):
@@ -2876,7 +3081,7 @@ out.stale = [shown().marks, Object.keys(there.marks).sort().join(' ')];
 
 
 # The last sync's data: data.js when it is here, else the copy kept of it.
-DATA_SEEN = "out.atStart = {draws: draws.length, shown: shown() || null, waitsFor: [Object.keys(script.on).sort(), Object.keys(window.on)], main: els['#main'].innerHTML, errors: [...errors]};\n"
+DATA_SEEN = "out.atStart = {draws: draws.length, shown: shown() || null, waitsFor: [Object.keys(script.on).sort(), Object.keys(window.on).filter(k => k === 'load')], main: els['#main'].innerHTML, errors: [...errors]};\n"
 DATA_ARRIVES = """
 const arrive = async (data, by = () => script.on.load()) => { window.SCHOOL_DATA = data; by(); later.splice(0).forEach(l => l.fn()); await settle(); };
 """
@@ -2982,6 +3187,274 @@ out.started = [draws.length, shown().data, keptNow('data').generated_at];
         out = boot("keep('data', DATA); window.SCHOOL_DATA = {...DATA, generated_at: 'G2', pad: 'x'.repeat(1500000)};",
                    "later.forEach(l => l.fn()); out.kept = keptNow('data'); out.shown = shown().data;")
         self.assertEqual([out["kept"], out["shown"]], [None, "G2"])
+
+
+# ---- a sync that ran while the page was open (dashboard.js "sync now", "back on show") ----
+# The page on your Mac's own server (platform.json answers 204), started and answered; `watch` lists
+# the looks at api/sync that wait, and `minute` lets the next one happen.
+BOOT_MAC = """
+window.SCHOOL_DATA = DATA;
+there.marks = {a2: MARK('S1')};
+there.tasks = {'task:aaaaaaaa': TASK('task:aaaaaaaa', 'Buy milk')};
+let loads = 0;
+location.reload = () => { loads++; };
+"""
+WATCHING = """
+const watch = () => later.filter(l => l.fn === lookAtSync).map(l => l.ms);
+const minute = async () => { const i = later.findIndex(l => l.fn === lookAtSync); later.splice(i, 1)[0].fn(); await settle(); };
+const asked = () => { const log = [...net.log]; net.log.length = 0; return log; };
+const NEXT = copy(DATA);
+NEXT.generated_at = 'G2';
+NEXT.courses[0].assignments = NEXT.courses[0].assignments.filter(a => a.id !== 'a3').concat({id: 'a4', name: 'HW 4'});
+const button = () => [els['#syncBtn'].disabled, els['#syncBtn'].textContent];
+"""
+WATCH_STARTED = WATCHING + """
+await answerNow(); await answerNow();
+// What the page does a moment after it is up (data.js noted as here and kept, the copies tidied).
+for (const l of later.splice(0)) { if (l.fn === lookAtSync) later.push(l); else l.fn(); }
+out.start = {asked: asked(), watch: watch()};
+const n = draws.length;
+"""
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class WatchSyncTest(unittest.TestCase):
+    """An open page notices a sync that ran by itself and takes its data in place: dashboard.js's own
+    code under Node, with the page, its timers, the network and the browser's storage stood in for."""
+
+    def test_it_looks_once_a_minute_and_only_while_on_show(self):
+        out = boot(BOOT_MAC, WATCH_STARTED + """
+await minute();
+out.look = {asked: asked(), watch: watch()};
+await answerNow();
+out.answered = {watch: watch(), draws: draws.length - n};
+// Out of view: the wait is over, and nothing is asked however a look comes about.
+show(false);
+out.hidden = watch();
+lookAtSync(); watchSync(); await settle();
+out.hiddenLook = {asked: asked(), watch: watch(), timers: later.length};
+// Back on show: asked at once, with the marks and tasks as before.
+show(true); await settle();
+out.back = asked().sort();
+await answerNow(); await answerNow();
+out.backDone = {asked: asked(), watch: watch(), draws: draws.length - n, loads};
+""")
+        # At the start, as before: where the page is, the marks, the tasks, and the sync's state.
+        self.assertEqual(out["start"], {"asked": ["GET platform.json", "GET api/marks", "GET api/tasks", "GET api/sync"], "watch": [60000]})
+        self.assertEqual(out["look"], {"asked": ["GET api/sync"], "watch": []})
+        self.assertEqual(out["answered"], {"watch": [60000], "draws": 0})
+        self.assertEqual(out["hidden"], [])
+        self.assertEqual(out["hiddenLook"], {"asked": [], "watch": [], "timers": 0})
+        self.assertEqual(out["back"], ["GET api/marks", "GET api/sync"])
+        self.assertEqual(out["backDone"], {"asked": ["GET api/tasks"], "watch": [60000], "draws": 0, "loads": 0})
+
+    def test_new_data_is_taken_in_place(self):
+        out = boot(BOOT_MAC, WATCH_STARTED + """
+// What must survive: an open drawer, and a step in the undo history.
+drawerId = 'a1';
+toggleMark('a2'); await settle(); await answerNow(q => q.method === 'POST');
+const before = {steps: steps.undo.length, label: steps.undo[0].label, draws: draws.length};
+asked();
+// A sync is running (the server's own, say): Sync now says so, and the page looks again soon.
+there.sync = {running: true, data_at: 'G1'};
+await minute(); await answerNow();
+out.running = {asked: asked(), button: button(), watch: watch(), draws: draws.length - before.draws};
+// It ended, and the data on the Mac is another sync's.
+there.sync = {running: false, data_at: 'G2'}; there.dataJs = asDataJs(NEXT);
+await minute(); await answerNow();
+out.told = asked();
+await answerNow();
+out.taken = {button: button(), draws: draws.length - before.draws, shown: shown(), kept: keptNow('data').generated_at, drawer: [drawerId, closed],
+  steps: [steps.undo.length, steps.undo[0].label === before.label, steps.redo.length], loads, toasts: toasts.length, errors};
+await answerNow(); await answerNow();
+out.after = {asked: asked(), draws: draws.length - before.draws, watch: watch(), reloads: events.filter(e => e === 'reload').length, unread};
+// The same data at the next look: only the look itself, and nothing is drawn.
+await minute(); await answerNow(); await answerNow();
+out.same = {asked: asked(), draws: draws.length - before.draws, watch: watch()};
+// The undo history still works on the new data.
+SchoolHubUndo: { travel('undo'); await settle(); await answerNow(); await answerNow(); await answerNow(); }
+out.undone = {marks: Object.keys(there.marks).sort().join(' '), steps: [steps.undo.length, steps.redo.length]};
+""")
+        self.assertEqual(out["running"], {"asked": ["GET api/sync"], "button": [True, "Syncing…"], "watch": [3000], "draws": 0})
+        self.assertEqual(out["told"], ["GET api/sync", "GET data.js"])
+        taken = out["taken"]
+        # Drawn once from the new sync, with the marks and tasks the page had; Sync now is back.
+        self.assertEqual([taken["button"], taken["draws"]], [[False, "Sync now"], 1])
+        self.assertEqual(taken["shown"], {"data": "G2", "write": "local", "live": True, "remote": False, "pub": False, "probing": False,
+                                          "plan": "unknown", "marks": "", "tasks": "task:aaaaaaaa", "items": 4})
+        # Kept for the next visit; the drawer stays open on its item; the undo history is as it was.
+        self.assertEqual(taken["kept"], "G2")
+        self.assertEqual(taken["drawer"], ["a1", 0])
+        self.assertEqual(taken["steps"], [1, True, 0])
+        # No page load, nothing said, nothing gone wrong.
+        self.assertEqual([taken["loads"], taken["errors"]], [0, []])
+        self.assertEqual(taken["toasts"], 1)                 # the ✓'s own, from before
+        # Then the marks and tasks as stored now (the sync checked the marks), and the minute's wait.
+        self.assertEqual(out["after"], {"asked": ["GET api/marks", "GET api/tasks"], "draws": 1, "watch": [60000], "reloads": 1, "unread": None})
+        self.assertEqual(out["same"], {"asked": ["GET api/sync"], "draws": 1, "watch": [60000]})
+        self.assertEqual(out["undone"], {"marks": "a2", "steps": [0, 1]})
+
+    def test_data_that_cannot_be_taken_leaves_the_page_and_offers_the_load(self):
+        out = boot(BOOT_MAC, WATCH_STARTED + """
+const state = () => ({asked: asked(), draws: draws.length - n, unread, data: D.generated_at, shown: shown().data, kept: keptNow('data').generated_at, watch: watch(), loads});
+const look = async () => { await minute(); for (let i = 0; i < 5; i++) await answerNow(); return state(); };
+// data.js not answered: nothing changes, and the next look asks again.
+there.sync = {running: false, data_at: 'G2'};
+out.unanswered = await look();
+out.again = await look();
+// Not what data.js holds: the page stays as it is, and offers the load (drawn again to show it).
+there.dataJs = 'window.SCHOOL_DATA = {"generated_at": "G2", "courses": "none"};\\n';
+out.notData = await look();
+// Not asked again for the same sync.
+out.notAgain = await look();
+// Data the page cannot draw: back to what it had.
+there.sync.data_at = 'G3'; there.dataJs = asDataJs({...NEXT, generated_at: 'G3'});
+cannotDraw = () => D.generated_at === 'G3';
+out.cannotDraw = await look();
+out.logged = errors.length;
+// The next sync's can be taken: the offer goes, and is not drawn with it.
+const offered = [];
+cannotDraw = () => { offered.push(unread); return false; };
+there.sync.data_at = 'G4'; there.dataJs = asDataJs({...NEXT, generated_at: 'G4'});
+out.next = await look();
+out.offered = offered;
+// How data.js is read.
+out.read = [readData(asDataJs(DATA)).generated_at, readData('window.SCHOOL_DATA = ' + JSON.stringify(DATA)).generated_at, readData(JSON.stringify(DATA).slice(0, 80)), readData(''), readData('window.SCHOOL_DATA = null;')];
+""")
+        calm = {"asked": ["GET api/sync", "GET data.js"], "draws": 0, "unread": None, "data": "G1", "shown": "G1", "kept": "G1", "watch": [60000], "loads": 0}
+        self.assertEqual(out["unanswered"], calm)
+        self.assertEqual(out["again"], calm)
+        self.assertEqual(out["notData"], {**calm, "draws": 1, "unread": "G2"})
+        self.assertEqual(out["notAgain"], {**calm, "asked": ["GET api/sync"], "draws": 1, "unread": "G2"})
+        self.assertEqual(out["cannotDraw"], {**calm, "draws": 2, "unread": "G3"})
+        self.assertEqual(out["logged"], 2)
+        self.assertEqual(out["next"], {"asked": ["GET api/sync", "GET data.js", "GET api/marks", "GET api/tasks"], "draws": 3, "unread": None,
+                                       "data": "G4", "shown": "G4", "kept": "G4", "watch": [60000], "loads": 0})
+        self.assertEqual(out["offered"], [None])
+        self.assertEqual(out["read"], ["G1", "G1", None, None, None])
+        # The offer: a quiet line above the list, and the only load is the one you press.
+        self.assertIn("""const newer = unread ? '<div class="banner">New data · <button type="button" class="linkish" id="newData">Refresh</button></div>' : '';""", JS)
+        self.assertIn('return banner + none + newer + errs + `<div class="stats">', JS)
+        self.assertIn("  if (e.target.closest('#newData')) return location.reload();", JS)
+
+    def test_not_before_data_js_has_come_and_not_in_the_middle_of_a_drag(self):
+        # Opened from the copy of an older sync: data.js is on its way, and is not asked for twice.
+        old = "there.platform = {status: 204}; there.sync = {running: false, data_at: 'G1'}; there.dataJs = asDataJs(DATA);\n" \
+              "keep('data', {...DATA, generated_at: 'G0'}); keep('state', {at: {remote: false, public: false}, marks: {}, tasks: {}});\n"
+        out = boot(old, WATCHING + DATA_ARRIVES + """
+await answerNow(); await answerNow();
+out.early = {asked: asked(), shown: shown().data, watch: watch()};
+window.SCHOOL_DATA = DATA; script.on.load(); await settle();
+out.came = {asked: asked(), shown: shown().data};
+await minute(); await answerNow(); await answerNow();
+out.later = {asked: asked(), shown: shown().data};
+""")
+        self.assertEqual(out["early"], {"asked": ["GET api/sync", "GET platform.json", "GET api/marks", "GET api/tasks"], "shown": "G0", "watch": [60000]})
+        self.assertEqual(out["came"], {"asked": [], "shown": "G1"})
+        self.assertEqual(out["later"], {"asked": ["GET api/sync"], "shown": "G1"})
+        # A block being dragged on the planner (what holds undo's keys): the data waits, a moment.
+        out = boot(BOOT_MAC, WATCH_STARTED + """
+let dragging = true;
+holds.push(() => dragging);
+there.sync = {running: false, data_at: 'G2'}; there.dataJs = asDataJs(NEXT);
+await minute(); await answerNow(); await answerNow();
+out.held = {asked: asked(), shown: shown().data, watch: watch()};
+dragging = false;
+await minute(); await answerNow(); await answerNow();
+out.dropped = {asked: asked(), shown: shown().data};
+""")
+        self.assertEqual(out["held"], {"asked": ["GET api/sync"], "shown": "G1", "watch": [3000]})
+        self.assertEqual(out["dropped"], {"asked": ["GET api/sync", "GET data.js", "GET api/marks"], "shown": "G2"})
+
+    def test_only_where_the_macs_own_server_answers(self):
+        seen = WATCHING + """
+for (let i = 0; i < 3; i++) await answerNow();
+later.splice(0).forEach(l => l.fn()); await settle();
+show(false); show(true); await settle();
+for (let i = 0; i < 3; i++) await answerNow();
+out.sync = net.log.filter(l => l.includes('sync') || l.includes('data.js'));
+out.watch = watch();
+out.live = LIVE;
+"""
+        # A public copy, the phone site and a file on disk: api/sync is never asked, and no look waits.
+        public = boot(BOOT_SERVER + "there.sync = {running: false, data_at: 'G2'};", seen)
+        phone = boot("PHONE = true; window.SCHOOL_DATA = DATA; there.sync = {running: false, data_at: 'G2'};", seen)
+        disk = boot("LOCAL_FILES = true; window.SCHOOL_DATA = DATA;", seen)
+        for name, got in (("public", public), ("phone", phone), ("disk", disk)):
+            self.assertEqual([got["sync"], got["watch"], got["live"]], [[], [], False], name)
+        # From another device through a platform, the Mac's server answers all the same.
+        remote = boot(BOOT_MAC + "there.platform = {status: 200, body: {apps: [], remote: true}};", seen)
+        self.assertEqual([set(remote["sync"]), remote["watch"], remote["live"]], [{"GET api/sync"}, [60000], True])
+
+    def test_a_page_drawn_anew_does_not_scroll(self):
+        # Focus is put back on the control that had it, and nothing scrolls for that: seen in a
+        # browser, a plain focus() on a control of the planner (which sticks under the bar) sent a
+        # scrolled window to the end of the page, and one on the drawer's Close sent the drawer to
+        # its top.
+        self.assertIn("    if (el) return el.focus({preventScroll: true});", JS)
+        self.assertEqual(PLANNER.count("if (key) root.querySelector(key)?.focus({preventScroll: true});"), 2)
+        self.assertNotIn("root.querySelector(key)?.focus();", PLANNER)
+        # The drawer stays where it was read, and the list is drawn in its own box.
+        self.assertIn("const top = drawerId === id ? drawer.scrollTop : 0;", JS)
+        self.assertIn("  main.innerHTML = stats() + (view === 'courses' ? coursesView(vis) : upcomingView(vis));", JS)
+
+    def test_sync_now_keeps_its_own_wait(self):
+        out = boot(BOOT_MAC, WATCH_STARTED + """
+els['#syncBtn'].onclick(); await settle(); await answerNow();
+out.pressed = {asked: asked(), later: later.map(l => l.ms), button: button()};
+// Nothing looks beside it, on a return to the tab either.
+show(false); show(true); await settle(); await answerNow(); await answerNow();
+out.back = asked().filter(l => l.includes('sync'));
+""")
+        self.assertEqual(out["pressed"], {"asked": ["POST api/sync"], "later": [1500], "button": [True, "Syncing…"]})
+        self.assertEqual(out["back"], [])
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class BackOnShowTest(unittest.TestCase):
+    """A page the browser brings back from its back/forward cache is asked again, as a tab that
+    comes back into view is: it is never shown as it was left without a word."""
+
+    def test_a_page_brought_back_asks_again(self):
+        out = boot(BOOT_MAC, WATCH_STARTED + """
+// A first showing (not from the cache) is the page's own start: nothing more.
+window.on.pageshow({persisted: false}); await settle();
+out.first = asked();
+// Brought back: the marks and tasks, and the sync's state.
+there.marks.a1 = MARK('S9');
+window.on.pageshow({persisted: true}); await settle();
+out.restored = asked().sort();
+// The tab's own event for the same return asks nothing more.
+show(true); await settle();
+out.both = asked();
+await answerNow(); await answerNow();
+out.done = {asked: asked(), draws: draws.length - n, marks: shown().marks, reloads: events.filter(e => e === 'reload').length, loads};
+// The next return asks again.
+window.on.pageshow({persisted: true}); await settle();
+out.next = asked().sort();
+""")
+        self.assertEqual(out["first"], [])
+        self.assertEqual(out["restored"], ["GET api/marks", "GET api/sync"])
+        self.assertEqual(out["both"], [])
+        self.assertEqual(out["done"], {"asked": ["GET api/tasks"], "draws": 1, "marks": "a1 a2", "reloads": 1, "loads": 0})
+        self.assertEqual(out["next"], ["GET api/marks", "GET api/sync"])
+
+    def test_a_public_copy_is_asked_again_too(self):
+        out = boot(BOOT_SERVER, WATCHING + """
+await answerNow(); asked();
+window.on.pageshow({persisted: true}); await settle();
+out.restored = asked();
+""")
+        self.assertEqual(out["restored"], ["GET api/marks"])        # (then the tasks; never api/sync)
+
+    def test_where_it_is_wired(self):
+        back = JS[JS.index(BACK_START):JS.index(BACK_END)]
+        self.assertIn("document.addEventListener('visibilitychange', () => { if (document.hidden) watchSync(); else backOnShow(); });", back)
+        self.assertIn("window.addEventListener('pageshow', e => { if (e.persisted) backOnShow(); });", back)
+        # Nothing keeps the page out of that cache: no unload or beforeunload listener anywhere.
+        for text in (JS, PLANNER, BAR):
+            self.assertNotIn("'unload'", text)
+            self.assertNotIn("beforeunload", text)
 
 
 # The planner's plan with dashboard.js's namespace, its copies and /api/plan stood in for. gate, when

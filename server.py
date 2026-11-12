@@ -293,7 +293,7 @@ MARK_TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?
 
 def mark_time(given):
     """When a mark was made: now, or the time sent with a mark the page puts back as it was (its undo
-    of taking the mark away), so the nightly check's answer for that very mark still applies to it.
+    of taking the mark away), so the last sync's answer for that very mark still applies to it.
     Only a real time written as MARK_TIME that is not in the future; anything else is now. A server
     without this rule (the phone view's, or a public copy from before it) stamps the mark now, which
     the page takes as it comes."""

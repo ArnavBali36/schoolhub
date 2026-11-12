@@ -309,13 +309,13 @@ const past = a => a.due_at && new Date(a.due_at) < now;
 function eff(a){
   const m = marks[a.id];
   if (m && !SOURCE_DONE.includes(a.status)) {
-    // The nightly check result only applies if it saw this exact mark.
+    // The last sync's check of a mark only applies if it saw this exact mark.
     return a.marked_done === m.marked_at && a.mark_check === 'not_found' ? 'flagged' : 'marked';
   }
   if (a.status === 'todo' && a.due_at && new Date(a.due_at) - now < 48 * 36e5) return 'soon';
   return a.status;
 }
-// Your ✓ is your word: a mark the nightly check could not confirm ('flagged') still counts as done,
+// Your ✓ is your word: a mark the last sync could not confirm ('flagged') still counts as done,
 // with a note on the item, rather than sitting in Needs attention. A check-in or a paper hand-in
 // leaves nothing on Canvas to find.
 const isDone = a => { const s = eff(a); return [...SOURCE_DONE, 'expired', 'marked', 'flagged'].includes(s) || (s === 'offline' && (!a.due_at || past(a))); };
@@ -329,7 +329,7 @@ function pillText(a, s){
           excused:'Excused', expired:'Old', marked:'Done ✓', flagged:'Done ✓', check:'Confirm', overdue:'Overdue'}[s];
 }
 const PILL_TIP = {
-  flagged: 'Marked done by you. The nightly check found no submission, which is fine if it was handed in another way',
+  flagged: 'Marked done by you. The last sync found no submission, which is fine if it was handed in another way',
   check: "SchoolHub can't see this course's submissions yet. If you turned it in, click ✓",
   marked: 'Marked done by you',
 };
@@ -420,8 +420,10 @@ function stats(){
     ? `<div class="banner">To mark assignments done and open files in their apps, use <a href="http://localhost:8722">localhost:8722</a>.</div>`
     : `<div class="banner">Read-only view. Your files and the ✓ buttons live on your Mac; this page shows the last sync.</div>`;
   const none = D.generated_at ? '' : '<div class="banner">No assignments yet: your Mac sends them with its next sync.</div>';
+  // A newer sync's data.js that could not be read ("a sync that ran by itself"): yours to load.
+  const newer = unread ? '<div class="banner">New data · <button type="button" class="linkish" id="newData">Refresh</button></div>' : '';
   const errs = D.errors?.length ? `<div class="errors"><b>Last sync had ${D.errors.length} issue(s)</b><ul>${D.errors.map(e => `<li>${esc(e)}</li>`).join('')}</ul></div>` : '';
-  return banner + none + errs + `<div class="stats">
+  return banner + none + newer + errs + `<div class="stats">
     <div class="stat ${attention ? 'red' : ''}"><b>${attention}</b><span>Need attention</span></div>
     <div class="stat ${soon ? 'amber' : ''}"><b>${soon}</b><span>Due in the next 48h</span></div>
     <div class="stat"><b>${week}</b><span>Due in the next 7 days</span></div>
@@ -441,10 +443,12 @@ function focusKey(within){
   const all = [...within.querySelectorAll(`[${attr}]`)], at = all.indexOf(el);
   return [sel(el), ...all.slice(at + 1).map(sel), ...all.slice(0, at).reverse().map(sel)];
 }
+// Nothing scrolls for it: the control is where the one before it was, in view or not, and a page
+// drawn anew while you read further down (a sync's new data, another device's ✓) stays where it is.
 function refocus(within, keys){
   for (const key of keys || []) {
     const el = within.querySelector(key);
-    if (el) return el.focus();
+    if (el) return el.focus({preventScroll: true});
   }
 }
 
@@ -454,7 +458,8 @@ function showSynced(){
   // A public copy gives data with no sync time before the Mac's first sync has reached it.
   const hrs = D.generated_at ? (now - new Date(D.generated_at)) / 36e5 : Infinity;
   $('#sync').textContent = D.generated_at ? 'Synced ' + ago(D.generated_at) : 'Not synced yet';
-  $('#sync').title = D.generated_at ? new Date(D.generated_at).toLocaleString() : '';
+  // Its tooltip: the time itself, and when the Mac syncs next by itself ("the next sync").
+  $('#sync').title = [D.generated_at ? new Date(D.generated_at).toLocaleString() : '', noteHere()].filter(Boolean).join('\n');
   $('#sync').classList.toggle('stale', hrs > 30);
 }
 function render(){
@@ -580,8 +585,8 @@ function markNote(a, s){
     : '';
   if (s === 'flagged') return `<div class="note warn">You marked this done ${ago(m.marked_at)}. ${esc(a.platform)} shows no submission, which is fine if it was handed in another way (in person, on paper, by email). If it wasn't, undo the mark and turn it in.</div>`;
   if (!a.verifiable) return `<div class="note">Marked done ${ago(m.marked_at)}. SchoolHub can't see ${esc(a.platform)} submissions, so this one is on your word.</div>`;
-  if (a.marked_done === m.marked_at && a.mark_check === 'confirmed') return '<div class="note">Confirmed by the nightly check.</div>';
-  return `<div class="note">Marked done ${ago(m.marked_at)}. The nightly sync will double-check ${esc(a.platform)} for your submission.</div>`;
+  if (a.marked_done === m.marked_at && a.mark_check === 'confirmed') return '<div class="note">Confirmed by the last sync.</div>';
+  return `<div class="note">Marked done ${ago(m.marked_at)}. The next sync will double-check ${esc(a.platform)} for your submission.</div>`;
 }
 
 // The drawer is a modal dialog: the page behind it is inert while it is open, focus starts in it
@@ -703,6 +708,8 @@ document.addEventListener('click', e => {
   if (op) { e.preventDefault(); if (REMOTE) return; return known.then(() => REMOTE || api('api/open', {path: op.dataset.open})).catch(() => toast("Couldn't open that file.")); }
   // A click the keyboard made (Enter or Space on a name) has no click count.
   const r = e.target.closest('.row'); if (r) return openDrawer(r.dataset.id, e.detail === 0);
+  // (Pressed by you: the page never loads again by itself for new data.)
+  if (e.target.closest('#newData')) return location.reload();
   if (e.target.closest('#doneToggle')) { state.showDone = !state.showDone; mem.set('showDone', state.showDone); return render(); }
   const c = e.target.closest('[data-course]'); if (c) { state.course = c.dataset.course; mem.set('course', state.course); render(); }
   const v = e.target.closest('#views button'); if (v) { state.view = v.dataset.view; mem.set('view', state.view); render(); }
@@ -891,7 +898,7 @@ document.addEventListener('keydown', e => {
 // A ✓ made or taken away. was: the mark before (null for none); now: the one the step left, known
 // once its save has answered. A mark is stored on its own under the assignment's id, so the way
 // back touches only that one: it takes away the mark the step made, or puts back the one it took
-// away, with the time it had (where the server takes it), so the nightly check's answer for that
+// away, with the time it had (where the server takes it), so the last sync's answer for that
 // mark still applies. Only while the stored mark is still the one the step left.
 function markStep(label, id, was){
   const step = {label, id, was, now: null};
@@ -943,23 +950,193 @@ function taskStep(label, id, was, now){
 // ---- sync now ----
 // Never on a public copy: syncs run on the Mac, which has your Canvas login.
 const syncBtn = $('#syncBtn');
-function showSyncing(on){ syncBtn.disabled = on; syncBtn.textContent = on ? 'Syncing…' : 'Sync now'; }
+function showSyncing(on){
+  syncBtn.disabled = on;
+  syncBtn.textContent = on ? 'Syncing…' : 'Sync now';
+  if (on) hideSyncNote();
+}
+// Sync now pressed on this page (pressed): the page waits for that sync and loads again when it
+// ends, to say how it went. The only time the page loads again without being asked to.
+let pressed = false;
 async function pollSync(){
   let s;
-  try { s = await getJson('api/sync'); } catch { showSyncing(false); return toast("Couldn't reach the SchoolHub server."); }
+  try { s = await getJson('api/sync'); } catch {
+    pressed = false;
+    showSyncing(false);
+    watchSync();
+    return toast("Couldn't reach the SchoolHub server.");
+  }
   if (s.running) { showSyncing(true); return setTimeout(pollSync, 2000); }
   try { sessionStorage.setItem('sh:synced', JSON.stringify({ok: s.ok, output: s.output})); } catch {}
   location.reload();
 }
+
+// The next sync. The Mac's server syncs by itself once the last good sync is over 12 hours old
+// (server.py, autosync.py) and says in api/sync's answer when it will (auto). One quiet line says
+// it on the page: in the tooltip of "Synced 2h ago" (showSynced), and in the page's own tooltip
+// (#syncNote in dashboard.html, the surface of the planner's previews) under Sync now while the
+// pointer rests on that button or the keyboard's focus is on it. The same element describes the
+// button to a screen reader. No line where the server does not sync by itself (auto.state "off")
+// or while a sync runs, and never on a public copy or the phone site: neither asks api/sync.
+const clockTime = iso => {
+  const d = iso ? new Date(iso) : null;
+  return d && !isNaN(d) ? d.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'}) : '';
+};
+function nextSyncNote(s){
+  const auto = s?.auto, at = clockTime(auto?.next_at);
+  if (!auto || s.running) return '';
+  if (auto.state === 'waiting') return `Syncs by itself every ${auto.every_hours || 12} hours` + (at ? ` · next around ${at}` : '');
+  if (auto.state === 'retrying') return "Last sync didn't finish · trying again " + (at ? `at ${at}` : 'soon');
+  if (auto.state === 'settling' || auto.state === 'due') return 'Syncing in a moment';
+  if (auto.state === 'offline') return 'Will sync when the network is back';
+  return '';
+}
+const noteEl = $('#syncNote');
+let syncNote = '';
+// The line as it may be said here: only where your Mac's own server answers the page.
+const noteHere = () => LIVE && !PUBLIC && !PHONE ? syncNote : '';
+// In its element: one line of the previews' own kind, small and quiet (.ptip .pd-line).
+const noteHtml = note => note ? `<div class="pd-line">${esc(note)}</div>` : '';
+function setSyncNote(note){
+  if (note === syncNote) return;
+  syncNote = note;
+  if (noteEl) noteEl.innerHTML = noteHtml(note);
+  if (note) syncBtn.setAttribute('aria-describedby', 'syncNote'); else syncBtn.removeAttribute('aria-describedby');
+  if (!note) hideSyncNote();
+  if (D) showSynced();
+}
+const NOTE_REST_MS = 350;      // the pointer rests on Sync now this long before the line shows (as the planner's previews)
+const NOTE_GAP = 8;            // px between the line and the button, and kept to the window's edges
+let noteTimer = 0;
+function showSyncNote(){
+  const tip = noteEl, note = noteHere();
+  clearTimeout(noteTimer);
+  noteTimer = 0;
+  if (!tip || !note || syncBtn.hidden || syncBtn.disabled) return;
+  tip.innerHTML = noteHtml(note);
+  // One line wherever the window has the width for it (a preview is no wider than 300 px).
+  Object.assign(tip.style, {left: '', top: '', maxWidth: `calc(100vw - ${2 * NOTE_GAP}px)`});
+  tip.hidden = false;
+  // Measured at its own size, then put under the button with their right edges in line (over it
+  // where there is no room under), wholly in the window.
+  const b = syncBtn.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight;
+  const vw = document.documentElement.clientWidth, vh = window.innerHeight;
+  const under = b.bottom + NOTE_GAP + h <= vh - NOTE_GAP;
+  tip.dataset.side = under ? 'below' : 'above';
+  Object.assign(tip.style, {left: Math.round(Math.max(NOTE_GAP, Math.min(b.right - w, vw - NOTE_GAP - w))) + 'px',
+    top: Math.round(under ? b.bottom + NOTE_GAP : Math.max(NOTE_GAP, b.top - NOTE_GAP - h)) + 'px'});
+}
+function hideSyncNote(){
+  if (!noteTimer && noteEl?.hidden !== false) return;    // nothing shows or waits (every scroll asks)
+  clearTimeout(noteTimer);
+  noteTimer = 0;
+  if (noteEl) noteEl.hidden = true;
+}
+syncBtn.addEventListener('pointerenter', e => {
+  if (e.pointerType === 'touch') return;
+  clearTimeout(noteTimer);
+  noteTimer = setTimeout(showSyncNote, NOTE_REST_MS);
+});
+syncBtn.addEventListener('pointerleave', hideSyncNote);
+// The keyboard's focus only: a click puts focus on the button too, and is not asking to read.
+syncBtn.addEventListener('focus', () => { if (syncBtn.matches(':focus-visible')) showSyncNote(); });
+syncBtn.addEventListener('blur', hideSyncNote);
+syncBtn.addEventListener('click', hideSyncNote);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') hideSyncNote(); });
+window.addEventListener('scroll', hideSyncNote, {passive: true});
+window.addEventListener('resize', hideSyncNote);
+
+// A sync that ran by itself. One may run while the page is open: the server's own every 12 hours,
+// one started in Terminal, or Sync now pressed in another window. So where your Mac's server
+// answers the page (LIVE: never a public copy, never the phone site) it asks api/sync about once a
+// minute while it is on show, and when it comes back on show ("back on show"); never while it is
+// hidden, when no timer runs. While a sync runs, Sync now says so. When the data on the Mac is no
+// longer the data on the page (data_at is not its generated_at), data.js is asked for again and
+// taken in place (takeData, as when data.js follows the copy a visit opened from): the list, the
+// planner's chips and an open drawer are drawn from it, and where you had scrolled to, an open
+// form and the undo history stay as they were. The page never loads again by itself for it. Only a
+// data.js that cannot be read leaves the page as it is, with a quiet "New data · Refresh" above
+// the list (stats) for you to press.
+const WATCH_MS = 60000;           // between two looks
+const WATCH_SOON_MS = 3000;       // while a sync runs (to see it end), or a drag holds new data back
+let watchTimer = 0, looking = false, running = false, soon = false;
+let unread = null;                // the data_at of a data.js that could not be read: "New data · Refresh"
+const watches = () => LIVE && !PUBLIC && !PHONE && !pressed && !document.hidden;
+// The next look, a while from now: none while the page is hidden, or where it does not watch.
+function watchSync(){
+  clearTimeout(watchTimer);
+  watchTimer = watches() ? setTimeout(lookAtSync, running || soon ? WATCH_SOON_MS : WATCH_MS) : 0;
+}
+async function lookAtSync(){
+  clearTimeout(watchTimer);
+  watchTimer = 0;
+  if (looking || !watches()) return;
+  looking = true;
+  let s = null;
+  try { s = await getJson('api/sync'); } catch {}
+  try {
+    if (s) await heardSync(s);
+    // No answer: Sync now is not left saying "Syncing…" for a sync nobody can see end.
+    else if (running && !pressed) { running = false; showSyncing(false); }
+  } catch (err) { console.error(err); }
+  looking = false;
+  watchSync();
+}
+async function heardSync(s){
+  setSyncNote(nextSyncNote(s));
+  if (pressed) return;            // Sync now's own wait is on, and ends with its load
+  soon = false;
+  if (s.running) { running = true; return showSyncing(true); }
+  if (running) { running = false; showSyncing(false); }
+  // Not before data.js itself has come (or failed): until then the page may show the copy kept of
+  // an older sync, and data.js is on its way already. Not in the middle of a drag: soon after.
+  if (!dataSeen || !D || !s.data_at || s.data_at === D.generated_at || s.data_at === unread) return;
+  if (holds.some(fn => fn())) { soon = true; return; }
+  await newData(s.data_at);
+}
+// data.js as text is one statement, `window.SCHOOL_DATA = {…};` (sync.py): what it holds, or null.
+function readData(text){
+  try {
+    const d = JSON.parse(text.slice(text.indexOf('=') + 1).trim().replace(/;$/, ''));
+    return dataShaped(d) ? d : null;
+  } catch { return null; }
+}
+// at: the data_at that told of it.
+async function newData(at){
+  let text;
+  try {
+    const r = await fetch('data.js', {cache: 'no-store'});
+    if (!r.ok) return;            // not answered: asked again at the next look
+    text = await r.text();
+  } catch { return; }
+  const fresh = readData(text), was = D;
+  if (fresh && fresh.generated_at === was.generated_at) return;
+  try {
+    if (!fresh) throw new Error('data.js could not be read');
+    unread = null;                // (before it is drawn: an offer made for an earlier sync goes)
+    takeData(fresh);
+  } catch (err) {
+    // Not taken: the page stays on the data it had, and offers the load.
+    console.error(err);
+    unread = at;
+    if (D !== was) { D = was; rebuild(); }
+    return refresh();
+  }
+  keepData(JSON.stringify(fresh));
+  // The sync also checked your ✓ marks: what is stored now follows, as on coming back to the tab.
+  reloadState();
+}
+
 // (The tasks are asked for with the marks, in "starting". Called again when the server's answer
 // names another place than the copy the page was drawn from: Sync now comes or goes.)
 function enableServerFeatures(){
   $('#fab').hidden = false;
   syncBtn.hidden = PUBLIC;
   if (PUBLIC || syncBtn.onclick) return;
-  syncBtn.onclick = () => api('api/sync', {}).then(() => { showSyncing(true); setTimeout(pollSync, 1500); })
+  syncBtn.onclick = () => api('api/sync', {}).then(() => { pressed = true; watchSync(); showSyncing(true); setTimeout(pollSync, 1500); })
     .catch(() => toast("Couldn't start a sync. Is the SchoolHub server running?"));
-  getJson('api/sync').then(s => { if (s.running) { showSyncing(true); pollSync(); } }).catch(() => {});
+  // Whether a sync is running now and when the next will; from here on, whether one ran.
+  lookAtSync();
   let done = null;
   try { done = JSON.parse(sessionStorage.getItem('sh:synced')); sessionStorage.removeItem('sh:synced'); } catch {}
   if (done) {
@@ -983,7 +1160,21 @@ async function reloadState(){
   } catch {}
   emit('reload');
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) reloadState(); });
+
+// ---- back on show ----
+// Back in view (the tab, the Mac app's window or its School view): what changed meanwhile is taken
+// in quietly, the marks and tasks from your other devices (reloadState; the planner follows it)
+// and a sync that ran (lookAtSync, "sync now"). The same when the browser brings the page back from
+// its back/forward cache (pageshow, persisted): it is shown as it was left, however long ago, and
+// would say nothing of it. Asked once though both events tell of one return.
+let returning = null;
+function backOnShow(){
+  if (!returning) returning = reloadState().finally(() => { returning = null; });
+  lookAtSync();
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) watchSync(); else backOnShow(); });
+window.addEventListener('pageshow', e => { if (e.persisted) backOnShow(); });
+// ---- end of back on show ----
 
 // ---- what planner.js uses ----
 // The day planner reads the list, opens the drawer and saves through this small namespace rather
@@ -1129,6 +1320,17 @@ function keepData(text){
   if (had?.text === text && Date.now() - had.at < 864e5) return;
   if (dataShaped(D)) kept.write('data', text); else kept.drop('data');
 }
+// Another sync's data than the page shows, taken in place: the list is built and drawn from it with
+// the marks and tasks the page has, and an open drawer stays unless its item is gone. For data.js
+// when it follows the copy a visit opened from (dataHere), and for a sync that ran while the page
+// was open ("sync now": newData).
+function takeData(fresh){
+  D = fresh;
+  rebuild();
+  if (!WRITE) marks = syncedMarks();
+  if (drawerId !== null && !byId[drawerId]) closeDrawer();
+  refresh();
+}
 function dataHere(){
   if (dataSeen) return;
   dataSeen = true;
@@ -1141,14 +1343,8 @@ function dataHere(){
   }
   const text = LOCAL_FILES ? '' : JSON.stringify(fresh);
   if (!D) { D = fresh; start(); }
-  else if (D !== fresh && text !== shownData) {
-    // A newer sync than the copy the page was drawn from: taken in place.
-    D = fresh;
-    rebuild();
-    if (!WRITE) marks = syncedMarks();
-    if (drawerId !== null && !byId[drawerId]) closeDrawer();
-    refresh();
-  }
+  // A newer sync than the copy the page was drawn from.
+  else if (D !== fresh && text !== shownData) takeData(fresh);
   shownData = null;
   if (!LOCAL_FILES) keepData(text);
 }

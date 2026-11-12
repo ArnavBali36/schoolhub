@@ -484,7 +484,7 @@ class ServerWithTursoTest(ServerRun, unittest.TestCase):
         self.assertNotIn(tid, self.kv("tasks"))
         self.request("POST", "/api/mark", {"id": "canvas:1", "done": False})
         self.assertNotIn("canvas:1", self.kv("marks"))
-        # The local copy follows, for offline reads and the nightly sync.
+        # The local copy follows, for offline reads and the next sync.
         self.assertIn("canvas:2", json.loads((self.hub / "state" / "marks.json").read_text()))
 
     def test_database_unreachable(self):

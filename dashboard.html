@@ -180,7 +180,9 @@
 :root.reduce-transparency,:root.reduce-transparency[data-theme]{--glass:var(--surface);--glass-thick:var(--surface);--glass-blur:none;--glass-blur-thick:none}
 *{box-sizing:border-box}
 /* Room for the bar above and the + button below a link or field the page scrolls to or focuses. */
-html{scroll-padding-top:calc(var(--bar-height) + 16px);scroll-padding-bottom:calc(96px + env(safe-area-inset-bottom));color:var(--text)}
+/* overflow-y: every page keeps the scroll bar's room, as QuantPrep's do, so with scroll bars that take
+   room a page too short to scroll is no wider than a long one and the bar sits where Prep's does. */
+html{overflow-y:scroll;scroll-padding-top:calc(var(--bar-height) + 16px);scroll-padding-bottom:calc(96px + env(safe-area-inset-bottom));color:var(--text)}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--font-text);-webkit-font-smoothing:antialiased}
 /* A faint tint of the accent at the top of the page, on a fixed layer that never repaints on scroll. */
 body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
@@ -194,15 +196,21 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline;tex
 .muted{color:var(--muted)}
 .sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 [hidden]{display:none!important}
-/* Going between QuantPrep and SchoolHub in a browser, the page cross-fades and the bar stays put. */
-@view-transition { navigation: auto; }
-::view-transition-old(root),::view-transition-new(root){animation-duration:160ms}
-@media (prefers-reduced-motion: reduce){@view-transition { navigation: none; }}
+/* Going between QuantPrep and SchoolHub in a browser is a page load: the old page stays until this
+   one can be drawn, the bar (the same name and the same box in both apps) holds still, and the rest
+   cross-fades. The same three rules as QuantPrep's stylesheet and the page it shows while SchoolHub
+   is down (QuantPrep docs/13, section 5.1.2); one copy, and none of it for those who ask for less
+   motion. */
+@media (prefers-reduced-motion: no-preference){
+  @view-transition{navigation:auto}
+  .topbar{view-transition-name:app-bar}
+  ::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation-duration:160ms}
+}
 
 /* The app bar, laid out like QuantPrep's so the two read as one product: glass the page scrolls
    under, with a hairline below, the same height, the title (or the app switch) at the left,
    SchoolHub's two views as its nav, and the theme button at the right end of the page column. */
-.topbar{position:sticky;top:0;z-index:5;view-transition-name: app-bar;background:var(--glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);border-bottom:1px solid var(--glass-edge)}
+.topbar{position:sticky;top:0;z-index:5;background:var(--glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);border-bottom:1px solid var(--glass-edge)}
 .bar{display:flex;align-items:center;gap:20px;max-width:calc(var(--content) + 2 * var(--gutter));height:var(--bar-height);margin:0 auto;padding:0 var(--gutter)}
 .brand-slot{display:flex;align-items:center;flex:none;min-width:0}
 .brand{margin:0;font-size:15px;line-height:32px;font-weight:650;letter-spacing:-.01em;color:var(--text);white-space:nowrap}
@@ -543,7 +551,7 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
    takes the theme's --cell and also masks the hatching below. Vertical drags on empty time scroll on
    a touch screen (planner.js makes blocks there on a long press), so only pan-y is left to the
    browser. */
-.pgrid{position:relative;isolation:isolate;margin:0 10px 0 58px;--cr:9px;
+.pgrid{position:relative;isolation:isolate;margin:0 10px 0 58px;border-bottom:1px solid transparent;--cr:9px;
   --cell-shape:linear-gradient(transparent var(--cr),var(--cell) 0,var(--cell) calc(100% - 2px - var(--cr)),transparent 0) 0 0/100% var(--hour,48px),
     linear-gradient(var(--cell) calc(100% - 2px),transparent 0) var(--cr) 0/calc(100% - 2 * var(--cr)) var(--hour,48px) repeat-y,
     radial-gradient(circle var(--cr) at 100% var(--cr),var(--cell) 96%,transparent) 0 0/var(--cr) var(--hour,48px) repeat-y,
@@ -950,6 +958,9 @@ dialog.task .wk-hours label{flex:1 1 160px}
 <!-- A block's details (planner.js fills it in and places it). -->
 <dialog class="pdetail" id="planDetail" aria-labelledby="pdTitle"></dialog>
 <div class="ptip" id="planTip" role="tooltip" hidden></div>
+<!-- When the Mac syncs next by itself: one line under Sync now while the pointer rests on it or the
+     keyboard's focus is on it, which also describes that button (dashboard.js, "sync now"). -->
+<div class="ptip" id="syncNote" role="tooltip" hidden></div>
 
 <!-- The last sync's data is asked for without holding the page up (async): dashboard.js starts from
      it when it is here, else from the copy it kept at the last visit, and takes it in when it comes. -->
