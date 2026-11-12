@@ -159,7 +159,8 @@ before the deploy.
   header. Clicking one opens its drawer, as in the list.
 - **Blocks** sit in absolute position by time, and blocks that overlap share the width side by side.
   Each kind has its own colour from the theme's tokens, and its name is written on it, so colour is
-  never the only cue:
+  never the only cue (the colours, and how the kind is told, changed on 2026-11-11: see "soft cells,
+  vivid bars" below):
 
   | Kind | Look |
   |---|---|
@@ -203,7 +204,8 @@ size, and clicking an event must show more about it.
   short it switches to a compact single line, "Lunch · Chipotle · 4–5 PM", cut with an ellipsis.
   Items show only where there is room, with "+N" otherwise.
   - Overlapping blocks still share the width. A column narrower than 70 px shows only the kind's
-    initial and colour, plus its name for screen readers.
+    initial and colour, plus its name for screen readers. (Since 2026-11-11 the kind's icon, not
+    its initial.)
   - Hour labels thin out (every 2 or 3 hours) when the hour height is under 30 px.
 - **Clicking a block opens its details** (a click is a release under 4 px of movement). Dragging
   still moves it. The details are a card next to the block on wide screens, and a bottom sheet on
@@ -227,36 +229,120 @@ size, and clicking an event must show more about it.
 
 The learner asked for the page to look more like three references they sent, the calendar cards most
 of all, with the layout and every behaviour kept. This is the look; nothing above changes in what
-the planner does.
+the planner does. Where a line above describes the first look (the fills and edges in the table of
+kinds, the kind's initial on a narrow column, the now line in `--bad`), this section replaces it.
 
-- **Header:** the date is a large light heading with **Today**, **Week…** and **+ Block** as pills
-  beside it, each with a small icon. Under it is the week of the day on show, Sunday to Saturday, a
-  chip a day (the weekday over the date), between the ‹ and › buttons, which still step a day. A
-  chip shows its day. The day on show is solid: in the accent when it is today (which also carries a
-  dot), in ink when it is another day.
-- **Timeline:** each hour is a soft rounded cell on a tray, drawn from gradients alone (`--cell-shape`),
-  with a dotted line at the half hour. Today's hours gone by are hatched, down to the now line.
+None of it changes a token the page shares with QuantPrep (`--bg`, the surfaces, text, the accent,
+the glass, `--titlebar`): the bar and the Mac app's title strip are the same in both apps. School's
+own tokens come after those in each theme's block, and every one has a value in light, dark and red.
+
+- **Canvas:** soft washes of lilac (left), rose (right) and sky (from below) on a fixed layer of
+  their own, `body::after`. The layer starts under the bar's resting place and fades in over the
+  first 240 px, so nothing of it is ever behind the bar. Dark has the same washes at about a third
+  of the strength; Night a breath of red, with no blue.
+  - Only `--text` and `--muted` are written straight on the canvas, and both keep 4.5:1 at the
+    strongest point of the washes. Anything in another colour stands on a ground of its own: a
+    course's links are small pills, a warning note sits on `--warn-soft`.
+- **Header:** the date is a large light heading (21 to 26 px with the pane's width) with **Today**,
+  **Week…** and **+ Block** as pills beside it, each with a small icon. The date has three lengths
+  and the page shows the one that fits: "Thursday, November 12", "Thu, Nov 12", and on a phone on
+  another day than today, where Today joins the buttons, "Nov 12".
+- **Week strip:** under the date, the week of the day on show, Sunday to Saturday, a chip a day (the
+  weekday over the date), between the ‹ and › buttons, which still step a day. A chip shows its day.
+  The day on show is solid: in the accent when it is today (which also carries a dot), in ink when
+  it is another day.
+  - The seven chips are made once and kept; only their date and state change, so one that has the
+    focus keeps it.
+  - They are one stop for Tab, on the day on show. The arrow keys, Home and End move the focus
+    between them; Enter or Space shows the focused day.
+  - The day on show has `aria-current="date"`. Each chip is read as its full date, and today's
+    ends in ", today".
+- **Hour rail:** a large light numeral with a small AM or PM beside it (19 px and 10.5 px).
+- **Timeline:** each hour is a soft rounded cell on a tray, drawn from gradients alone
+  (`--cell-shape`), with a dotted line at the half hour.
+  - Today's last hours gone by are hatched, lightly: most at the now line, fading out over the three
+    and a half hours above it. So a day seen late in the evening is still a tray of white cells, and
+    a day that is over is not hatched at all. The hatching takes no pointer.
 - **Now:** a dashed line in `--accent` across the cells, from a small solid pill in the hour rail
   that says the time. It runs under the blocks, and the block that is on says "Now".
+  - The pill and an hour's label never overlap. A label within 9 px of the now line gives way to the
+    pill, which says the time; one within 16 px steps 8 px away from it (the first and the last
+    label give way instead, as a step would take them out of the tray).
+- **Free time:** a stretch of an hour and a half or more between two blocks gets a dashed card that
+  says how long it is ("2 hr free"), its words on a pill of their own.
+  - Decoration only: hidden from screen readers, and the pointer goes through it, so a click or a
+    drag there still makes a block.
+  - Today it shows only for time still to come: a stretch that has begun has none.
+  - Nothing before the first block of the day or after the last.
 - **Blocks** are bars in a gradient per kind, each with its own ink (4.5:1 on both ends of the
-  gradient, checked in the tests in light, dark and red):
+  gradient, under the sheen and on the nested panel; checked in the tests in light, dark and red):
 
-  | Kind | Bar | Ink |
-  |---|---|---|
-  | Meal | amber to coral (`--k-meal-a`, `--k-meal-b`) | dark brown |
-  | Deep work | deep violet | white |
-  | Socialize | green | dark green |
-  | Block | pale blue | navy |
+  | Kind | Light | Dark | Night |
+  |---|---|---|---|
+  | Meal | amber to coral, dark brown ink | deep amber-brown, cream ink | dark red-brown, amber ink |
+  | Deep work | deep violet, white ink | rich violet, white ink | dark red, red-orange ink |
+  | Socialize | green, dark green ink | deep green, pale green ink | dark brown, amber ink |
+  | Block | pale blue, navy ink | slate blue, pale blue ink | darkest red, red ink |
 
-  A bar has its kind's icon in a round bubble at the left, then the title and the time, and one
-  white chip at the right: "Now", else "2 of 3 done" where it has items, else the kind's name where
-  the title does not say it, else "+N". A tall block's items sit on a nested panel. As a block gets
-  shorter or narrower the decorations go: one line with a smaller bubble, then the icon alone, then
-  (under 150 px wide) the kind's initial as before.
-- **Dragging:** the bar lifts with a bright rim, turns a little see-through and tilts about a degree.
-  Nothing on a block is blurred.
-- **Night:** the bars are dark reds to ambers with bright ink of their own, and the chip is bright
-  with dark ink. No colour has blue.
+  - **Edge:** a bar has a hairline of its kind's edge colour, drawn at `--pb-edge-mix` over the bar
+    (60% in light, 50% in dark, the whole colour in Night). The bar's edge is at least 3:1 against
+    the hour cell in every theme.
+  - **Dark:** the bars are deep, low fills of each kind's hue with light ink, so nothing glares on
+    the dark tray; deep work is the richest of the four, as it is the strongest in light.
+  - **The plain Block** is pale on purpose, the quiet one of the four. It has the same parts as the
+    others: its icon in a bubble that shows on the pale bar, its edge, and a soft shadow taken from
+    its edge colour.
+  - A tall block's items sit on a nested panel.
+- **One chip** at the end of a bar's first line, white on the bar: "Now" while the block is on, else
+  "2 of 3 done" where it has items, else the kind's name (see the next point). A block too narrow
+  for a chip (under 260 px inside) says "+N" for the items it does not show: at the end of its line,
+  or after the time on the second line of a tall block.
+  - "+N more" keeps its own line under the items where there is room for it. It is never written
+    beside "N of M done".
+- **The kind's name** (decided 2026-11-11; it replaces "its name is written on it"). The kind is
+  never told by colour alone, and this is how:
+  - every block of every size has its kind's icon: in a bubble where the block has room, alone where
+    it is short or narrow, and alone in the middle of a column too narrow for words. The letters
+    (M, D, S, B) are gone;
+  - the block's label for a screen reader, its preview on hover or focus and its details card always
+    say the name;
+  - the name is also written on the bar, as the chip, where the block has room for a chip, the title
+    does not already say it (a meal's does, and so does a block titled "Deep work"), and no count of
+    items has the chip;
+  - the plain kind's name, "Block", is never written on a bar: beside a block's own title it says
+    nothing.
+- **What gives way.** A title is never cut to make room for a time or a chip. The first line of a
+  bar holds what fits whole, and what does not goes in this order: the chip, then the time, and only
+  then is the title cut with an ellipsis. (The line wraps and shows its first line only; planner.js
+  also leaves the time out where it reckons it would not fit.) The time and the count are in the
+  block's preview and its details. A narrow tall block writes its time in the compact form
+  ("4–5:30 PM").
+- **As a block gets shorter or narrower** the decorations go: one line with a smaller bubble, then
+  the icon alone, then the icon alone in the middle of the column. The block is a named container
+  (`container: pblock / inline-size`), and the rules that do this ask for it by name.
+- **Dragging:** the bar lifts with a bright rim. Moved, it also tilts about a degree; resized by an
+  edge, it stays square to the hours. It stays solid, so its words keep their contrast, and its time
+  shows while it is dragged even where the block is too narrow for it at rest. Nothing on a block is
+  blurred.
+- **Night:** the bars are dark reds to ambers with bright ink of their own and a bright hairline, and
+  the chip is bright with dark ink. The hatching is faint. No colour has blue.
+- **The other surfaces** follow the same family:
+  - the **details card** and the assignment **drawer** are nearly solid (the thick glass with most
+    of `--surface` mixed in), so the vivid bars under them never show through as smudges; solid
+    wherever the glass is (reduced transparency);
+  - the **preview** on hover keeps the thick glass in light and is solid in dark and Night, with the
+    kind as a small bar of its own;
+  - the **toast** (with Undo or Redo) is an ink capsule with its button as a chip;
+  - the line under **Sync now** that says when the Mac syncs next is the preview's surface as one
+    compact line with a small clock;
+  - ticks and radio buttons in the card, the editor and the weekly form are drawn, the same in every
+    theme;
+  - while the planner **waits for the server's plan** the day is dimmed to 55% and its buttons are off;
+  - in the list, a two-line row with width to spare (beside the planner, on a tablet) draws its
+    course's dot large, as a round bubble at its left. Never on a phone.
+- **Checked in the tests:** ink on every bar, the edge against the cell, text on the washed canvas
+  and every other new pair, in all three themes; no blue in any Night colour; a value in dark and
+  red for every one of School's tokens.
 
 ### Changing a repeating block or a meal
 

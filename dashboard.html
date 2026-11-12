@@ -78,7 +78,7 @@
   /* School's canvas under the bar: soft washes of lilac, rose and sky on a layer of their own
      (body::after), which never reaches behind the bar. Text straight on the canvas is --text or
      --muted, which keep 4.5:1 where all three are at their strongest. */
-  --canvas-wash-1:rgb(139 108 240 / .2);--canvas-wash-2:rgb(236 132 178 / .15);--canvas-wash-3:rgb(104 176 236 / .13);
+  --canvas-wash-1:rgb(139 108 240 / .22);--canvas-wash-2:rgb(236 132 178 / .15);--canvas-wash-3:rgb(104 176 236 / .13);
   /* Icons, as masks that take the colour of what they sit on: the kinds of block, and the stat tiles. */
   --ic-meal:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 3v18M4 3v5a3 3 0 0 0 6 0V3M17 21v-8h-3.5v-2c0-4 1.3-6.8 3.5-8z'/%3E%3C/svg%3E");--ic-deep:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 6.5C10 5.2 7.5 4.7 4 5v13c3.5-.3 6 .2 8 1.5 2-1.3 4.5-1.8 8-1.5V5c-3.5-.3-6 .2-8 1.5zM12 6.5v13'/%3E%3C/svg%3E");--ic-social:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3.5 19c.6-3 2.7-4.5 5.5-4.5s4.9 1.5 5.5 4.5M16 5.2a3 3 0 0 1 0 5.6M17.5 14.7c1.7.6 2.7 2 3 4.3'/%3E%3C/svg%3E");--ic-other:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 7.5A2.5 2.5 0 0 1 7.5 5h9A2.5 2.5 0 0 1 19 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 5 16.5zM9 10h6M9 14h3.5'/%3E%3C/svg%3E");--ic-alert:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7.5v5.5M12 16.4v.1'/%3E%3C/svg%3E");--ic-clock:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7.5V12l3 2'/%3E%3C/svg%3E");--ic-cal:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 6.5A2.5 2.5 0 0 1 7.5 4h9A2.5 2.5 0 0 1 19 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 5 17.5zM5 9.5h14M9 2.5v3M15 2.5v3'/%3E%3C/svg%3E");--ic-file:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 3h7l4 4v12a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM14 3v4h4'/%3E%3C/svg%3E");
   color-scheme:light;
@@ -194,6 +194,7 @@
 :root[data-theme="red"] input:is([type=checkbox],[type=radio]):disabled{opacity:.5}
 /* A course's color set in config.json may be any hue: Night keeps to its own course reds. */
 :root[data-theme="red"] .dot{background:var(--dot-theme)}
+:root[data-theme="red"] .dot{--dot-c:var(--dot-theme)}  /* and where the dot is drawn as a bubble (the list beside the planner) */
 /* Glass turns opaque --surface where the browser cannot blur, where the system asks for less
    transparency, and where the Mac app says so (it sets .reduce-transparency, as WebKit does not
    report the setting). */
@@ -214,7 +215,7 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
    nothing of it is ever behind the bar, which stays QuantPrep's to the pixel; the first 60 px under
    the bar, where a narrow window keeps the last sync, get under a quarter of it. */
 body::after{content:"";position:fixed;left:0;right:0;top:calc(var(--bar-height) + 1px);bottom:0;z-index:-1;pointer-events:none;
-  background:radial-gradient(72% 64% at 0% 24%,var(--canvas-wash-1),transparent 72%),radial-gradient(62% 58% at 100% 34%,var(--canvas-wash-2),transparent 72%),radial-gradient(76% 62% at 40% 108%,var(--canvas-wash-3),transparent 72%);
+  background:radial-gradient(96% 84% at 0% 30%,var(--canvas-wash-1),transparent 72%),radial-gradient(62% 58% at 100% 34%,var(--canvas-wash-2),transparent 72%),radial-gradient(76% 62% at 40% 108%,var(--canvas-wash-3),transparent 72%);
   -webkit-mask:linear-gradient(transparent 8px,#000 240px);mask:linear-gradient(transparent 8px,#000 240px)}
 button,input,select,textarea{font:inherit;color:inherit}
 a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline;text-underline-offset:2px}
@@ -333,7 +334,7 @@ input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 .row{display:grid;grid-template-columns:120px minmax(0,1fr) auto 150px 104px 28px;gap:14px;align-items:center;padding:11px 18px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shine),var(--neu-sm);cursor:pointer;font-size:14px;line-height:1.45;transition:box-shadow var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out)}
 .row:hover{border-color:var(--border-strong);box-shadow:var(--shine),var(--neu);transform:translateY(-1px)}
 .chip{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--dot)}
+.dot{--dot-c:var(--dot);width:8px;height:8px;border-radius:50%;flex:none;background:var(--dot)}
 /* The name is a button, so the drawer opens from the keyboard too; it reads as text. */
 .name{display:block;min-width:0;padding:0;border:0;background:none;color:inherit;font:inherit;font-weight:560;text-align:left;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .name small{color:var(--muted);font-weight:400;margin-left:8px}
@@ -361,7 +362,10 @@ input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 .clist .n{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 .chead{display:flex;align-items:baseline;gap:14px;margin-bottom:14px;flex-wrap:wrap}
 .chead h2{margin:0;font:350 28px/1.2 var(--font-rounded);letter-spacing:-.022em}
-/* The canvas is tinted: a note in a colour of its own stands on its own soft ground there. */
+/* The canvas is tinted, and only --text and --muted are written straight on it: a course's links
+   are small pills on a ground of their own, and so is a note in a colour of its own. */
+.chead > a{align-self:center;padding:3px 12px;border:1px solid var(--border);border-radius:999px;background:var(--surface);box-shadow:var(--btn-shadow);font-size:13.5px;font-weight:560;white-space:nowrap}
+.chead > a:hover{background:var(--surface-2);text-decoration:none}
 .chead .note.warn{padding:2px 10px;border-radius:999px;background:var(--warn-soft)}
 .sub{margin-top:28px}
 .mat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shine),var(--neu);padding:6px 20px;font-size:14px}
@@ -510,6 +514,16 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
   .row .due{grid-area:due;align-self:end}
   .row .plat{display:none}
   .row .check{grid-area:check;width:32px;height:32px;align-self:center}
+}
+/* Where those two-line rows have width to spare (beside the planner on a laptop, a tablet; never a
+   phone, whose titles need every pixel), the course's dot is drawn large: a round bubble of the
+   course's colour at the row's left, its dot in the middle. The course's name stays written under
+   the title. */
+@container (min-width:600px) and (max-width:880px){
+  .group .row{padding-left:64px}
+  .group .row .chip{gap:0}
+  .group .row .chip .dot{position:absolute;left:15px;top:50%;width:36px;height:36px;margin-top:-18px;
+    background:radial-gradient(circle,var(--dot-c) 0 4.5px,transparent 5.2px),color-mix(in srgb,var(--dot-c) 13%,var(--surface));box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--dot-c) 22%,transparent)}
 }
 /* The four tiles stay in one row wherever the column fits them (beside the planner too). */
 @container (min-width:560px){.stats{grid-template-columns:repeat(4,minmax(0,1fr))}}
@@ -856,6 +870,13 @@ dialog.pdetail .close{top:12px;right:12px}
 
 /* The block editor and the weekly form, built like the task dialog. */
 dialog.task input[type=checkbox],dialog.task input[type=radio]{width:16px;height:16px;margin:0;padding:0}
+/* Their ticks and radio buttons are drawn, as the details card's are: the same in every theme and engine. */
+dialog.task input:is([type=checkbox],[type=radio]){appearance:none;-webkit-appearance:none;display:inline-grid;place-content:center;flex:none;border:1.5px solid var(--border-input);border-radius:5px;background:var(--surface);box-shadow:none;cursor:pointer}
+dialog.task input[type=radio]{border-radius:50%}
+dialog.task input:is([type=checkbox],[type=radio]):checked{background:var(--accent);border-color:var(--accent)}
+dialog.task input[type=checkbox]:checked::before{content:"";width:8px;height:4px;margin-top:-2px;border:solid var(--on-accent);border-width:0 0 2px 2px;transform:rotate(-45deg)}
+dialog.task input[type=radio]:checked::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--on-accent)}
+dialog.task input:is([type=checkbox],[type=radio]):focus-visible{outline:2px solid var(--accent);outline-offset:2px;box-shadow:none}
 dialog.task fieldset{display:grid;gap:8px;margin:0;padding:0 0 0 24px;border:0}
 dialog.task fieldset legend{padding:0;margin-bottom:6px;font-size:13px;color:var(--muted)}
 dialog.task .hint{margin:0;font-size:12.5px;color:var(--muted)}

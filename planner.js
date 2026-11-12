@@ -821,7 +821,8 @@
         : `<div class="pb-head"><span class="pb-title">${title}</span>${chipHtml(says)}</div><div class="pb-sub">${time}${says ? '' : chipHtml(chip)}</div>`;
       list = items.slice(0, fit).map(it => `<li><label class="pb-item${it.done ? ' done' : ''}"><input type="checkbox" data-pitem="${esc(it.id)}"${it.done ? ' checked' : ''}><span>${esc(it.text)}</span>${!it.done && listDone(it) ? '<small>done</small>' : ''}</label></li>`).join('');
       list = list ? `<ul class="pb-items">${list}</ul>` : '';
-      if (rest > 0 && !inline) under = `<div class="pb-more" aria-hidden="true">+${rest} more</div>`;
+      // (Not under a chip that already counts them where the block shows none of them.)
+      if (rest > 0 && !inline && !(says && !fit)) under = `<div class="pb-more" aria-hidden="true">+${rest} more</div>`;
     }
     const left = e.col / e.cols * 100, width = 100 / e.cols;
     const cls = ['pblock', 'k-' + e.kind, form, e.cutTop && 'cut-top', e.cutBottom && 'cut-bottom', det?.ref === e.ref && 'shown'].filter(Boolean).join(' ');

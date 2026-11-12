@@ -118,6 +118,14 @@ on a block (or on a flag of something due) shows its details beside it, as does 
 keyboard; a click opens the same details as a card you can act on. The whole design is in
 [docs/planner.md](docs/planner.md).
 
+What you see: each hour is a soft cell, and each kind of block is a coloured bar with its own icon
+(amber for meals, violet for deep work, green for socializing, pale blue for a plain block) and one
+small chip that says "Now", "2 of 3 done" or the kind. Under the date is the week as a strip of day
+chips; click one to show that day (or Tab to the strip and use the arrow keys). A free stretch of an
+hour and a half or more between two blocks is marked with a dashed "2 hr free" card, and today's last
+few hours gone by are lightly hatched. The colours follow the theme: deeper in dark, and red with
+no blue in Night.
+
 It is saved through `GET /api/plan?from=&to=` and `POST /api/plan`, one key per object (`settings`,
 `week:sun` … `week:sat`, `day:YYYY-MM-DD`). Every save is checked by `plan.py`, which refuses what
 breaks a rule with the reason; `tests/plan_vectors.json` holds the cases, and the public site's copy

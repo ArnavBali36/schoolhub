@@ -507,12 +507,288 @@ class BarColorsTest(unittest.TestCase):
 
     def test_red_bars_have_no_blue(self):
         t = _theme_tokens("red")
-        mine = [name for name in t if name.startswith(("k-", "pb-", "cell", "hatch", "tray", "neu", "ink-pill", "on-ink-pill"))]
-        self.assertGreater(len(mine), 35)
+        mine = [name for name in t if name.startswith(("k-", "pb-", "cell", "hatch", "tray", "neu", "ink-pill", "on-ink-pill", "canvas-wash-", "free-"))]
+        self.assertGreater(len(mine), 40)
         for name in mine:
             for value in re.findall(r"#[0-9a-f]{6}|rgb\([^)]*\)", t[name]):
                 self.assertEqual(_rgba(value)[2], 0, (name, value))
             self.assertNotIn("white", t[name])
+
+
+# School's own tokens: everything the look added, by the start of its name.
+LOOK_TOKENS = ("k-", "pb-", "cell", "hatch", "tray", "neu", "ink-pill", "on-ink-pill", "canvas-wash-", "free-")
+# Window sizes the canvas is checked at (the bar is 82 px tall up to 640 px wide, 56 px past that).
+WINDOWS = [(1440, 900), (1440, 700), (1920, 1200), (2560, 1440), (1100, 800), (1024, 768), (768, 1024), (375, 812), (430, 932), (360, 640)]
+
+
+def _rule(selector):
+    """The first rule in the page's CSS that starts a line with this selector."""
+    return re.search(r"^" + re.escape(selector) + r"\{[^}]*\}", HTML, re.M).group(0)
+
+
+def _mix(top, bottom, share=1.0):
+    """top (r, g, b, alpha), `share` of its alpha, over an opaque (r, g, b)."""
+    a = top[3] * share
+    return tuple(t * a + b * (1 - a) for t, b in zip(top[:3], bottom[:3]))
+
+
+def _ratio(a, b):
+    """Contrast of two opaque (r, g, b) colours."""
+    return _contrast(*("".join(f"{round(v):02x}" for v in c[:3]) for c in (a, b)))
+
+
+def _radials(selector):
+    """A rule's radial gradients as (rx, unit, ry, unit, cx %, cy %, token, where it ends)."""
+    found = re.findall(r"radial-gradient\(([\d.]+)(px|%) ([\d.]+)(px|%) at ([-\d.]+)% ([-\d.]+)%,var\(--([\w-]+)\),transparent (\d+)%\)", _rule(selector))
+    return [(float(a), ua, float(b), ub, float(cx), float(cy), token, float(stop) / 100) for a, ua, b, ub, cx, cy, token, stop in found]
+
+
+def _canvas(t, width, height, bar, fade):
+    """A function giving the canvas's colour at a point of a window: --bg, the page's own tint
+    (body::before), then School's washes (body::after: under the bar, through its mask, which
+    fades in between the two heights of `fade`)."""
+    bg = _rgba(t["bg"])[:3]
+    layers = []
+    for selector, top in (("body::before", 0), ("body::after", bar + 1)):
+        h = height - top
+        for rx, ux, ry, uy, cx, cy, token, stop in reversed(_radials(selector)):   # the first listed is painted last
+            layers.append((top, rx if ux == "px" else rx / 100 * width, ry if uy == "px" else ry / 100 * h,
+                           cx / 100 * width, top + cy / 100 * h, _rgba(t[token]), stop))
+
+    def at(x, y):
+        ground = bg
+        for top, rx, ry, cx, cy, colour, stop in layers:
+            share = 1.0 if not top else min(1.0, max(0.0, (y - top - fade[0]) / (fade[1] - fade[0])))
+            d = (((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2) ** 0.5
+            if share and d < stop:
+                ground = _mix(colour, ground, share * (1 - d / stop))
+        return ground
+    return at
+
+
+class FinalLookTest(unittest.TestCase):
+    """The look as it was finished on 2026-11-11 (docs/planner.md, "soft cells, vivid bars"): what
+    it must never touch, what each theme must have, and the contrast of everything it added."""
+
+    def test_the_tokens_shared_with_quantprep_are_untouched(self):
+        # The bar, its glass and the Mac app's title strip are the same in both apps: the look adds
+        # tokens of its own and changes none of these.
+        shared = {
+            "light": {"bg": "#f2f3f7", "titlebar": "#fcfcfd", "accent": "#2f5bd3", "glass": "rgb(255 255 255 / .74)", "glass-thick": "rgb(255 255 255 / .9)",
+                      "glass-edge": "rgb(15 23 42 / .08)", "glass-blur": "saturate(180%) blur(20px)", "wash-1": "rgb(47 91 211 / .07)", "wash-2": "rgb(122 92 214 / .045)"},
+            "dark": {"bg": "#0b0c10", "titlebar": "#17181e", "accent": "#7c9cff", "glass": "rgb(26 28 34 / .78)", "glass-thick": "rgb(26 28 34 / .9)",
+                     "glass-edge": "rgb(255 255 255 / .09)", "wash-1": "rgb(124 156 255 / .09)", "wash-2": "rgb(160 120 255 / .05)"},
+            "red": {"bg": "#0b0000", "titlebar": "#150100", "accent": "#ff3a00", "glass": "rgb(22 1 0 / .9)", "glass-thick": "rgb(22 1 0 / .94)",
+                    "glass-edge": "rgb(255 40 0 / .18)", "glass-blur": "blur(18px)", "wash-1": "rgb(255 40 0 / .06)", "wash-2": "rgb(255 72 0 / .03)"},
+        }
+        for theme, tokens in shared.items():
+            t = _theme_tokens(theme)
+            for name, value in tokens.items():
+                self.assertEqual(t[name], value, (theme, name))
+        # The bar's own rules name none of School's tokens, and the page's first tint is as it was.
+        for selector in (".topbar", ".bar", ".views button", ".app-seg", ".app-seg a", ".theme-btn"):
+            for token in re.findall(r"var\(--([\w-]+)", _rule(selector)):
+                self.assertFalse(token.startswith(LOOK_TOKENS), (selector, token))
+        self.assertIn("radial-gradient(1100px 520px at 8% -8%,var(--wash-1),transparent 70%),radial-gradient(900px 480px at 100% -6%,var(--wash-2),transparent 70%)", _rule("body::before"))
+
+    def test_every_token_of_the_look_has_a_value_in_dark_and_red(self):
+        light = HTML[HTML.index(":root{"):HTML.index(':root[data-theme="dark"]{')]
+        mine = [name for name in re.findall(r"--([\w-]+):", light) if name.startswith(LOOK_TOKENS)]
+        self.assertGreater(len(mine), 40)
+        for theme in ("dark", "red"):
+            start = HTML.index(f':root[data-theme="{theme}"]{{')
+            own = set(re.findall(r"--([\w-]+):", HTML[start:HTML.index("\n}", start)]))
+            self.assertEqual([name for name in mine if name not in own], [], theme)
+
+    def test_the_washes_never_reach_behind_the_bar(self):
+        # A fixed layer of its own under everything, from the bar's bottom edge down, fading in.
+        rule = _rule("body::after")
+        for part in ("position:fixed", "top:calc(var(--bar-height) + 1px)", "bottom:0", "z-index:-1", "pointer-events:none"):
+            self.assertIn(part, rule)
+        self.assertRegex(rule, r"-webkit-mask:linear-gradient\(transparent \d+px,#000 \d+px\);mask:linear-gradient\(transparent \d+px,#000 \d+px\)")
+        self.assertEqual([g[6] for g in _radials("body::after")], ["canvas-wash-1", "canvas-wash-2", "canvas-wash-3"])
+        self.assertEqual(HTML.count("body::after{"), 1)
+        # Dark is much quieter than light, and Night has no blue (its own test) and next to nothing.
+        alpha = {theme: [_rgba(_theme_tokens(theme)[f"canvas-wash-{n}"])[3] for n in (1, 2, 3)] for theme in ("light", "dark", "red")}
+        for n in range(3):
+            self.assertLessEqual(alpha["dark"][n], alpha["light"][n] * 0.4)
+            self.assertLessEqual(alpha["red"][n], 0.04)
+
+    def test_text_on_the_washed_canvas_stays_readable(self):
+        # Only --text and --muted are written straight on the canvas; both keep 4.5:1 wherever the
+        # washes are strongest, in every window size. Sampled as the page paints it.
+        fade = tuple(int(v) for v in re.search(r"mask:linear-gradient\(transparent (\d+)px,#000 (\d+)px\)", _rule("body::after")).groups())
+        for theme in ("light", "dark", "red"):
+            t = _theme_tokens(theme)
+            text, muted, warn = (_rgba(t[name])[:3] for name in ("text", "muted", "warn"))
+            lum = {name: _lum("".join(f"{v:02x}" for v in colour)) for name, colour in (("text", text), ("muted", muted), ("warn", warn))}
+            for width, height in WINDOWS:
+                bar = 82 if width <= 640 else 56
+                at = _canvas(t, width, height, bar, fade)
+                step = max(8, width // 48)
+                for y in range(bar + 1, height, step):
+                    for x in range(0, width, step):
+                        ground = _lum("".join(f"{round(v):02x}" for v in at(x, y)))
+                        ratio = {name: (max(ground, v) + 0.05) / (min(ground, v) + 0.05) for name, v in lum.items()}
+                        self.assertGreaterEqual(ratio["text"], 4.5, (theme, width, height, x, y))
+                        self.assertGreaterEqual(ratio["muted"], 4.5, (theme, width, height, x, y))
+                        # The first 66 px under the bar, where a narrow window keeps "Synced 2h ago"
+                        # (in --warn when it is stale): the washes have barely begun there.
+                        if y <= bar + 67:
+                            self.assertGreaterEqual(ratio["warn"], 4.5, (theme, width, height, x, y))
+        # What else is on the canvas has a ground of its own: a course's links, a warning note.
+        self.assertIn("background:var(--surface)", _rule(".chead > a"))
+        self.assertIn("background:var(--warn-soft)", _rule(".chead .note.warn"))
+        light = _theme_tokens("light")
+        self.assertGreaterEqual(_contrast(light["warn"].lstrip("#"), light["warn-soft"].lstrip("#")), 4.5)
+
+    def test_a_bars_edge_keeps_3_to_1_against_its_cell(self):
+        # Blocks are buttons: the bar itself, or its hairline (the edge colour at --pb-edge-mix over
+        # the bar), stands 3:1 off the hour cell it lies on, at both ends of the gradient.
+        block = _rule(".pblock")
+        self.assertIn("inset 0 0 0 1px color-mix(in srgb,var(--pb-edge) var(--pb-edge-mix),transparent)", block)
+        for theme in ("light", "dark", "red"):
+            t = _theme_tokens(theme)
+            share = float(t["pb-edge-mix"].rstrip("%")) / 100
+            cell = _rgba(t["cell"])[:3]
+            for kind in ("meal", "deep", "social", "other"):
+                for end in ("a", "b"):
+                    fill = _rgba(t[f"k-{kind}-{end}"])[:3]
+                    hair = _mix((*_rgba(t[f"k-{kind}-edge"])[:3], share), fill)
+                    self.assertGreaterEqual(max(_ratio(hair, cell), _ratio(fill, cell)), 3, (theme, kind, end))
+        self.assertEqual(_theme_tokens("red")["pb-edge-mix"], "100%")
+
+    def test_dark_bars_are_deep_with_light_ink(self):
+        # Nothing glares on the dark tray: each bar is a low fill of its hue with ink far lighter
+        # than it, and deep work, the strongest in light, is not the faintest here.
+        t = _theme_tokens("dark")
+        cell = _rgba(t["cell"])[:3]
+        stand_out = {}
+        for kind in ("meal", "deep", "social", "other"):
+            for end in ("a", "b"):
+                fill = t[f"k-{kind}-{end}"].lstrip("#")
+                self.assertLess(_lum(fill), 0.12, (kind, end))
+                self.assertGreater(_lum(t[f"k-{kind}-ink"].lstrip("#")), 0.75, kind)
+            stand_out[kind] = _ratio(_rgba(t[f"k-{kind}-a"])[:3], cell)
+        self.assertEqual(max(stand_out, key=stand_out.get), "deep")
+        # The chip is light but not white, and a bar's own values are not light's.
+        self.assertNotEqual(t["pb-chip"], "#ffffff")
+        light = _theme_tokens("light")
+        for name in ("k-meal-a", "k-deep-a", "k-social-a", "k-other-a", "k-meal-ink", "k-social-ink", "k-other-ink", "pb-bubble", "pb-gloss", "k-panel"):
+            self.assertNotEqual(t[name], light[name], name)
+
+    def test_the_other_new_pairs_stay_readable(self):
+        for theme in ("light", "dark", "red"):
+            t = _theme_tokens(theme)
+            hexes = lambda *names: [t[n].lstrip("#") for n in names]
+            # A free card's words, the hour rail, the toast and its button.
+            self.assertGreaterEqual(_contrast(*hexes("muted", "surface")), 4.5, theme)
+            self.assertGreaterEqual(_contrast(*hexes("muted", "tray")), 4.5, theme)
+            self.assertGreaterEqual(_contrast(*hexes("text", "tray")), 4.5, theme)
+            self.assertGreaterEqual(_contrast(*hexes("bg", "text")), 4.5, theme)
+        self.assertIn("color:var(--muted)", _rule(".pfree span"))
+        self.assertIn("background:var(--surface)", _rule(".pfree span"))
+        self.assertIn("color:var(--muted)", _rule(".phour"))
+        self.assertIn("color:var(--text)", _rule(".phour b"))
+
+    def test_night_has_no_blue_in_the_look_and_faint_hatching(self):
+        t = _theme_tokens("red")
+        mine = [name for name in t if name.startswith(LOOK_TOKENS)]
+        self.assertGreater(len(mine), 40)
+        for name in mine:
+            for value in re.findall(r"#[0-9a-f]{6}|rgb\([^)]*\)", t[name]):
+                self.assertEqual(_rgba(value)[2], 0, (name, value))
+            self.assertNotRegex(t[name], r"(?<![-\w])(?:white|black|grey|gray|blue)(?![-\w(])")
+        # The stripes of the hours gone by are toned right down, most of all in Night.
+        for theme, most in (("light", 0.08), ("dark", 0.08), ("red", 0.08)):
+            self.assertLessEqual(_rgba(_theme_tokens(theme)["hatch"])[3], most, theme)
+
+    def test_hatching_is_a_trail_behind_now(self):
+        # Only the last hours before now, fading under a veil of the cell's own colour, beneath the
+        # half-hour dots; it takes no pointer, so hatched time still makes a block.
+        rule = _rule(".pgrid::after")
+        self.assertRegex(rule, r"background:linear-gradient\(to top,transparent,var\(--cell\) calc\(var\(--hour,48px\) \* [\d.]+\)\),repeating-linear-gradient\(135deg,var\(--hatch\)")
+        self.assertIn("pointer-events:none", rule)
+        self.assertIn("z-index:-3", rule)
+        self.assertIn("z-index:-2", _rule(".pgrid::before"))
+
+    def test_the_hour_rail_and_the_date(self):
+        # A large light numeral with a small AM or PM, and a large light date whose comma keeps its gap.
+        self.assertRegex(PLANNER, r"const hourMark = h => \{ const \[n, m\] = hourLabel\(h\)\.split\(' '\); return `<b>\$\{n\}</b><small>\$\{m\}</small>`; \};")
+        self.assertRegex(PLANNER, r'<span class="phour" style="top:\$\{i \* hourPx\}px">\$\{hourMark\(s\.day_start \+ i\)\}</span>')
+        self.assertRegex(_rule(".phour b"), r"font:300 19px/1 var\(--font-rounded\)")
+        size = float(re.search(r"font-size:([\d.]+)px", _rule(".phour small")).group(1))
+        self.assertGreaterEqual(size, 10.5)
+        date = _rule(".ph-date")
+        self.assertRegex(date, r"font:300 \d+px/1\.2 var\(--font-rounded\);font-size:clamp\(21px,[\d.]+cqi,26px\)")
+        self.assertRegex(date, r"word-spacing:\.\d+em")
+        # Three lengths of the date, for the room the header has.
+        self.assertRegex(PLANNER, r'<span class="long">\$\{esc\(longDate\(shown\)\)\}</span><span class="short">\$\{esc\(shortDate\(shown\)\)\}</span><span class="tiny">')
+        self.assertIn(".ph-date :is(.short,.tiny){display:none}", HTML)
+        # Room above the first hour and under the last, outside what the fit measures.
+        self.assertRegex(_rule(".pscroll"), r"margin:\d+px 0 \d+px")
+
+    def test_the_block_is_a_named_container(self):
+        self.assertIn("container:pblock / inline-size", _rule(".pblock"))
+        queries = re.findall(r"@container ([^{]*)\{((?:[^{}]*\{[^{}]*\})*)\s*\}", HTML)
+        asked = [q for q, body in queries if ".pblock" in body or ".pb-" in body]
+        self.assertGreaterEqual(len(asked), 3)
+        for query in asked:
+            self.assertTrue(query.startswith("pblock "), query)
+        # planner.js's line for a block with room is the page's (the block has 15 px of padding).
+        self.assertIn("@container pblock (max-width:260px){", HTML)
+        self.assertIn("@container pblock (min-width:260.01px){", HTML)
+        self.assertRegex(PLANNER, r"const ROOMY_PX = 275;")
+        # The fill's old name still resolves, for any rule written against it.
+        self.assertRegex(HTML, r"\.k-meal,\.k-deep,\.k-social,\.k-other\{[^}]*--pb-fill:var\(--pb-b\)")
+
+    def test_a_drag_tilts_only_for_a_move_and_stays_solid(self):
+        lifted = _rule(".pblock.dragging,.pblock.armed")
+        self.assertNotIn("transform", lifted)
+        self.assertNotIn("opacity", lifted)
+        self.assertRegex(_rule(".pblock.moving"), r"transform:rotate\(-?[\d.]+deg\) scale\([\d.]+\)")
+        self.assertRegex(PLANNER, r"d\.el\.classList\.toggle\('moving', d\.mode === 'move'\);")
+        self.assertRegex(PLANNER, r"drag\.el\.classList\.toggle\('moving', drag\.mode === 'move'\);")
+        self.assertRegex(PLANNER, r"d\.el\?\.classList\.remove\('armed', 'dragging', 'moving'\);")
+        # No tilt for those who ask for less motion, and still no blur on anything a drag moves.
+        self.assertRegex(HTML, r"@media \(prefers-reduced-motion:reduce\)\{[^@]*\.pblock\.moving[^{]*\{transform:none\}")
+        for selector in (".pblock", ".pblock.dragging,.pblock.armed", ".pblock.moving", ".pfree"):
+            self.assertNotIn("backdrop-filter", _rule(selector))
+            self.assertNotIn("blur(", _rule(selector))
+
+    def test_what_floats_over_the_bars_is_nearly_solid(self):
+        # The drawer and the details card: the thick glass with most of --surface mixed in, so the
+        # bars never show through; solid wherever the glass tokens are (reduced transparency).
+        mixed = "background:color-mix(in srgb,var(--surface) 72%,var(--glass-thick))"
+        self.assertIn(mixed, _rule("aside"))
+        self.assertIn(mixed, _rule("dialog.pdetail"))
+        for theme in ("light", "dark", "red"):
+            alpha = _rgba(_theme_tokens(theme)["glass-thick"])[3]
+            self.assertGreaterEqual(0.72 + 0.28 * alpha, 0.97, theme)
+        # The preview keeps the thick glass itself (PreviewSourceTest), and takes no pointer.
+        self.assertIn("pointer-events:none", _rule(".ptip"))
+
+    def test_the_new_surfaces_take_their_colours_from_tokens(self):
+        # The toast and its button, the line under Sync now, the banner, the free card, the drawn
+        # ticks, the course bubble: no colour written out, so every theme (and Night) has its own.
+        rules = "\n".join(re.findall(r"^[^\n{@]*(?:\.toast|#syncNote|\.banner|\.pfree|\.pd-check input|dialog\.task input:is|\.chead|\.group \.row|\.phour|\.ph-date|\.pb-sub|\.pblock\.moving)[^\n{]*\{[^}]*\}", HTML, re.M))
+        self.assertGreater(rules.count("{"), 25)
+        self.assertNotRegex(rules, r"#[0-9a-fA-F]{3,8}\b")
+        self.assertNotRegex(rules, r"rgba?\(|hsla?\(|(?<![-\w])(?:white|black|blue)(?![-\w])")
+        # The line under Sync now: the preview's element and surface, with a rule of its own.
+        self.assertIn('<div class="ptip" id="syncNote" role="tooltip" hidden></div>', HTML)
+        self.assertIn("mask:var(--ic-clock)", _rule("#syncNote .pd-line::before"))
+        # The course's dot is drawn large only where a two-line row has width to spare: never on a phone.
+        bubble = re.search(r"@container \(min-width:(\d+)px\) and \(max-width:880px\)\{\s*\.group \.row\{padding-left:\d+px\}", HTML)
+        self.assertGreaterEqual(int(bubble.group(1)), 560)
+        self.assertEqual(HTML.count(".group .row .chip .dot{"), 1)
+        self.assertIn(':root[data-theme="red"] .dot{--dot-c:var(--dot-theme)}', HTML)
+
+    def test_the_kinds_name_rule_is_written_down(self):
+        doc = (REPO / "docs" / "planner.md").read_text(encoding="utf-8")
+        self.assertIn("**The kind's name** (decided 2026-11-11", doc)
+        self.assertIn('the plain kind\'s name, "Block", is never written on a bar', doc)
+        self.assertRegex(PLANNER, r"const kindName = !meal && e\.kind !== 'other' && e\.title !== KIND_NAME\[e\.kind\] \? KIND_NAME\[e\.kind\] : '';")
 
 
 class NightThemeTest(unittest.TestCase):
@@ -886,6 +1162,140 @@ console.log(JSON.stringify({{
 
 
 @unittest.skipUnless(NODE, "Node is not installed")
+@unittest.skipUnless(NODE, "Node is not installed")
+class BlockDrawingTest(unittest.TestCase):
+    """planner.js's own blockHtml and week strip, run against stand-ins: what a bar writes for its
+    size (one chip, the count, the time where it fits), and how the strip's seven buttons change."""
+
+    @classmethod
+    def setUpClass(cls):
+        plan_pure = PLANNER[PLANNER.index(PLAN_START):PLANNER.index(PLAN_END)]
+        shows = PLANNER[PLANNER.index(SHOWS_START):PLANNER.index(SHOWS_END)]
+        draw = PLANNER[PLANNER.index("  function blockHtml(e, gridW){"):PLANNER.index("  function dueLabel(a, m){")]
+        week = PLANNER[PLANNER.index("  const dayPills = [...els.days.children];"):PLANNER.index("  // The focused control, found again")]
+        script = esc_source() + plan_pure + """
+const SH = {items: [], byId: () => null, isDone: () => false};
+let shown = '2026-11-12', det = null;
+""" + shows + draw + """
+const own = (n, done) => ({id: 'item' + n, kind: 'own', text: 'To-do ' + n, done});
+const block = (o, w, h, cols = 1) => blockHtml({ref: 'block:b', kind: 'deep', title: 'Review notes', start: 540, end: 600, items: [], top: 0, h, col: 0, cols, ...o}, (w + 4) * cols);
+const out = {
+  wideLine: block({items: [own(1, true), own(2, false)]}, 400, 32),
+  wideShortest: block({items: [own(1, true), own(2, false)]}, 400, 22),
+  halfLongTitle: block({kind: 'social', title: 'Coffee with Sam', start: 990, end: 1050}, 197, 32),
+  halfItems: block({kind: 'other', title: 'Laundry and pack', start: 1350, end: 1410, items: [own(1, false), own(2, false)]}, 197, 32),
+  social: block({kind: 'social', title: 'Pickleball'}, 400, 32),
+  plain: block({kind: 'other', title: 'Gym'}, 400, 32),
+  namedForItsKind: block({title: 'Deep work'}, 400, 32),
+  meal: block({kind: 'meal', meal: 'lunch', title: 'Lunch', place: ''}, 400, 32),
+  halfTall: block({title: 'Deep work', start: 765, end: 855, items: [own(1, false), own(2, false), own(3, false)]}, 197, 45),
+  narrowTall: block({kind: 'other', title: 'Gym', start: 960, end: 1050}, 87, 45),
+  column: block({kind: 'social', title: 'Call home'}, 60, 45),
+  wideNoRoomForItems: block({items: [own(1, true), own(2, false)]}, 400, 41.75),
+  wideTall: block({items: [own(1, false), own(2, false), own(3, false)]}, 400, 80),
+};
+// The week strip: seven buttons stood in for, and the keys it listens to.
+const made = n => ({n, className: '', dataset: {}, tabIndex: null, attrs: {}, lastChild: {textContent: ''},
+  setAttribute(k, v){ this.attrs[k] = v; }, removeAttribute(k){ delete this.attrs[k]; }, focus(){ focused = this.n; }});
+const pills = Array.from({length: 7}, (_, i) => made(i));
+let focused = null, onKey = null, prevented = 0;
+const els = {date: {innerHTML: ''}, days: {children: pills, addEventListener: (type, fn) => { if (type === 'keydown') onKey = fn; }}};
+""" + week + """
+const see = () => pills.map(b => [b.dataset.pday, b.className, b.tabIndex, b.attrs['aria-current'] || '', b.attrs['aria-label'], b.lastChild.textContent]);
+const key = (from, k, extra = {}) => { focused = null; onKey({target: pills[from], key: k, preventDefault(){ prevented++; }, ...extra}); return focused; };
+out.week = {first: see(), heading: els.date.innerHTML};
+shown = '2026-11-15'; drawDate(); out.week.next = see();
+out.week.keys = [key(3, 'ArrowRight'), key(3, 'ArrowLeft'), key(0, 'ArrowLeft'), key(6, 'ArrowRight'), key(2, 'Home'), key(2, 'End'), key(2, 'Enter'), key(2, 'ArrowRight', {metaKey: true}), onKey({target: {}, key: 'ArrowRight', preventDefault(){ prevented++; }}) ?? null];
+out.week.prevented = prevented;
+out.today = todayIso();
+console.log(JSON.stringify(out));
+"""
+        cls.out = run_node(script)
+
+    def test_one_chip_and_never_two_counts_on_a_line(self):
+        o = self.out
+        # A block with room: how many of its items are done, and no "+N" beside it.
+        self.assertIn('<span class="pb-st">1 of 2 done</span>', o["wideLine"])
+        self.assertNotIn("pb-n", o["wideLine"])
+        # The shortest line has no room for the words: "+2" for its items.
+        self.assertIn('<span class="pb-n">+2</span>', o["wideShortest"])
+        self.assertNotIn("pb-st", o["wideShortest"])
+        # No items: the kind's name, where the title does not say it; never the plain "Block".
+        self.assertIn('<span class="pb-kind">Socialize</span>', o["social"])
+        for name in ("plain", "namedForItsKind", "meal"):
+            self.assertNotIn("pb-kind", o[name], name)
+        self.assertNotIn(">Block<", "".join(v for v in o.values() if isinstance(v, str)))
+        # Every head holds one chip at most, and "more" is never written on a line with "done".
+        for name, html in o.items():
+            if name in ("week", "today"):
+                continue
+            head = re.search(r'<div class="pb-head">(.*?)</div>', html)
+            if head:
+                self.assertLessEqual(len(re.findall(r'class="pb-(?:st|kind|n)"', head.group(1))), 1, name)
+                self.assertNotRegex(head.group(1), r"more")
+            self.assertNotRegex(html, r"\bpb-ki\b|\bpb-ini\b")
+        # The count's own line under the items stays where items are listed, and goes where the chip
+        # already counts them and none is shown.
+        self.assertIn('<div class="pb-more" aria-hidden="true">+2 more</div>', o["wideTall"])
+        self.assertIn('<span class="pb-st">0 of 3 done</span>', o["wideTall"])
+        self.assertEqual(o["wideTall"].count("<li>"), 1)
+        self.assertIn("pb-st", o["wideNoRoomForItems"])
+        self.assertNotIn("pb-more", o["wideNoRoomForItems"])
+
+    def test_a_title_is_never_cut_for_the_time(self):
+        o = self.out
+        # Where the whole title, the time and the chip fit, the time is written; where they would
+        # not, it is marked to show only in a drag (the page's CSS hides it).
+        self.assertIn('<span class="pb-time" data-short="1">· 9–10 AM</span>', o["wideLine"])
+        self.assertIn('<span class="pb-time" data-short="1" data-tight="1">· 4:30–5:30 PM</span>', o["halfLongTitle"])
+        self.assertIn('data-tight="1"', o["halfItems"])
+        self.assertIn('<span class="pb-n">+2</span>', o["halfItems"])   # the count stays, the time goes
+        self.assertIn(".pb-time[data-tight]{display:none}", HTML)
+        self.assertIn(".pblock.dragging .pb-time[data-tight]{display:block}", HTML)
+        # The whole title is in the markup; only CSS shortens it.
+        self.assertIn('<span class="pb-title">Coffee with Sam</span>', o["halfLongTitle"])
+        # A drag writes the time in the form the block has it.
+        self.assertRegex(PLANNER, r"time\.dataset\.short \? \(time\.dataset\.short === '1' \? '· ' : ''\) \+ shortRange\(d\.start, d\.end\) : range\(d\.start, d\.end\)")
+
+    def test_a_narrow_block_keeps_its_count_and_a_column_its_icon(self):
+        o = self.out
+        # Half the width, three items and room for none: the time on a line of its own, "+3" after it.
+        self.assertRegex(o["halfTall"], r'<div class="pb-sub"><span class="pb-time">12:45–2:15 PM</span><span class="pb-n">\+3</span></div>')
+        self.assertNotIn("pb-st", o["halfTall"])
+        # Narrower still: the time in its compact form.
+        self.assertIn('<span class="pb-time" data-short="2">4–5:30 PM</span>', o["narrowTall"])
+        # A column too narrow for words: nothing written, the icon alone (CSS), the name in the label.
+        self.assertIn('class="pblock k-social nar"', o["column"])
+        self.assertIn('<div class="pb-body" aria-hidden="true"></div>', o["column"])
+        self.assertIn('aria-label="Socialize: Call home, 9:00 to 10:00 AM"', o["column"])
+        # Every block still says what it is to a preview and carries no title.
+        for name in ("wideLine", "column", "halfTall"):
+            self.assertIn('data-tip="b:block:b"', o[name])
+            self.assertNotIn(" title=", o[name])
+
+    def test_the_week_strip_changes_in_place_and_is_one_stop(self):
+        w, today = self.out["week"], self.out["today"]
+        # Thursday the 12th: Sunday the 8th to Saturday the 14th.
+        self.assertEqual([p[0] for p in w["first"]], [f"2026-11-{d:02d}" for d in range(8, 15)])
+        self.assertEqual([p[5] for p in w["first"]], list(range(8, 15)))
+        self.assertEqual([p[2] for p in w["first"]], [-1, -1, -1, -1, 0, -1, -1])           # one stop for Tab
+        self.assertEqual([p[3] for p in w["first"]], ["", "", "", "", "date", "", ""])      # the day on show
+        for date_, cls, _tab, _cur, label, _n in w["first"] + w["next"]:
+            self.assertEqual("today" in cls.split(), date_ == today, date_)
+            self.assertEqual(label.endswith(", today"), date_ == today, date_)
+            self.assertRegex(label, r"^\w+day, \w+ \d+")
+        self.assertIn("on", w["first"][4][1].split())
+        # The next week: the same seven buttons, with new dates.
+        self.assertEqual([p[0] for p in w["next"]], [f"2026-11-{d}" for d in range(15, 22)])
+        self.assertEqual([p[2] for p in w["next"]], [0, -1, -1, -1, -1, -1, -1])
+        # The arrow keys, Home and End move the focus and stop at the ends; other keys, a key with
+        # Cmd, and a key from elsewhere are left alone.
+        self.assertEqual(w["keys"], [4, 2, 0, 6, 0, 6, None, None, None])
+        self.assertEqual(w["prevented"], 6)
+        # The date's three lengths.
+        self.assertRegex(w["heading"], r'<span class="long">Thursday, November 12</span><span class="short">Thu, Nov 12</span><span class="tiny">Nov 12</span>')
+
+
 class BehaviourTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
