@@ -247,10 +247,15 @@ own tokens come after those in each theme's block, and every one has a value in 
   **Week…** and **+ Block** as pills beside it, each with a small icon. The date has three lengths
   and the page shows the one that fits: "Thursday, November 12", "Thu, Nov 12", and on a phone on
   another day than today, where Today joins the buttons, "Nov 12".
+  - The date and the buttons share a line; the date gives way, never the buttons. On the narrowest
+    phones (a pane under about 310 px) the date has a line of its own above them.
+  - In Night the light display type (the date, the hour numerals) is a weight heavier: thin red
+    strokes on black are harder to read.
 - **Week strip:** under the date, the week of the day on show, Sunday to Saturday, a chip a day (the
   weekday over the date), between the ‹ and › buttons, which still step a day. A chip shows its day.
   The day on show is solid: in the accent when it is today (which also carries a dot), in ink when
-  it is another day.
+  it is another day. In a short window the chips take one line ("Wed 11") where the pane is wide
+  enough for seven of those; a short phone keeps the weekday over the date.
   - The seven chips are made once and kept; only their date and state change, so one that has the
     focus keeps it.
   - They are one stop for Tab, on the day on show. The arrow keys, Home and End move the focus

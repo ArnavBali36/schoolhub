@@ -727,6 +727,28 @@ class FinalLookTest(unittest.TestCase):
         self.assertIn(".ph-date :is(.short,.tiny){display:none}", HTML)
         # Room above the first hour and under the last, outside what the fit measures.
         self.assertRegex(_rule(".pscroll"), r"margin:\d+px 0 \d+px")
+        # Night: thin red strokes on black are a weight up.
+        self.assertIn(':root[data-theme="red"] :is(.phour b,.ph-date){font-weight:400}', HTML)
+
+    def test_the_header_holds_on_a_phone_and_in_a_short_window(self):
+        # On another day than today, Today joins the buttons: the date steps down a size, takes its
+        # short form sooner, and on a phone is the month and the day with the buttons drawn closer.
+        today = r"\.ph:has\(#planToday:not\(\[hidden\]\)\)"
+        self.assertRegex(HTML, today + r" \.ph-date\{font-size:clamp\(19px,[\d.]+cqi,22px\)\}")
+        self.assertRegex(HTML, r"@container planner \(max-width:5\d\dpx\)\{" + today + r" \.ph-date \.long\{display:none\}")
+        phone = re.search(r"@container planner \(max-width:400px\)\{\n(.*?)\n\}", HTML, re.S).group(1)
+        self.assertRegex(phone, today + r" \.ph-date :is\(\.long,\.short\)\{display:none\}")
+        self.assertRegex(phone, today + r" \.ph-date \.tiny\{display:inline\}")
+        self.assertRegex(phone, today + r" \.ph-actions \.btn\.small\{padding-left:\d+px;padding-right:\d+px\}")
+        # The date and the buttons share a line (the date gives way, never the buttons), except on
+        # the narrowest phones, where the date has a line of its own.
+        self.assertRegex(_rule(".ph-date"), r"\{flex:1 1 0;")
+        self.assertRegex(HTML, r"@container planner \(max-width:3\d\dpx\)\{\.ph-date\{flex-basis:100%\}\}")
+        # A short window puts a day chip on one line only where the pane is wide enough for seven
+        # of those: a short phone keeps the weekday over the date (they ran into each other).
+        short = re.search(r"@media \(max-height:780px\)\{\n(.*?)\n\}\n", HTML, re.S).group(1)
+        self.assertRegex(short, r"@container planner \(min-width:4\d\dpx\)\{\s*\.pday\{grid-auto-flow:column;")
+        self.assertNotRegex(short.split("@container")[0], r"\.pday")
 
     def test_the_block_is_a_named_container(self):
         self.assertIn("container:pblock / inline-size", _rule(".pblock"))
@@ -1036,7 +1058,7 @@ console.log(JSON.stringify({{
   fits: [itemsFit(20, 'xs', 3), itemsFit(50, 'md', 3), itemsFit(53, '', 1), itemsFit(100, '', 2), itemsFit(100, '', 5), itemsFit(150, '', 1)],
   short: [shortRange(960, 1020), shortRange(990, 1050), shortRange(660, 720), shortRange(1380, 1440), shortRange(780, 795), shortRange(0, 60)],
   lengths: [duration(15), duration(60), duration(90), duration(150), duration(1440)],
-  timeFits: [timeFits(300, 'Lunch · Chipotle', '· 4–5 PM', iconPx(300)), timeFits(197, 'Coffee with Sam', '· 4:30–5:30 PM', iconPx(197)),
+  timeFits: [timeFits(300, 'Lunch · Chipotle', '· 4–5 PM', iconPx(300)), timeFits(197, 'Coffee with a friend', '· 4:30–5:30 PM', iconPx(197)),
              timeFits(197, 'Gym', '4:00–5:30 PM', iconPx(197)), timeFits(197, 'Laundry and pack', '· 10:30–11:30 PM', iconPx(197) + chipPx(['pb-n', '+2'])),
              timeFits(87, '', '4:00–5:30 PM', iconPx(87)), timeFits(400, 'Review notes', '8:30–10:15 AM', iconPx(400))],
   room: [iconPx(275), iconPx(276), chipPx(null), chipPx(['pb-n', '+2']), chipPx(['pb-st', '1 of 3 done'])],
@@ -1182,7 +1204,7 @@ const block = (o, w, h, cols = 1) => blockHtml({ref: 'block:b', kind: 'deep', ti
 const out = {
   wideLine: block({items: [own(1, true), own(2, false)]}, 400, 32),
   wideShortest: block({items: [own(1, true), own(2, false)]}, 400, 22),
-  halfLongTitle: block({kind: 'social', title: 'Coffee with Sam', start: 990, end: 1050}, 197, 32),
+  halfLongTitle: block({kind: 'social', title: 'Coffee with a friend', start: 990, end: 1050}, 197, 32),
   halfItems: block({kind: 'other', title: 'Laundry and pack', start: 1350, end: 1410, items: [own(1, false), own(2, false)]}, 197, 32),
   social: block({kind: 'social', title: 'Pickleball'}, 400, 32),
   plain: block({kind: 'other', title: 'Gym'}, 400, 32),
@@ -1253,7 +1275,7 @@ console.log(JSON.stringify(out));
         self.assertIn(".pb-time[data-tight]{display:none}", HTML)
         self.assertIn(".pblock.dragging .pb-time[data-tight]{display:block}", HTML)
         # The whole title is in the markup; only CSS shortens it.
-        self.assertIn('<span class="pb-title">Coffee with Sam</span>', o["halfLongTitle"])
+        self.assertIn('<span class="pb-title">Coffee with a friend</span>', o["halfLongTitle"])
         # A drag writes the time in the form the block has it.
         self.assertRegex(PLANNER, r"time\.dataset\.short \? \(time\.dataset\.short === '1' \? '· ' : ''\) \+ shortRange\(d\.start, d\.end\) : range\(d\.start, d\.end\)")
 

@@ -120,7 +120,7 @@
   --pb-gloss:linear-gradient(180deg,rgb(255 255 255 / .07),rgb(255 255 255 / 0) 26px);--pb-rim:rgb(255 255 255 / .14);
   --pb-bubble:rgb(255 255 255 / .12);--pb-bubble-rim:rgb(255 255 255 / .24);--pb-shade:rgb(0 0 0 / .4);--pb-lift:rgb(0 0 0 / .7);
   --pb-chip:#e6e9f1;--pb-chip-ink:#141821;--ink-pill:#e8eaee;--on-ink-pill:#0b0d11;
-  --k-other-bubble:rgb(255 255 255 / .12);--k-other-bubble-rim:rgb(255 255 255 / .24);--pb-edge-mix:50%;--free-line:rgb(169 155 255 / .4);
+  --k-other-bubble:rgb(255 255 255 / .12);--k-other-bubble-rim:rgb(255 255 255 / .24);--pb-edge-mix:50%;--free-line:rgb(169 155 255 / .5);
   --canvas-wash-1:rgb(139 108 240 / .075);--canvas-wash-2:rgb(236 132 178 / .04);--canvas-wash-3:rgb(104 176 236 / .04);
   color-scheme:dark;
 }
@@ -167,7 +167,7 @@
   --pb-chip:#ff5a00;--pb-chip-ink:#0b0000;--ink-pill:#ff4800;--on-ink-pill:#0b0000;
   /* A bar's fill is close to its cell here, so its hairline is the whole edge colour (5:1 and more);
      the canvas keeps a breath of red where the other themes have their washes. */
-  --k-other-bubble:rgb(255 72 0 / .16);--k-other-bubble-rim:rgb(255 72 0 / .32);--pb-edge-mix:100%;--free-line:rgb(255 72 0 / .4);
+  --k-other-bubble:rgb(255 72 0 / .16);--k-other-bubble-rim:rgb(255 72 0 / .32);--pb-edge-mix:100%;--free-line:rgb(255 72 0 / .55);
   --canvas-wash-1:rgb(255 40 0 / .035);--canvas-wash-2:rgb(255 72 0 / .02);--canvas-wash-3:rgb(255 40 0 / .02);
   color-scheme:dark;
   scrollbar-color:var(--border-strong) var(--bg);
@@ -557,10 +557,17 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 /* On another day than today, Today joins the buttons: the date steps down a size to stay whole
    beside them, and takes its short form a little sooner. */
 .ph:has(#planToday:not([hidden])) .ph-date{font-size:clamp(19px,3.9cqi,22px)}
-@container planner (max-width:545px){.ph:has(#planToday:not([hidden])) .ph-date .long{display:none}.ph:has(#planToday:not([hidden])) .ph-date .short{display:inline}}
+@container planner (max-width:530px){.ph:has(#planToday:not([hidden])) .ph-date .long{display:none}.ph:has(#planToday:not([hidden])) .ph-date .short{display:inline}}
 /* A phone, where the three buttons leave it least room: the month and the day (the strip under it
    says the weekday). */
-@container planner (max-width:400px){.ph:has(#planToday:not([hidden])) .ph-date :is(.long,.short){display:none}.ph:has(#planToday:not([hidden])) .ph-date .tiny{display:inline}}
+@container planner (max-width:400px){
+  .ph:has(#planToday:not([hidden])) .ph-date :is(.long,.short){display:none}
+  .ph:has(#planToday:not([hidden])) .ph-date .tiny{display:inline}
+  .ph:has(#planToday:not([hidden])) .ph-actions{gap:4px}
+  .ph:has(#planToday:not([hidden])) .ph-actions .btn.small{padding-left:9px;padding-right:9px}
+}
+/* The narrowest phones: the date has a line of its own above the buttons. */
+@container planner (max-width:310px){.ph-date{flex-basis:100%}}
 /* A phone: Today and Week… are their words alone, so the three still fit on the date's line. */
 @container planner (max-width:400px){#planWeek svg,#planToday svg{display:none}}
 .ph-actions{display:flex;align-items:center;gap:6px;flex:none;margin-left:auto}
@@ -581,12 +588,15 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 .pday.on{background:var(--ink-pill);color:var(--on-ink-pill)}
 .pday.on b{color:inherit}
 .pday.on.today{background:var(--sheen),var(--accent);color:var(--on-accent);box-shadow:inset 0 1px 0 var(--sheen-edge),0 5px 12px -5px color-mix(in srgb,var(--accent) 65%,transparent)}
-/* A short window gives the day the room: the chips take one line ("Wed 11"). */
+/* A short window gives the day the room: the chips take one line ("Wed 11"), where the pane is
+   wide enough for seven of those (a short phone keeps the weekday over the date). */
 @media (max-height:780px){
   .ph{gap:8px;padding-top:8px;padding-bottom:8px}
-  .pday{grid-auto-flow:column;justify-content:center;align-items:center;gap:4px;height:30px}
-  .pday b{font-size:13px}
-  .pday.today::after{width:3px;height:3px;margin-left:-1px}
+  @container planner (min-width:480px){
+    .pday{grid-auto-flow:column;justify-content:center;align-items:center;gap:4px;height:30px}
+    .pday b{font-size:13px}
+    .pday.today::after{width:3px;height:3px;margin-left:-1px}
+  }
 }
 .pstrip{display:flex;gap:6px;padding:8px 12px 1px;overflow-x:auto;scrollbar-width:thin;overscroll-behavior-x:contain}
 .pchip{flex:0 1 auto;min-width:min(9em,100%);display:inline-flex;align-items:center;gap:6px;max-width:100%;min-height:26px;padding:2px 10px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--text);box-shadow:var(--btn-shadow);font-size:12.5px;line-height:1.3;cursor:pointer;transition:background-color 120ms ease}
@@ -609,6 +619,8 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 .phour b{font:300 19px/1 var(--font-rounded);letter-spacing:-.02em;color:var(--text)}
 .phour small{font-size:10.5px;font-weight:600;letter-spacing:.02em}
 .phour:first-child{--dy:3px}.phour:last-child{--dy:-3px}
+/* Night: thin red strokes on black are harder to read, so its light display type is a weight up. */
+:root[data-theme="red"] :is(.phour b,.ph-date){font-weight:400}
 /* The now line's pill and an hour never overlap (planner.js says where the pill is, each minute):
    an hour the pill sits on gives way to it, as the pill says the time; one it would only touch
    steps a few pixels away from it, or gives way where that would take it out of the tray. */

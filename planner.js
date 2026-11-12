@@ -813,10 +813,11 @@
     } else if (form !== 'nar') {
       // As many items as fit under the title and the time, then "+2 more" on a line of its own; where
       // that line would cost an item, the chip's count stands for it, or "+2" after the time.
-      // The time in full, or in its compact form ("4–5:30 PM") on a block too narrow for that.
-      const full = range(e.start, e.end), compact = form === '' && !timeFits(w, '', full, iconPx(w));
-      const time = compact ? `<span class="pb-time" data-short="2">${esc(shortRange(e.start, e.end))}</span>` : `<span class="pb-time">${esc(full)}</span>`;
+      // The time in full, or in its compact form ("4–5:30 PM") on a block too narrow for that
+      // beside the "+2" on its line.
       const chip = inline ? more(rest) : says;
+      const full = range(e.start, e.end), compact = form === '' && !timeFits(w, '', full, iconPx(w) + (says ? 0 : chipPx(chip)));
+      const time = compact ? `<span class="pb-time" data-short="2">${esc(shortRange(e.start, e.end))}</span>` : `<span class="pb-time">${esc(full)}</span>`;
       body = form === 'md' ? `<div class="pb-head"><span class="pb-title">${title}</span>${time}${chipHtml(chip)}</div>`
         : `<div class="pb-head"><span class="pb-title">${title}</span>${chipHtml(says)}</div><div class="pb-sub">${time}${says ? '' : chipHtml(chip)}</div>`;
       list = items.slice(0, fit).map(it => `<li><label class="pb-item${it.done ? ' done' : ''}"><input type="checkbox" data-pitem="${esc(it.id)}"${it.done ? ' checked' : ''}><span>${esc(it.text)}</span>${!it.done && listDone(it) ? '<small>done</small>' : ''}</label></li>`).join('');
