@@ -82,7 +82,8 @@ class SourceTest(unittest.TestCase):
         self.assertIn("Promise.all([getJson('api/marks'), where, getJson('api/tasks').catch(() => null)]).then(([m, at, t]) => ({marks: m, tasks: t?.tasks ?? null, at}));", JS)
         self.assertRegex(JS, r"if \(PHONE\) WRITE = 'cloud'; else setPlace\(got\.at\);\s*placed = true;\s*keepState\(\);\s*PROBING = false;\s*"
                              r"if \(PHONE\) \$\('#fab'\)\.hidden = false; else enableServerFeatures\(\);\s*"
-                             r"if \(!took\(got\.marks, got\.tasks\) && moved\) refresh\(\);")
+                             r"(?://[^\n]*\s*)*if \(saves !== sent\) \{ if \(moved\) refresh\(\); reloadState\(\); \}\s*"
+                             r"else if \(!took\(got\.marks, got\.tasks\) && moved\) refresh\(\);")
         # Set nowhere else (besides their declarations).
         self.assertEqual(len(re.findall(r"^\s+PUBLIC = ", JS, re.M)), 1)
         self.assertEqual(len(re.findall(r"^\s+LIVE = ", JS, re.M)), 1)
@@ -404,9 +405,43 @@ class PlannerPageTest(unittest.TestCase):
         self.assertRegex(PLANNER, r"const NOW_HIDE_PX = 9;")
         self.assertRegex(PLANNER, r"const NOW_CLEAR_PX = 16;")
         self.assertRegex(PLANNER, r"h\.dataset\.now = Math\.abs\(d\) < NOW_HIDE_PX \? 'at' : Math\.abs\(d\) < NOW_CLEAR_PX \? d < 0 \? 'above' : 'below' : '';")
+        # Measured to where each label is drawn: the first and the last sit 3 px in from their lines.
+        self.assertIn("const EDGE_HOUR_PX = 3;", PLANNER)
+        self.assertIn("const d = on ? parseFloat(h.style.top) + edge - nowTop() : Infinity;", PLANNER)
+        self.assertIn(".phour:first-child{--dy:3px}.phour:last-child{--dy:-3px}", HTML)
+        self.assertIn('.phour:first-child[data-now="above"],.phour:last-child[data-now="below"]{visibility:hidden}', HTML)
         self.assertRegex(HTML, r'\.phour\[data-now="at"\][^{]*\{visibility:hidden\}')
         self.assertRegex(HTML, r'\.phour\[data-now="above"\]\{--dy:-\d+px\}\.phour\[data-now="below"\]\{--dy:\d+px\}')
         self.assertNotIn("near-now", PLANNER + HTML)
+
+    @unittest.skipUnless(NODE, "Node is not installed")
+    def test_the_now_pill_never_sits_on_the_first_or_last_hour(self):
+        # planner.js's own placeNow with the rail stood in for: a day from 5 AM to midnight at 25 px
+        # an hour, so twenty labels, the last on the line at 475 px.
+        consts = "\n".join(re.search(rf"^  const {name} = .*$", PLANNER, re.M).group(0) for name in ("NOW_HIDE_PX", "NOW_CLEAR_PX", "EDGE_HOUR_PX"))
+        place = re.search(r"^  function placeNow\(\)\{.*?^  \}$", PLANNER, re.M | re.S).group(0)
+        out = run_node(consts + """
+let at = 0;
+const shown = 'today', isToday = () => true, settings = () => ({day_start: 5, day_end: 24}), minutesNow = () => 600, nowTop = () => at, entriesOn = () => [], clock = () => '';
+const hours = Array.from({length: 20}, (_, i) => ({style: {top: i * 25 + 'px'}, dataset: {}}));
+const els = {hours: {children: hours, firstElementChild: hours[0], lastElementChild: hours[19]}};
+const line = {style: {}, dataset: {}, setAttribute(){}, remove(){}};
+const grid = {style: {setProperty(){}, removeProperty(){}}, querySelector: () => line, querySelectorAll: () => []};
+""" + place + """
+const marks = px => { at = px; placeNow(); return [hours[0].dataset.now, hours[10].dataset.now, hours[19].dataset.now]; };
+console.log(JSON.stringify({
+  beforeLast: [475 - 19.5, 475 - 18.5, 475 - 17, 475 - 13, 475 - 11.5, 475].map(px => marks(px)[2]),
+  afterFirst: [0, 11.5, 13, 17, 18.5, 19.5].map(px => marks(px)[0]),
+  middle: [250 - 17, 250 - 15, 250 - 8, 250 + 8, 250 + 15, 250 + 17].map(px => marks(px)[1]),
+}));
+""")
+        # The last label is drawn 3 px over its line: within 19 px of the now line it would touch the
+        # pill, and it cannot step down out of the tray, so it gives way ("below" is hidden there).
+        self.assertEqual(out["beforeLast"], ["", "below", "below", "below", "at", "at"])
+        # The first is drawn 3 px under its line, and gives way the same ("above" is hidden there).
+        self.assertEqual(out["afterFirst"], ["at", "at", "above", "above", "above", ""])
+        # Every other label as before: it steps aside within 16 px and gives way within 9.
+        self.assertEqual(out["middle"], ["", "below", "at", "at", "above", ""])
 
     def test_the_week_strip_shows_and_picks_a_day(self):
         # Seven buttons, made once and kept: only their date and state change, so one that has the
@@ -521,6 +556,28 @@ class BarColorsTest(unittest.TestCase):
             for text in ("text", "muted"):
                 for ground in ("tray", "cell"):
                     self.assertGreaterEqual(_contrast(t[text].lstrip("#"), t[ground].lstrip("#")), 4.5, (theme, text, ground))
+
+    def test_nights_ticks_on_a_bar_are_the_bars_ink(self):
+        # Night draws every tick box in the page's reds, and that edge is under 3:1 on a bar's panel;
+        # on a bar the box keeps the bar's ink, as in light and dark. The rules come after Night's
+        # own and after the bar's (the same weight: the later one wins).
+        night = ':root[data-theme="red"] input:is([type=checkbox],[type=radio]){appearance:none;'
+        rules = (':root[data-theme="red"] .pb-item input{border-color:var(--pb-ink);background:none}',
+                 ':root[data-theme="red"] .pb-item input:checked{background:var(--pb-ink);border-color:var(--pb-ink)}',
+                 ':root[data-theme="red"] .pb-item input:checked::before{border-color:var(--pb-b)}')
+        for rule in rules:
+            self.assertIn(rule, HTML)
+            self.assertGreater(HTML.index(rule), HTML.index(night))
+            self.assertGreater(HTML.index(rule), HTML.index(".pb-item input:checked::before{content:"))
+        t = _theme_tokens("red")
+        faint = 0
+        for kind in ("meal", "deep", "social", "other"):
+            panel = _rgba(t["k-deep-panel" if kind == "deep" else "k-panel"])
+            for end in ("a", "b"):
+                ground = _over(panel, _rgba(t[f"k-{kind}-{end}"]))
+                self.assertGreaterEqual(_contrast(t[f"k-{kind}-ink"].lstrip("#"), ground), 3, (kind, end))
+                faint += _contrast(t["border-input"].lstrip("#"), ground) < 3
+        self.assertGreater(faint, 0)     # what the page's own edge would be there
 
     def test_red_bars_have_no_blue(self):
         t = _theme_tokens("red")
@@ -767,6 +824,16 @@ class FinalLookTest(unittest.TestCase):
         self.assertRegex(short, r"@container planner \(min-width:4\d\dpx\)\{\s*\.pday\{grid-auto-flow:column;")
         self.assertNotRegex(short.split("@container")[0], r"\.pday")
 
+    def test_a_chips_focus_ring_is_not_cut_off_by_the_strip(self):
+        # The strip scrolls sideways, so it clips on every side, and has 1 px under its chips: a
+        # ring 2 px out from the chip (the page's own, 2 px wide) lost its bottom edge there.
+        strip = _rule(".pstrip")
+        self.assertIn("overflow-x:auto", strip)
+        under = int(re.search(r"padding:\d+px \d+px (\d+)px", strip).group(1))
+        ring = re.search(r"^:focus-visible\{outline:(\d+)px solid var\(--accent\);outline-offset:(\d+)px\}", HTML, re.M)
+        self.assertLess(under, int(ring.group(1)) + int(ring.group(2)))      # no room for the page's own
+        self.assertIn(".pchip:focus-visible{outline-offset:-2px}", HTML)       # so it is drawn inside the chip
+
     def test_the_block_is_a_named_container(self):
         self.assertIn("container:pblock / inline-size", _rule(".pblock"))
         queries = re.findall(r"@container ([^{]*)\{((?:[^{}]*\{[^{}]*\})*)\s*\}", HTML)
@@ -878,6 +945,14 @@ class NightThemeTest(unittest.TestCase):
         self.assertIn("values='0.2126 0.7152 0.0722 0 0 0.04 0.13 0.01 0 0 0 0 0 0 0 0 0 0 1 0'", picker)
         # The browser's blue highlight on the part of a date or time being typed: no blue comes out.
         self.assertIn(':root[data-theme="red"] :is(input:not([type=checkbox],[type=radio]),textarea,select){filter:url(#redkeep)}', HTML)
+        # WebKit draws no border on a date or time field that has a filter (seen in an offscreen
+        # WKWebView: no edge at all on Start and End), but it draws a shadow inside it: in Night
+        # those fields' edge is that, in the red the other fields' borders have, on top of the
+        # field's own inner shade; focused, the accent's, with the ring.
+        fields = ':root[data-theme="red"] dialog.task input:is([type=date],[type=time],[type=datetime-local])'
+        self.assertIn(fields + "{border-color:transparent;background-clip:padding-box;box-shadow:inset 0 0 0 1px var(--border-input),var(--input-inset)}", HTML)
+        self.assertIn(fields + ":focus-visible{border-color:transparent;box-shadow:inset 0 0 0 1px var(--accent),var(--input-inset),0 0 0 3px var(--ring)}", HTML)
+        self.assertGreater(HTML.index(fields), HTML.index("dialog.task :is(input,select,textarea):focus-visible{"))
         self.assertIn('<filter id="redkeep" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="1 0 1 0 0  0 0.5 0 0 0  0 0 0 0 0  0 0 0 1 0"/>', HTML)
         self.assertNotRegex(HTML, r":is\([^)]*::")  # a pseudo-element inside :is() matches nothing
         # A course's set color gives way to the theme's own course red.
@@ -1229,6 +1304,11 @@ const out = {
   meal: block({kind: 'meal', meal: 'lunch', title: 'Lunch', place: ''}, 400, 32),
   halfTall: block({title: 'Deep work', start: 765, end: 855, items: [own(1, false), own(2, false), own(3, false)]}, 197, 45),
   narrowTall: block({kind: 'other', title: 'Gym', start: 960, end: 1050}, 87, 45),
+  narrowNoRoom: block({kind: 'other', title: 'Gym', start: 570, end: 660}, 73, 45),
+  narrowRoom: block({kind: 'other', title: 'Gym', start: 540, end: 660}, 73, 45),
+  phoneNoRoom: block({kind: 'other', title: 'Gym', start: 1200, end: 1350}, 88, 45),
+  phoneRoom: block({kind: 'other', title: 'Gym', start: 420, end: 570}, 88, 45),
+  narrowCount: block({title: 'Deep work', start: 540, end: 660, items: [own(1, false), own(2, false), own(3, false)]}, 100, 45),
   column: block({kind: 'social', title: 'Call home'}, 60, 45),
   wideNoRoomForItems: block({items: [own(1, true), own(2, false)]}, 400, 41.75),
   wideTall: block({items: [own(1, false), own(2, false), own(3, false)]}, 400, 80),
@@ -1303,6 +1383,17 @@ console.log(JSON.stringify(out));
         self.assertNotIn("pb-st", o["halfTall"])
         # Narrower still: the time in its compact form.
         self.assertIn('<span class="pb-time" data-short="2">4–5:30 PM</span>', o["narrowTall"])
+        # Where not even that fits whole it is left out (it shows in a drag, and is in the preview):
+        # cut short, "9:30–1…" would read as another time. Seen in a browser: a 73 px block has 52 px
+        # for the time, "9–11 AM" is 50 px wide and "9:30–11 AM" 68; an 88 px block has 67, and
+        # "8–10:30 PM" was cut there while "7–9:30 AM" fitted.
+        self.assertIn('<span class="pb-time" data-short="2" data-tight="1">9:30–11 AM</span>', o["narrowNoRoom"])
+        self.assertIn('<span class="pb-time" data-short="2">9–11 AM</span>', o["narrowRoom"])
+        self.assertIn('<span class="pb-time" data-short="2" data-tight="1">8–10:30 PM</span>', o["phoneNoRoom"])
+        self.assertIn('<span class="pb-time" data-short="2">7–9:30 AM</span>', o["phoneRoom"])
+        # The "+N" beside it keeps its place either way.
+        self.assertRegex(o["narrowCount"], r'<div class="pb-sub"><span class="pb-time" data-short="2" data-tight="1">9–11 AM</span><span class="pb-n">\+3</span></div>')
+        self.assertIn(".pb-time[data-tight]{display:none}", HTML)
         # A column too narrow for words: nothing written, the icon alone (CSS), the name in the label.
         self.assertIn('class="pblock k-social nar"', o["column"])
         self.assertIn('<div class="pb-body" aria-hidden="true"></div>', o["column"])
@@ -1463,7 +1554,6 @@ let answers = {running: false}, kept = null;
 const getJson = path => { calls.push('GET ' + path); return Promise.resolve(path === 'api/tasks' ? {tasks: {}} : JSON.parse(JSON.stringify(answers))); };
 const api = path => { calls.push('POST ' + path); return Promise.resolve({}); };
 const toast = m => toasts.push(m), refreshTasks = () => {};
-const sessionStorage = {getItem: () => kept, setItem(){}, removeItem(){}};
 const location = {reload(){ calls.push('load'); }};
 const settle = async () => { for (let i = 0; i < 6; i++) await new Promise(r => globalThis.setTimeout(r, 0)); };
 let LIVE = true, PUBLIC = false, PHONE = false, D = {generated_at: '2026-11-10T12:00:00+00:00'}, dataSeen = true;
@@ -1512,11 +1602,22 @@ for (const [name, pub] of [['mac', false], ['public', true]]) {
 
     def test_a_failed_sync_points_to_the_sync_log(self):
         # The server adds each sync's output to state/sync.log (server.py run_sync); the toast says so.
-        out = sync_page("kept = JSON.stringify({ok: false, output: 'Traceback: boom'}); enableServerFeatures(); out.toasts = toasts;")
+        out = sync_page("""
+enableServerFeatures(); await settle();
+later.length = 0; calls.length = 0;
+els['#syncBtn'].onclick(); await settle();
+answers = {running: false, ok: false, output: 'Traceback: boom'};
+later.shift().fn(); await settle();
+out.toasts = toasts; out.calls = calls; out.button = [els['#syncBtn'].disabled, els['#syncBtn'].textContent];
+out.said = [syncSaid({ok: true, output: ''}), syncSaid({ok: true, output: '⚠️ one\\n🔎 two\\n[schoolhub] 9 courses, 2 new files\\nmore'}), syncSaid({ok: false})];
+""")
         self.assertEqual(out["toasts"], ["Sync failed. See state/sync.log"])
+        self.assertEqual(out["button"], [False, "Sync now"])
+        self.assertNotIn("load", out["calls"])
+        self.assertEqual(out["said"], ["Sync finished", "Sync finished · 9 courses, 2 new files · 2 alert(s)", "Sync failed. See state/sync.log"])
 
-    def test_sync_now_waits_for_its_sync_and_then_loads_the_page(self):
-        # The one load the page makes without being asked to: after Sync now, pressed on this page.
+    def test_sync_now_waits_for_its_sync_and_then_says_how_it_went(self):
+        # The page is not loaded again when the sync ends (WatchSyncTest has what it takes in place).
         out = sync_page("""
 enableServerFeatures(); await settle();
 later.length = 0; calls.length = 0;
@@ -1528,11 +1629,13 @@ later.shift().fn(); await settle();
 out.running = {calls: [...calls], later: later.map(l => l.ms)};
 answers = {running: false, ok: true, output: '[schoolhub] 3 new'};
 later.shift().fn(); await settle();
-out.done = {calls: [...calls], later: later.map(l => l.ms)};
+out.done = {calls: [...calls], later: later.map(l => l.ms), toasts, button: [els['#syncBtn'].disabled, els['#syncBtn'].textContent]};
 """)
         self.assertEqual(out["pressed"], {"calls": ["POST api/sync"], "later": [1500], "button": [True, "Syncing…"]})
         self.assertEqual(out["running"], {"calls": ["POST api/sync", "GET api/sync"], "later": [2000]})
-        self.assertEqual(out["done"], {"calls": ["POST api/sync", "GET api/sync", "GET api/sync", "load"], "later": []})
+        # Said in a toast, Sync now is back, and the minute's look takes up again.
+        self.assertEqual(out["done"], {"calls": ["POST api/sync", "GET api/sync", "GET api/sync"], "later": [60000],
+                                       "toasts": ["Sync finished · 3 new"], "button": [False, "Sync now"]})
 
 
 @unittest.skipUnless(NODE, "Node is not installed")
@@ -1642,6 +1745,20 @@ PUBLIC = false; LIVE = false; PHONE = true; showSynced(); btn.on.focus(); out.ph
         self.assertEqual(out["off"], {"title": 1, "tipText": "", "describes": None})
         self.assertTrue(out["offFocus"])
 
+    def test_the_label_goes_stale_by_the_time_it_is_now(self):
+        # A page stays open across syncs: how old its data is, is counted from now, not from when
+        # the page was opened (`now` on this stand-in page is days before the test runs).
+        out = sync_page("""
+const seen = [];
+els['#sync'].classList = {toggle: (name, on) => seen.push([name, on])};
+D = {generated_at: new Date(Date.now() - 31 * 36e5).toISOString()}; showSynced();
+D = {generated_at: new Date(Date.now() - 29 * 36e5).toISOString()}; showSynced();
+D = {}; showSynced();
+out.seen = seen; out.label = els['#sync'].textContent;
+""")
+        self.assertEqual(out["seen"], [["stale", True], ["stale", False], ["stale", True]])
+        self.assertEqual(out["label"], "Not synced yet")
+
     def test_never_on_a_public_copy_or_the_phone_site(self):
         self.assertEqual(self.out["waitingAgain"]["title"], 2)
         self.assertEqual(self.out["publicCopy"], [1, True])
@@ -1702,6 +1819,74 @@ console.log(JSON.stringify(Object.fromEntries(Object.entries(items).map(([k, a])
 
 
 # ---- undo and redo (dashboard.js "undo and redo", planner.js "undo") ----
+@unittest.skipUnless(NODE, "Node is not installed")
+class TaskFormTest(unittest.TestCase):
+    """The task form's Save, dashboard.js's own, with the form and the server stood in for. Its
+    answer may be a while coming (a slow connection, or the server's first answer still awaited)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.out = run_node("""
+const save = {disabled: false, textContent: 'Save'};
+const els = {'#tName': {value: ' Buy milk ', focus(){}}, '#tDate': {value: ''}, '#tTime': {value: ''}, '#tCourse': {value: 'personal'}, '#tNotes': {value: ''},
+  '#tPinned': {checked: true}, '#taskForm button[type="submit"]': save};
+const $ = sel => els[sel] || null;
+const taskDialog = {closed: 0, close(){ this.closed++; }};
+let editingTask = null, taskForms = 1, savingTask = false, tasks = {};
+const toasts = [], sent = [];
+let answer = null;
+const backend = {saveTask: body => { sent.push(body); return new Promise((res, rej) => { answer = {res, rej}; }); }};
+const toast = msg => toasts.push(msg), refreshTasks = next => { tasks = next; };
+const sameTask = () => false, taskEdit = () => 'edited', taskStep = label => ({label}), addStep = s => s, offerStep = () => null;
+""" + source_of("function taskSaving(on){") + "\n" + source_of("async function saveTask(e){") + """
+const tick = () => new Promise(r => setTimeout(r, 0));
+const press = () => saveTask({preventDefault(){}});
+const made = n => ({task: {id: 'task:' + n, name: 'Buy milk'}, tasks: {['task:' + n]: {id: 'task:' + n, name: 'Buy milk'}}});
+const state = () => ({sent: sent.length, button: [save.disabled, save.textContent], closed: taskDialog.closed, toasts: [...toasts]});
+const out = {};
+(async () => {
+  // Pressed twice before the answer: one task is asked for, and the button shows it is on its way.
+  const first = press(), second = press();
+  await tick();
+  out.pressedTwice = state();
+  answer.res(made(1)); await first; await second;
+  out.answered = state();
+  // A save that fails gives the button back, to try again.
+  const third = press(); await tick();
+  answer.rej(new Error('offline')); await third;
+  out.failed = state();
+  // Cancel, and another form opened before the answer: that form is not closed under you, and
+  // the task the answer is for is the one that was being edited then.
+  editingTask = 'task:1'; tasks = made(1).tasks;
+  const fourth = press(); await tick();
+  taskForms++; editingTask = null;                      // (openTaskForm for a new task)
+  out.whileOther = [save.disabled, sent[sent.length - 1].id];
+  answer.res(made(1)); await fourth;
+  out.late = state();
+  console.log(JSON.stringify(out));
+})();
+""")
+
+    def test_save_pressed_twice_makes_one_task(self):
+        o = self.out
+        self.assertEqual(o["pressedTwice"], {"sent": 1, "button": [True, "Saving…"], "closed": 0, "toasts": []})
+        self.assertEqual(o["answered"], {"sent": 1, "button": [False, "Save"], "closed": 1, "toasts": ["Added “Buy milk”"]})
+
+    def test_a_failed_save_can_be_pressed_again(self):
+        self.assertEqual(self.out["failed"], {"sent": 2, "button": [False, "Save"], "closed": 1,
+                                              "toasts": ["Added “Buy milk”", "Couldn't save the task. Check your connection and try again."]})
+
+    def test_a_late_answer_leaves_another_form_open(self):
+        o = self.out
+        self.assertEqual(o["whileOther"], [True, "task:1"])
+        self.assertEqual(o["late"]["closed"], 1)                       # not closed again
+        self.assertEqual(o["late"]["toasts"][-1], "Saved “Buy milk”")   # named for what it was: an edit
+        self.assertEqual(o["late"]["button"], [False, "Save"])
+        # The form counts its openings, and its Save is found without a new id in the page.
+        self.assertIn("  taskForms++;\n", JS)
+        self.assertEqual(len(re.findall(r'<button type="submit" class="btn primary">Save</button>', HTML[HTML.index('<form id="taskForm"'):HTML.index("</form>", HTML.index('<form id="taskForm"'))])), 1)
+
+
 UNDO_START, UNDO_END = "// ---- undo and redo ----", "// ---- end of undo and redo ----"
 PLAN_KEPT_START, PLAN_KEPT_END = "  // ---- the plan, loaded and saved ----", "  // ---- what shows on a date ----"
 
@@ -1743,10 +1928,13 @@ class UndoSourceTest(unittest.TestCase):
     def test_the_keys(self):
         # Cmd+Z and Ctrl+Z undo; with Shift, and Ctrl+Y, redo. Typing in a field keeps the field's own.
         self.assertIn("const dir = k === 'z' ? (e.shiftKey ? 'redo' : 'undo') : k === 'y' && e.ctrlKey && !e.metaKey && !e.shiftKey ? 'redo' : '';", JS)
-        self.assertIn("if (dir && requestStep(dir)) e.preventDefault();", JS)
+        # (A key held down repeats: it is taken each time, and asks once.)
+        self.assertIn("if (dir && requestStep(dir, e.repeat)) e.preventDefault();", JS)
         self.assertIn("if (editingText(document.activeElement)) return false;", JS)
-        # Nothing changes underneath an open form, or during a drag on the planner.
-        self.assertIn("if (!document.querySelector('dialog[open] form') && !holds.some(fn => fn())) travel(dir);", JS)
+        # Nothing changes underneath an open form, or during a drag on the planner; and no more
+        # than one request waits behind the one that is running.
+        self.assertIn("const MAX_TRAVELS = 2;", JS)
+        self.assertIn("if (!again && travels < MAX_TRAVELS && !document.querySelector('dialog[open] form') && !holds.some(fn => fn())) travel(dir);", JS)
         self.assertIn("SH.holdUndo?.(() => !!drag);", PLANNER)
         # The forms are the three dialogs with a form; the details card has none, so it follows an undo.
         self.assertEqual(len(re.findall(r"<dialog[^>]*>\s*<form", HTML)), 3)
@@ -1892,6 +2080,39 @@ const reset = () => { steps.undo.length = steps.redo.length = toasts.length = lo
   out.keys.heldDuringDrag = [held, log.length];
   page.focus = field('search');
   out.keys.apiWhileTyping = requestStep('undo');
+  // A slow server: each way back asks it before it changes anything. The request is said at once,
+  // and of five made meanwhile one runs, one waits and three are left out.
+  reset(); page.focus = {tagName: 'BODY'}; page.form = false;
+  let release;
+  const gate = new Promise(r => { release = r; });
+  const slow = label => ({label, undo: async () => { await gate; log.push('undo ' + label); return {ok: true}; }, redo: async () => ({ok: true})});
+  for (const l of ['q1', 'q2', 'q3', 'q4', 'q5']) addStep(slow(l));
+  const answers = [];
+  for (let i = 0; i < 5; i++) answers.push(requestStep('undo'));
+  await new Promise(r => setTimeout(r, 0));
+  out.queue = {answers, said: [...toasts], undone: log.length, asked: travels};
+  // The keyboard's own repeat of a held key is taken (the browser does nothing with it) and asks for nothing.
+  let prevented = false;
+  page.keydown({key: 'z', metaKey: true, ctrlKey: false, shiftKey: false, altKey: false, repeat: true, preventDefault(){ prevented = true; }});
+  out.queue.heldKey = [prevented, travels];
+  release();
+  await travelling;
+  out.queue.after = {log: [...log], left: steps.undo.map(s => s.label), toasts: [...toasts], asked: travels};
+  // Done with: the next press is taken again. A toast's own button is never left out.
+  requestStep('undo'); await travelling;
+  out.queue.next = [...log];
+  const again = new Promise(r => { release = r; });
+  for (const l of ['r1', 'r2', 'r3']) addStep({label: l, undo: async () => { await again; log.push('undo ' + l); return {ok: true}; }, redo: async () => ({ok: true})});
+  log.length = 0;
+  requestStep('undo'); requestStep('undo'); travel('undo', {refocus: true});
+  release(); await travelling;
+  out.queue.button = [...log];
+  // A held key's repeat with nothing running either: taken, and no step.
+  addStep(mk('held'));
+  let taken = false;
+  page.keydown({key: 'z', metaKey: true, ctrlKey: false, shiftKey: false, altKey: false, repeat: true, preventDefault(){ taken = true; }});
+  await travelling;
+  out.queue.repeat = [taken, log.length, steps.undo.map(s => s.label)];
   console.log(JSON.stringify(out));
 })();
 """
@@ -1900,8 +2121,28 @@ const reset = () => { steps.undo.length = steps.redo.length = toasts.length = lo
     def test_steps_go_back_in_reverse_and_a_new_change_clears_redo(self):
         o = self.out["order"]
         self.assertEqual(o["log"], ["undo c", "undo b", "redo b", "undo d", "undo b", "undo a"])
-        self.assertEqual(o["toasts"], ["Undid: c [Redo]", "Undid: b [Redo]", "Redid: b [Undo]", "Nothing to redo",
-                                       "Undid: d [Redo]", "Undid: b [Redo]", "Undid: a [Redo]", "Nothing to undo"])
+        # Each way back says first that it is on its way, and then what came of it.
+        self.assertEqual(o["toasts"], ["Undoing…", "Undid: c [Redo]", "Undoing…", "Undid: b [Redo]", "Redoing…", "Redid: b [Undo]", "Nothing to redo",
+                                       "Undoing…", "Undid: d [Redo]", "Undoing…", "Undid: b [Redo]", "Undoing…", "Undid: a [Redo]", "Nothing to undo"])
+
+    def test_a_way_back_is_said_at_once_and_only_one_more_waits_behind_it(self):
+        q = self.out["queue"]
+        # Five presses on a server that has not answered the first: each is taken, the toast says
+        # "Undoing…" before anything has come back, and nothing has changed yet.
+        self.assertEqual(q["answers"], [True] * 5)
+        self.assertEqual([q["said"], q["undone"], q["asked"]], [["Undoing…"], 0, 2])
+        self.assertEqual(q["heldKey"], [True, 2])
+        # Two steps go back, not five: the page does not go on undoing after the keys are up.
+        self.assertEqual(q["after"], {"log": ["undo q5", "undo q4"], "left": ["q1", "q2", "q3"], "asked": 0,
+                                      "toasts": ["Undoing…", "Undid: q5 [Redo]", "Undoing…", "Undid: q4 [Redo]"]})
+        self.assertEqual(q["next"], ["undo q5", "undo q4", "undo q3"])
+        self.assertEqual(q["button"], ["undo r3", "undo r2", "undo r1"])
+        self.assertEqual(q["repeat"], [True, 3, ["q1", "q2", "held"]])
+        # The toast that only says so counts nothing down, and goes if nothing takes its place.
+        self.assertIn("toast(DOING[dir], null, {ms: WAIT_MS, wait: true});", JS)
+        self.assertIn("if (wait) el.dataset.wait = '1';", JS)
+        self.assertIn("} else endWait();", JS)
+        self.assertIn(".toast[data-wait] .timer{display:none}", HTML)
 
     def test_about_a_hundred_steps_are_kept(self):
         self.assertEqual(self.out["cap"], {"undone": 100, "first": "undo s105", "last": "undo s6", "end": "Nothing to undo", "redo": 100})
@@ -1909,17 +2150,17 @@ const reset = () => { steps.undo.length = steps.redo.length = toasts.length = lo
     def test_a_way_back_that_fails_stays_and_one_that_conflicts_goes(self):
         f = self.out["failed"]
         self.assertEqual(f["log"], ["undo offline", "undo offline"])
-        self.assertEqual(f["toasts"], ["Couldn't undo that. Check your connection and try again."] * 2)
+        self.assertEqual(f["toasts"], ["Undoing…", "Couldn't undo that. Check your connection and try again."] * 2)
         self.assertEqual(f["left"], ["kept", "offline"])
         c = self.out["conflict"]
         self.assertEqual(c["log"], ["undo moved Lunch to 3:00 PM", "undo kept"])
-        self.assertEqual(c["toasts"], ["Can't undo: moved Lunch to 3:00 PM. It was changed somewhere else since.", "Undid: kept [Redo]"])
+        self.assertEqual(c["toasts"], ["Undoing…", "Can't undo: moved Lunch to 3:00 PM. It was changed somewhere else since.", "Undoing…", "Undid: kept [Redo]"])
         self.assertEqual((c["left"], c["redo"]), ([], ["kept"]))
 
     def test_a_change_that_was_never_saved_is_no_step(self):
         g = self.out["gone"]
         self.assertEqual(g["log"], ["undo kept"])
-        self.assertEqual(g["toasts"], ["Undid: kept [Redo]", "Couldn't undo that. Check your connection and try again."])
+        self.assertEqual(g["toasts"], ["Undoing…", "Undid: kept [Redo]", "Undoing…", "Couldn't undo that. Check your connection and try again."])
         self.assertEqual(g["left"], ["throws"])
 
     def test_a_toasts_button_is_for_its_own_step(self):
@@ -1953,7 +2194,8 @@ class UndoMarksAndTasksTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         script = UNDO_PAGE + """
-let WRITE = 'local', clock = 0, down = false;
+let WRITE = 'local', clock = 0, down = false, wait = null;
+const leaving = new Promise(() => {});
 const server = {marks: {}, tasks: {}}, sent = [];
 const copy = v => JSON.parse(JSON.stringify(v));
 const stamp = () => '2026-11-11T10:00:0' + (clock++) + '+00:00';
@@ -1974,10 +2216,10 @@ const api = async (path, body) => {
   const removed = server.tasks[body.id] || null; delete server.tasks[body.id];
   return {removed, tasks: copy(server.tasks)};
 };
-const getJson = async path => { if (down) throw new Error('down'); return copy(path === 'api/marks' ? server.marks : {tasks: server.tasks}); };
+const getJson = async path => { if (wait) await wait; if (down) throw new Error('down'); return copy(path === 'api/marks' ? server.marks : {tasks: server.tasks}); };
 const cloudApi = async () => { throw new Error('not here'); };
 const byId = {'canvas:1': {id: 'canvas:1', name: 'HW 1', course: {short: '15-122'}}};
-""" + source_of("const backend = {") + "\n" + source_of("async function setMark(id, done, as){") + "\n" + source_of("const unsavedMark = {};") + "\n" + undo_section() + """
+""" + source_of("const turns = {};") + "\n" + source_of("const backend = {") + "\n" + source_of("async function setMark(id, done, as){") + "\n" + source_of("const unsavedMark = {};") + "\n" + undo_section() + """
 const out = {};
 (async () => {
   // The ✓ clicked twice before the first save answers: two steps, and both go back.
@@ -2050,10 +2292,66 @@ const out = {};
   await travel('undo');
   out.taskConflict = {toast: toasts[toasts.length - 1], wrote: sent.length - m, name: server.tasks[old.id].name, localNotes: tasks[old.id].notes};
   out.sameTask = [sameTask(null, null), sameTask(null, old), sameTask(old, {...old, updated_at: 'later'}), sameTask(old, {...old, pinned: true}), sameTask(old, {...old, pinned: false}), sameTask(old, {...old, notes: ''})];
+
+  // A slow server: the undo is said at once, and the ✓ changes only when the server has been asked.
+  steps.undo.length = steps.redo.length = 0;
+  server.marks = {}; marks = {};
+  toggleMark('canvas:1');
+  await Promise.all(steps.undo.map(s => s.settled));
+  let free;
+  wait = new Promise(r => { free = r; });
+  const going = travel('undo');
+  await new Promise(r => setTimeout(r, 0));
+  out.slow = {toast: toasts[toasts.length - 1], marked: 'canvas:1' in marks};
+  wait = null; free(); await going;
+  out.slow.then = [toasts[toasts.length - 1], 'canvas:1' in marks, 'canvas:1' in server.marks];
+
+  // A toast's button goes with its toast, and focus with it: it is put on the thing's own ✓ (in the
+  // drawer first, when that is open on it), else on the + button, without scrolling.
+  steps.undo.length = steps.redo.length = 0;
+  const focused = [], onPage = new Set(['#fab']), plain = document.querySelector;
+  document.querySelector = sel => onPage.has(sel) ? {focus(o){ focused.push(sel + (o?.preventScroll ? '' : ' (scrolls)')); page.focus = this; }} : plain(sel);
+  const T = 'task:zzz99999', check = `[data-mark="${T}"]`, gone = copy(server.tasks[T]);
+  await backend.deleteTask(T).then(r => refreshTasks(r.tasks));
+  const del = addStep(taskStep('deleted “Other”', T, gone, null));
+  page.focus = document.body; onPage.add(check);            // the list shows the task once it is back
+  offerStep(del)(); await travelling;
+  out.focus = {undo: [...focused], back: T in server.tasks};
+  page.focus = document.body; onPage.delete(check);         // Redo on that toast: the task goes again
+  lastAction(); await travelling;
+  out.focus.redo = focused[focused.length - 1];
+  page.focus = document.body; onPage.add(check); onPage.add('#drawer:not([hidden]) ' + check);
+  lastAction(); await travelling;                           // with the drawer open on it
+  out.focus.drawer = focused[focused.length - 1];
+  const sofar = focused.length;
+  page.focus = {tagName: 'BUTTON'};                         // focus put somewhere meanwhile stays there
+  lastAction(); await travelling;
+  page.focus = document.body;                               // the keys ask for no focus
+  await travel('undo');
+  out.focus.left = focused.length - sofar;
+  // A ✓'s toast: its ✓.
+  onPage.add('[data-mark="canvas:1"]');
+  toggleMark('canvas:1'); await Promise.all(steps.undo.map(s => s.settled));
+  page.focus = document.body;
+  lastAction(); await travelling;
+  out.focus.mark = focused[focused.length - 1];
   console.log(JSON.stringify(out));
 })();
 """
         cls.out = run_node(script)
+
+    def test_an_undo_is_said_before_the_server_has_answered(self):
+        # Nothing on the page has changed yet: the step asks what is stored first.
+        self.assertEqual(self.out["slow"], {"toast": "Undoing…", "marked": True, "then": ["Undid: marked “HW 1” done [Redo]", False, False]})
+
+    def test_a_toasts_button_leaves_focus_on_the_thing_it_brought_back(self):
+        f = self.out["focus"]
+        check = '[data-mark="task:zzz99999"]'
+        self.assertEqual([f["undo"], f["back"]], [[check], True])
+        self.assertEqual(f["redo"], "#fab")                      # the task is gone: the + button
+        self.assertEqual(f["drawer"], "#drawer:not([hidden]) " + check)
+        self.assertEqual(f["left"], 0)
+        self.assertEqual(f["mark"], '[data-mark="canvas:1"]')
 
     def test_a_mark_put_back_is_the_same_mark(self):
         o = self.out
@@ -2253,6 +2551,35 @@ const out = {};
   out.nested = {steps: steps.undo.length - m, label: steps.undo[steps.undo.length - 1].label, outer: typeof outer};
   await travel('undo');
   out.nested.title = blockOf(store[K], 'blockcccc3').title;
+
+  // 10. A time is its start and its end together. I changed a block's end; another device then
+  // changed its start. Each taken back apart would leave the end before the start, and cleaning
+  // would quietly make a few minutes of it: nothing is saved, and the toast says so.
+  record('added “Study”', D, 'block:spanblock1', () => editDay(D, v => { v.blocks.push({id: 'spanblock1', type: 'deep', title: 'Study', start: '10:00', end: '11:00', items: []}); }));
+  await idle();
+  record('changed “Study” to 10:00 AM–1:00 PM', D, 'block:spanblock1', () => editDay(D, v => { blockOf(v, 'spanblock1').end = '13:00'; }));
+  await idle();
+  blockOf(store[K], 'spanblock1').start = '12:00';
+  posts.length = 0;
+  const stepsLeft = steps.undo.length;
+  await travel('undo');
+  out.span = {toast: toasts[toasts.length - 1], posts: [...posts], stored: [blockOf(store[K], 'spanblock1').start, blockOf(store[K], 'spanblock1').end],
+    shown: blockOf(plan.days[D], 'spanblock1').start, gone: stepsLeft - steps.undo.length};
+
+  // 11. The week this page has is not the week the server has: another device added a repeating
+  // block with a time and a to-do for today, and moved the weekly lunch while keeping today's. A
+  // tick of mine on the same date is taken back, and none of that is lost to the page's old week.
+  record('ticked “three” in “Errands”', D, 'block:blockbbbb2', () => editDay(D, v => { blockOf(v, 'blockbbbb2').items[2].done = true; }));
+  await idle();
+  const weekNow = copy(store['week:wed']);
+  weekNow.blocks.push({id: 'gymweekly1', type: 'other', title: 'Gym', start: '06:00', end: '07:00'});
+  Object.assign(weekNow.meals.lunch, {start: '12:00', end: '13:00'});
+  store['week:wed'] = weekNow;
+  store[K].repeats = {gymweekly1: {start: '17:00', end: '18:00', items: [{id: 'itemshoes1', kind: 'own', text: 'bring shoes', done: false}]}};
+  store[K].meals = {lunch: {start: '15:00', end: '16:00'}};
+  await travel('undo');
+  out.week = {toast: toasts[toasts.length - 1], repeats: copy(store[K].repeats), meals: copy(store[K].meals), tick: blockOf(store[K], 'blockbbbb2').items[2].done,
+    known: [plan.week.wed.blocks.some(b => b.id === 'gymweekly1'), plan.week.wed.meals.lunch.start]};
   out.labels = [
     changeLabel({kind: 'meal', title: 'Lunch', start: 900, end: 960, place: 'Chipotle', items: []}, {start: 930, end: 990, place: 'Chipotle', items: []}),
     changeLabel({kind: 'meal', title: 'Lunch', start: 900, end: 960, place: 'Chipotle', items: []}, {start: 900, end: 960, place: 'Thai place', items: []}),
@@ -2298,6 +2625,14 @@ console.log(JSON.stringify({
   mealItems: show(rebase({meals: {lunch: {start: '15:30', end: '16:30'}}}, {meals: {lunch: {start: '15:30', end: '16:30', items: [I('call')]}}}, null)),
   // the settings: one hour each
   hours: [show(rebase({day_start: 7, day_end: 24}, {day_start: 7, day_end: 23}, {day_start: 5, day_end: 24})), show(rebase({day_start: 7, day_end: 24}, {day_start: 8, day_end: 24}, {day_start: 5, day_end: 24}))],
+  // a time is one thing: my end back and their start, merged, must still be a block
+  span: [show(rebase({start: '10:00', end: '13:00'}, {start: '12:00', end: '13:00'}, {start: '10:00', end: '11:00'})),
+    show(rebase({start: '10:00', end: '13:00'}, {start: '12:00', end: '13:00'}, {start: '10:00', end: '12:00'})),
+    show(rebase({start: '10:00', end: '13:00'}, {start: '12:00', end: '13:00'}, {start: '10:00', end: '12:05'})),
+    show(rebase({start: '10:00', end: '13:00'}, {start: '09:00', end: '13:00'}, {start: '10:00', end: '11:00'})),
+    show(rebase({blocks: [{...B('a', '10:00'), end: '13:00'}]}, {blocks: [{...B('a', '12:00'), end: '13:00'}]}, {blocks: [{...B('a', '10:00'), end: '11:00'}]})),
+    show(rebase({repeats: {w: {start: '10:00', end: '13:00'}}}, {repeats: {w: {start: '12:30', end: '13:00'}}}, {repeats: {w: {start: '10:00', end: '12:00'}}})),
+    show(rebase({meals: {lunch: {start: '15:00', end: '17:00', place: 'x'}}}, {meals: {lunch: {start: '16:30', end: '17:00', place: 'x'}}}, {meals: {lunch: {start: '15:00', end: '16:00', place: 'x'}}}))],
   same: [same({a: 1, b: [1, {c: 2}]}, {b: [1, {c: 2}], a: 1}), same({a: 1}, {a: 1, b: undefined}), same([1, 2], [2, 1]), same(null, undefined), same({}, null), same('5', 5)],
 }));
 """)
@@ -2370,6 +2705,23 @@ console.log(JSON.stringify({
         self.assertEqual(m["mealItems"], {"meals": {"lunch": {"items": [{"id": "call", "kind": "own", "text": "call", "done": False}]}}})
         self.assertEqual(m["hours"], [{"day_start": 5, "day_end": 23}, "CONFLICT"])
         self.assertEqual(m["same"], [True, True, False, True, False, False])
+        # An end at or before its start is no block: a conflict. The shortest block there is, and
+        # any longer one, is a merge like any other.
+        self.assertEqual(m["span"], ["CONFLICT", "CONFLICT", {"start": "12:00", "end": "12:05"}, {"start": "09:00", "end": "11:00"},
+                                     "CONFLICT", "CONFLICT", "CONFLICT"])
+
+    def test_a_time_changed_at_both_ends_is_not_merged_into_no_time_at_all(self):
+        self.assertEqual(self.out["span"], {"toast": "Can't undo: changed “Study” to 10:00 AM–1:00 PM. It was changed somewhere else since.", "posts": [],
+                                            "stored": ["12:00", "13:00"], "shown": "12:00", "gone": 1})
+
+    def test_the_way_back_goes_by_the_week_the_server_has_now(self):
+        w = self.out["week"]
+        self.assertEqual(w["toast"], "Undid: ticked “three” in “Errands” [Redo]")
+        self.assertFalse(w["tick"])
+        # What the other device saved for the day is all still there.
+        self.assertEqual(w["repeats"], {"gymweekly1": {"start": "17:00", "end": "18:00", "items": [{"id": "itemshoes1", "kind": "own", "text": "bring shoes", "done": False}]}})
+        self.assertEqual(w["meals"], {"lunch": {"start": "15:00", "end": "16:00"}})
+        self.assertEqual(w["known"], [True, "12:00"])
 
 
 # ---- a preview on hover (planner.js "what the details say", "a preview on hover") ----
@@ -2984,11 +3336,17 @@ class KeptSourceTest(unittest.TestCase):
         self.assertIn("SH.kept?.write('plan', JSON.stringify({from: loaded.from, to: loaded.to, plan}));", PLANNER)
         self.assertIn("const c = SH.kept?.read('plan'), today = todayIso();", PLANNER)
 
-    def test_nothing_is_saved_on_the_word_of_a_copy(self):
-        # Every save waits for the server's own answer about where the page saves.
-        self.assertIn("const sending = to => known.then(() => { if (WRITE !== to) throw new Error('nowhere to save'); });", JS)
-        self.assertIn("const api = (path, body) => sending('local').then(() => saved(path, fetch(path, {", JS)
-        self.assertIn("return (body ? sending('cloud').then(() => saved('cloud', ask())) : ask()).then(answer).then(r => heard('cloud', r));", JS)
+    def test_nothing_is_saved_on_the_word_of_a_copy_unless_the_page_is_put_away(self):
+        # Every save waits for the server's own answer about where the page saves, or for the page
+        # being put away before it (a change that waited would be lost with the page): see BootTest.
+        self.assertIn("const sending = to => Promise.race([known, leaving]).then(() => { if (WRITE !== to) throw new Error('nowhere to save'); return !answered; });", JS)
+        self.assertIn("const api = (path, body) => sending('local').then(early => saved(path, fetch(path, {", JS)
+        self.assertIn("return (body ? sending('cloud').then(early => saved('cloud', ask(early))) : ask()).then(answer).then(r => heard('cloud', r));", JS)
+        self.assertIn("document.addEventListener('visibilitychange', () => { if (document.hidden) nowLeaving(); });", JS)
+        self.assertIn("window.addEventListener('pagehide', () => nowLeaving());", JS)
+        self.assertEqual(JS.count("nowLeaving()"), 2)
+        # A save sent early outlives the page; no other request is changed.
+        self.assertEqual(len(re.findall(r"keepalive: ", JS)), 2)
         self.assertEqual(JS.count("nowKnown()"), 2)          # from disk at once; else when the server answered or did not
         self.assertRegex(JS, r"\}\)\.finally\(\(\) => \{\s*if \(!copy && !PHONE\) \{ showSyncbox\(\); emit\('ready'\); \}\s*nowKnown\(\);\s*\}\);")
         # What is kept is what the server said, once it has said where the page saves.
@@ -3006,15 +3364,18 @@ class KeptSourceTest(unittest.TestCase):
         # Equal to what is on show, nothing is drawn again; a ✓ not saved yet stays as shown.
         self.assertIn("for (const id in unsavedMark) { if (marks[id]) next[id] = marks[id]; else delete next[id]; }", JS)
         self.assertIn("if (changed) refreshTasks(t); else tasks = t;", JS)
-        self.assertIn("if (s && before === saves && !took(s.marks, s.tasks)) showSynced();", JS)
+        self.assertIn("if (s && before !== saves) { if (tries > 1) return reloadState(tries - 1); }", JS)
+        self.assertIn("else if (s && !took(s.marks, s.tasks)) showSynced();", JS)
         self.assertIn("const asShown = copied && same(plan, next) && same(loaded, {from, to});", PLANNER)
         self.assertIn("if (asShown) unlock(); else render();", PLANNER)
         # The drawer stays where it was read when it is drawn again for the same item.
         self.assertIn("const top = drawerId === id ? drawer.scrollTop : 0;", JS)
         self.assertIn("drawer.scrollTop = top;", JS)
-        # No page load in any of it: only after Sync now, as before, and when you press Refresh.
-        self.assertEqual(JS.count("location.reload()"), 2)
-        self.assertIn("  try { sessionStorage.setItem('sh:synced', JSON.stringify({ok: s.ok, output: s.output})); } catch {}\n  location.reload();\n}", JS)
+        # No page load in any of it, after Sync now either (its data is taken in place, like a
+        # sync's that ran by itself): only when you press Refresh.
+        self.assertEqual(JS.count("location.reload()"), 1)
+        self.assertNotIn("sessionStorage", JS)
+        self.assertIn("  try { await heardSync(s); } catch (err) { console.error(err); }\n  toast(syncSaid(s));\n  watchSync();\n}", JS)
         self.assertIn("  if (e.target.closest('#newData')) return location.reload();", JS)
 
     def test_synced_ago_is_the_datas_own_time(self):
@@ -3261,7 +3622,7 @@ const TASK = (id, name) => ({id, name, course_id: 'personal', due_at: null, all_
 const there = {marks: {}, tasks: {}, platform: {status: 204}, down: false, sync: {running: false}, dataJs: null};
 // data.js as sync.py writes it.
 const asDataJs = data => 'window.SCHOOL_DATA = ' + JSON.stringify(data) + ';\\n';
-const net = {log: [], waiting: []};
+const net = {log: [], waiting: [], early: []};
 let stamp = 0;
 function serve(q){
   if (there.down) return q.rej(new TypeError('Failed to fetch'));
@@ -3280,6 +3641,7 @@ function serve(q){
 const fetch = (url, o = {}) => new Promise((res, rej) => {
   const q = {url, method: o.method || 'GET', body: o.body ? JSON.parse(o.body) : null, res, rej};
   net.log.push(q.method + ' ' + url);
+  if (o.keepalive) net.early.push(q.method + ' ' + url);     // sent to outlive the page
   net.waiting.push(q);
 });
 const settle = async () => { for (let i = 0; i < 6; i++) await tick(); };
@@ -3321,7 +3683,7 @@ def boot_sections():
         "let D = window.SCHOOL_DATA || null;", kept_section(), JS[JS.index(ASK_START):JS.index(ASK_END)], source_of("const backend = {"),
         source_of("async function platformMode(r){"), marks, source_of("function refreshTasks(next){"), source_of("function took(m, t){"),
         source_of("async function setMark(id, done, as){"), source_of("const unsavedMark = {};"), undo_section(),
-        JS[JS.index(SYNC_START):JS.index(SYNC_END)], source_of("async function reloadState(){"), JS[JS.index(BACK_START):JS.index(BACK_END)],
+        JS[JS.index(SYNC_START):JS.index(SYNC_END)], source_of("async function reloadState("), JS[JS.index(BACK_START):JS.index(BACK_END)],
         JS[JS.index(BOOT_START):]])
 
 
@@ -3329,6 +3691,27 @@ def boot(setup, body):
     """One visit: setup says what the browser and the server hold before the page's scripts run,
     body what happens after."""
     return run_node(BOOT_PAGE + setup + boot_sections() + "\nconst out = {};\n(async () => {\n" + body + "\nconsole.log(JSON.stringify(out));\n})();\n")
+
+
+# The same visit with the page's own toast(), whose element is stood in for (els['#toast']).
+BOOT_TOAST_LINE = "const toast = (msg, action, o = {}) => { toasts.push(msg + (action ? ' [' + (o.label || 'Undo') + ']' : '')); };\n"
+BOOT_TOAST = """
+const UNDO_MS = 6000, markEmoji = () => {};
+document.createElement = () => ({className: '', id: '', dataset: {}, innerHTML: '', attrs: {}, setAttribute(k, v){ this.attrs[k] = v; },
+  querySelector(sel){
+    const el = this;
+    if (sel === 'button') return el.button = el.button || {};
+    return sel === '.unsent' && el.innerHTML.includes('class="unsent"') ? {remove(){ el.innerHTML = el.innerHTML.replace(/<span class="unsent">[^<]*<\\/span>/, ''); }} : null;
+  },
+  remove(){ if (els['#toast'] === this) delete els['#toast']; }});
+document.body.append = el => { els['#toast'] = el; };
+"""
+
+
+def boot_toast(setup, body):
+    assert BOOT_TOAST_LINE in BOOT_PAGE
+    return run_node(BOOT_PAGE.replace(BOOT_TOAST_LINE, "") + BOOT_TOAST + setup + source_of("function toast(msg, action,") + "\n" + boot_sections()
+                    + "\nconst out = {};\n(async () => {\n" + body + "\nconsole.log(JSON.stringify(out));\n})();\n")
 
 
 # What the server holds in most visits, and the copy the last visit kept of it.
@@ -3581,13 +3964,132 @@ await settle();
 await answerNow(q => q.method === 'POST');
 out.saved = [posts().length, Object.keys(unsavedMark).length];
 read.res({ok: true, status: 200, json: async () => old});
-await settle(); await answerNow(); await back;
+await settle(); await answerNow();
 out.stale = [shown().marks, Object.keys(there.marks).sort().join(' ')];
+// They are asked for once more (the save's own answer held the marks, not the tasks): a task added
+// on another device meanwhile is not left out until the next return.
+there.tasks['task:bbbbbbbb'] = TASK('task:bbbbbbbb', 'Added on the phone');
+const asks = net.log.length;
+await answerNow(); await answerNow(); await back;
+out.again = [net.log.slice(asks - 1), shown().marks, shown().tasks, events.filter(e => e === 'reload').length];
 """)
         self.assertEqual(out["same"], [0, 1, 1])
         self.assertEqual(out["changed"], [1, "a1 a2", 1])
         self.assertEqual(out["saved"], [1, 0])      # the save is answered and done with before the old read comes in
         self.assertEqual(out["stale"], ["a1 a2 a3", "a1 a2 a3"])
+        self.assertEqual(out["again"], [["GET api/marks", "GET api/tasks"], "a1 a2 a3", "task:aaaaaaaa task:bbbbbbbb", 3])
+
+    def test_a_change_made_before_the_answer_is_sent_when_the_page_is_put_away(self):
+        # The ✓ shows at once, and waits for the server's first answer. The tab hidden or closed
+        # before that answer would lose it with the page: it is sent then, to outlive the page.
+        for how, leave in (("hidden", "show(false);"), ("closed", "window.on.pagehide();")):
+            with self.subTest(how=how):
+                out = boot(BOOT_COPY, """
+toggleMark('a3');
+await settle();
+out.held = posts();
+""" + leave + """
+await settle();
+out.left = {posts: posts(), early: [...net.early]};
+// The save's own answer comes first; then the answers asked for before it, which do not hold it.
+const stale = copy(there.marks);
+await answerNow(q => q.method === 'POST');
+out.saved = [Object.keys(there.marks).sort().join(' '), shown().marks];
+const first = net.waiting.find(q => q.url === 'api/marks');
+net.waiting = net.waiting.filter(q => q !== first);
+first.res({ok: true, status: 200, json: async () => stale});
+await answerNow();
+out.answered = {shown: shown().marks, placed, asked: net.log.slice(-1)};
+// Asked for again, as on coming back to a tab, rather than taken: the ✓ stays.
+await answerNow(); await answerNow();
+await Promise.all(steps.undo.map(s => s.settled));
+out.end = {shown: shown().marks, kept: Object.keys(keptNow('state').marks).sort().join(' '), steps: steps.undo.map(s => s.label), toasts: [...toasts]};
+// From here on a save is sent as any other is.
+toggleMark('a1'); await settle(); await answerNow();
+out.later = {posts: posts().length, early: net.early.length, there: Object.keys(there.marks).sort().join(' ')};
+""")
+                self.assertEqual(out["held"], [])
+                self.assertEqual(out["left"], {"posts": ["POST api/mark"], "early": ["POST api/mark"]})
+                self.assertEqual(out["saved"], ["a2 a3", "a2 a3"])
+                self.assertEqual(out["answered"], {"shown": "a2 a3", "placed": True, "asked": ["GET api/marks"]})
+                self.assertEqual(out["end"], {"shown": "a2 a3", "kept": "a2 a3", "steps": ["marked “HW 3” done"], "toasts": ["Marked “HW 3” done [Undo]"]})
+                self.assertEqual(out["later"], {"posts": 2, "early": 1, "there": "a1 a2 a3"})
+        # The phone site the same way, to its own store.
+        phone = "PHONE = true; location.pathname = '/k/'; window.SCHOOL_DATA = DATA; there.marks = {a2: MARK('S1')}; there.tasks = {};\n" \
+                "keep('state', {at: null, marks: there.marks, tasks: there.tasks}, {place: 'phone', path: '/k/'});"
+        out = boot(phone, "toggleMark('a3'); await settle(); out.held = posts(); show(false); await settle(); out.early = [...net.early];"
+                          "await answerNow(); await answerNow(); await answerNow(); out.there = Object.keys(there.marks).sort().join(' ');")
+        self.assertEqual([out["held"], out["early"], out["there"]], [[], ["POST /api/state/"], "a2 a3"])
+        # A page that only went out of view, with nothing waiting, sends nothing; and with no
+        # server after all, what was sent early fails as any save does and is put back.
+        out = boot(BOOT_COPY, "show(false); await settle(); out.posts = posts(); show(true); await settle(); out.asked = [...net.log];")
+        self.assertEqual(out["posts"], [])
+        out = boot(BOOT_COPY + "there.down = true;", """
+toggleMark('a3'); await settle();
+show(false); await settle();
+await answerNow(); await answerNow();
+await Promise.all(steps.undo.map(s => s.settled)).catch(() => {});
+await settle();
+out.after = {marks: shown().marks, write: shown().write, toast: toasts[toasts.length - 1], steps: steps.undo.length, early: net.early};
+""")
+        self.assertEqual(out["after"], {"marks": "a1", "write": None, "toast": "Couldn't save. Check your connection and try again.", "steps": 0, "early": ["POST api/mark"]})
+
+    def test_two_saves_of_one_thing_go_in_the_order_they_were_made(self):
+        # Marked and unmarked before the server's first answer: sent together, either could arrive
+        # last and stay. The second goes once the first is answered.
+        out = boot(BOOT_COPY, """
+toggleMark('a3'); toggleMark('a3');
+toggleMark('a1');                                  // another thing does not wait for it
+await settle();
+await answerNow(q => q.method === 'GET');
+out.first = net.waiting.map(q => [q.url, q.body.id, q.body.done]);
+await answerNow();
+out.second = net.waiting.map(q => [q.url, q.body.id, q.body.done]);
+await answerNow();
+await Promise.all(steps.undo.map(s => s.settled));
+out.end = [Object.keys(there.marks).sort().join(' '), shown().marks, posts().length, Object.keys(turns).length];
+// A task's two saves the same way; a new task has no id yet, and waits for nothing.
+const body = {id: 'task:aaaaaaaa', name: 'Buy oat milk'};
+for (const save of [backend.saveTask(body), backend.deleteTask('task:aaaaaaaa'), backend.saveTask({name: 'New one'}), backend.saveTask({name: 'New two'})]) save.catch(() => {});
+await settle();
+out.tasks = net.waiting.map(q => [q.url, q.body.id || q.body.name]);
+net.waiting.splice(0).forEach(q => q.rej(new Error('x')));
+await settle();
+out.thenDelete = net.waiting.map(q => q.url);      // the save failed: the delete still goes
+""")
+        self.assertEqual(out["first"], [["api/mark", "a3", True], ["api/mark", "a1", True]])
+        self.assertEqual(out["second"], [["api/mark", "a3", False]])
+        self.assertEqual(out["end"], ["a1 a2", "a1 a2", 3, 0])
+        self.assertEqual(sorted(out["tasks"]), [["api/task", "New one"], ["api/task", "New two"], ["api/task", "task:aaaaaaaa"]])
+        self.assertEqual(out["thenDelete"], ["api/task/delete"])
+        # Only a page being put away sends them together: the second cannot wait for an answer
+        # the page will not be there to hear.
+        out = boot(BOOT_COPY, "toggleMark('a3'); toggleMark('a3'); await settle(); show(false); await settle(); out.sent = net.waiting.filter(q => q.method === 'POST').map(q => q.body.done);")
+        self.assertEqual(out["sent"], [True, False])
+
+    def test_a_change_that_waits_to_be_sent_says_so(self):
+        # The page's own toast, with a stand-in for its element: "· waiting to save" until the
+        # server has answered (or the page is put away and the save goes).
+        out = boot_toast(BOOT_COPY, """
+toggleMark('a3'); await settle();
+out.waiting = els['#toast'].innerHTML;
+toast('Nothing to undo', null, {ms: 2000});
+out.plain = els['#toast'].innerHTML;
+toggleMark('a3'); await settle();
+out.again = els['#toast'].innerHTML;
+await answerNow(q => q.method === 'GET');
+out.sent = els['#toast'].innerHTML;
+await answerNow(); await answerNow();
+toggleMark('a1'); await settle();
+out.later = els['#toast'].innerHTML;
+""")
+        self.assertIn("<span>Marked “HW 3” done<span class=\"unsent\"> · waiting to save</span></span><button type=\"button\">Undo</button>", out["waiting"])
+        self.assertNotIn("unsent", out["plain"])
+        self.assertIn("<span>Unmarked “HW 3”<span class=\"unsent\"> · waiting to save</span></span>", out["again"])
+        self.assertIn("<span>Unmarked “HW 3”</span><button", out["sent"])
+        self.assertNotIn("unsent", out["later"])
+        out = boot_toast(BOOT_COPY, "toggleMark('a3'); await settle(); show(false); await settle(); out.left = els['#toast'].innerHTML;")
+        self.assertNotIn("unsent", out["left"])
 
 
 # The last sync's data: data.js when it is here, else the copy kept of it.
@@ -3734,10 +4236,11 @@ class WatchSyncTest(unittest.TestCase):
 
     def test_it_looks_once_a_minute_and_only_while_on_show(self):
         out = boot(BOOT_MAC, WATCH_STARTED + """
+const said = synced;
 await minute();
 out.look = {asked: asked(), watch: watch()};
 await answerNow();
-out.answered = {watch: watch(), draws: draws.length - n};
+out.answered = {watch: watch(), draws: draws.length - n, said: synced - said};
 // Out of view: the wait is over, and nothing is asked however a look comes about.
 show(false);
 out.hidden = watch();
@@ -3752,7 +4255,9 @@ out.backDone = {asked: asked(), watch: watch(), draws: draws.length - n, loads};
         # At the start, as before: where the page is, the marks, the tasks, and the sync's state.
         self.assertEqual(out["start"], {"asked": ["GET platform.json", "GET api/marks", "GET api/tasks", "GET api/sync"], "watch": [60000]})
         self.assertEqual(out["look"], {"asked": ["GET api/sync"], "watch": []})
-        self.assertEqual(out["answered"], {"watch": [60000], "draws": 0})
+        # Nothing changed and nothing is drawn, but "Synced 2h ago" is said again for now: the page
+        # stays open across syncs, and the label is what says how old its data is.
+        self.assertEqual(out["answered"], {"watch": [60000], "draws": 0, "said": 1})
         self.assertEqual(out["hidden"], [])
         self.assertEqual(out["hiddenLook"], {"asked": [], "watch": [], "timers": 0})
         self.assertEqual(out["back"], ["GET api/marks", "GET api/sync"])
@@ -3908,16 +4413,32 @@ out.live = LIVE;
         self.assertIn("const top = drawerId === id ? drawer.scrollTop : 0;", JS)
         self.assertIn("  main.innerHTML = stats() + (view === 'courses' ? coursesView(vis) : upcomingView(vis));", JS)
 
-    def test_sync_now_keeps_its_own_wait(self):
+    def test_sync_now_keeps_its_own_wait_and_takes_its_data_in_place(self):
         out = boot(BOOT_MAC, WATCH_STARTED + """
+// What must survive the sync: a step in the undo history.
+toggleMark('a2'); await settle(); await answerNow(q => q.method === 'POST');
+asked();
 els['#syncBtn'].onclick(); await settle(); await answerNow();
 out.pressed = {asked: asked(), later: later.map(l => l.ms), button: button()};
 // Nothing looks beside it, on a return to the tab either.
 show(false); show(true); await settle(); await answerNow(); await answerNow();
 out.back = asked().filter(l => l.includes('sync'));
+// The sync ends and left a new data.js: taken in place and said in a toast. No page load.
+there.sync = {running: false, ok: true, output: '[schoolhub] 1 courses, 3 assignments, 2 new files', data_at: 'G2'}; there.dataJs = asDataJs(NEXT);
+later.splice(later.findIndex(l => l.fn === pollSync), 1)[0].fn(); await settle();
+for (let i = 0; i < 4; i++) await answerNow();
+out.ended = {asked: asked(), shown: shown().data, kept: keptNow('data').generated_at, loads, toast: toasts[toasts.length - 1], button: button(),
+  steps: steps.undo.map(s => s.label), watch: watch(), errors};
+// And the history still works.
+travel('undo'); await settle(); for (let i = 0; i < 3; i++) await answerNow();
+out.undone = [Object.keys(there.marks).sort().join(' '), toasts[toasts.length - 1]];
 """)
         self.assertEqual(out["pressed"], {"asked": ["POST api/sync"], "later": [1500], "button": [True, "Syncing…"]})
         self.assertEqual(out["back"], [])
+        self.assertEqual(out["ended"], {"asked": ["GET api/sync", "GET data.js", "GET api/marks", "GET api/tasks"], "shown": "G2", "kept": "G2", "loads": 0,
+                                        "toast": "Sync finished · 1 courses, 3 assignments, 2 new files", "button": [False, "Sync now"],
+                                        "steps": ["unmarked “HW 2”"], "watch": [60000], "errors": []})
+        self.assertEqual(out["undone"], ["a2", "Undid: unmarked “HW 2” [Redo]"])
 
 
 @unittest.skipUnless(NODE, "Node is not installed")

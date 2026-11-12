@@ -25,6 +25,7 @@
   const FREE_MIN = 90;           // a free stretch between two blocks at least this long gets a card that says so
   const NOW_HIDE_PX = 9;         // an hour's label this near the now line's pill gives way to it,
   const NOW_CLEAR_PX = 16;       // and one nearer than this steps aside
+  const EDGE_HOUR_PX = 3;        // the day's first and last hour labels are drawn this far in from their lines
   const ITEM_PX = 21;            // an item's line on a block
   const FLAG_LANE_PX = 92;       // the lane on the right kept for flags of things due at a time
   const TIME_PAD = 15;           // the timeline's margins above and below (.ptime) and the grid's border
@@ -229,6 +230,10 @@
       if (v === CONFLICT) return CONFLICT;
       if (v != null) out[k] = v;
     }
+    // A start and an end are one time. Merged apart (the step changed one, another device the
+    // other) they may leave no block at all, an end at or before its start, which cleaning would
+    // then quietly turn into a few minutes at a time nobody chose: that is a conflict too.
+    if (out.start != null && out.end != null && !(toMin(out.end) - toMin(out.start) >= LEAST)) return CONFLICT;
     return out;
   }
   function rebaseList(was, now, goal){
@@ -384,8 +389,13 @@
       } catch {}
       if (!plan || !isObject(body)) return false;
       if (pending || serial !== saveSerial) continue;
-      for (const {key} of step.writes)
-        setKey(key, key === 'settings' ? body.settings : key.startsWith('week:') ? cleanWeek(body.week?.[key.slice(5)]) : body.days?.[key.slice(4)]);
+      // The settings and all seven weekdays come with every answer, and are taken too: a date's
+      // value is cleaned against its weekday (cleanDay), and against a week this page has had for
+      // a while that would drop what another device has since added to it (a repeating block's
+      // to-dos for the day, a meal's time kept for the day when the weekly time moved).
+      plan.settings = cleanSettings(body.settings);
+      for (const wd of WD) plan.week[wd] = cleanWeek(body.week?.[wd]);
+      for (const {key} of step.writes) if (key.startsWith('day:')) setKey(key, body.days?.[key.slice(4)]);
       return true;
     }
     return false;
@@ -661,6 +671,12 @@
   // chip at its end: [its class, its words], or none.
   const iconPx = w => w > ROOMY_PX ? 27 : 17;
   const chipPx = chip => chip ? chip[1].length * 6 + (chip[0] === 'pb-n' ? 20 : 28) : 0;
+  // The room a tall block's second line has for its time, by dashboard.html's own numbers: the
+  // block's 15 px of padding, and the line starts 6 px in on the narrowest columns (up to 110 px
+  // inside, under the icon), 17 px in up to 260 px, 33 px beyond; less the "+N" beside the time
+  // and the gap between them. A character of the time there is about 7 px wide.
+  const SUB_CHAR_PX = 7.1;
+  const subRoom = (w, chip) => w - 15 - (w - 15 <= 110 ? 6 : w - 15 <= 260 ? 17 : 33) - (chip ? chipPx(chip) + 6 : 0);
   // How many of a block's n items fit, and whether "+N more" goes after the time (where a line of
   // its own would cost an item, or does not fit). The one-line forms show none.
   function itemsFit(h, form, n){
@@ -815,10 +831,13 @@
       // As many items as fit under the title and the time, then "+2 more" on a line of its own; where
       // that line would cost an item, the chip's count stands for it, or "+2" after the time.
       // The time in full, or in its compact form ("4–5:30 PM") on a block too narrow for that
-      // beside the "+2" on its line.
+      // beside the "+2" on its line. Where not even that fits whole it is left out, as on the head
+      // (data-tight: it shows while the block is dragged): cut short, "5–7…" would read as another
+      // time. It is in the block's preview and its details.
       const chip = inline ? more(rest) : says;
       const full = range(e.start, e.end), compact = form === '' && !timeFits(w, '', full, iconPx(w) + (says ? 0 : chipPx(chip)));
-      const time = compact ? `<span class="pb-time" data-short="2">${esc(shortRange(e.start, e.end))}</span>` : `<span class="pb-time">${esc(full)}</span>`;
+      const short = shortRange(e.start, e.end), tight = compact && short.length * SUB_CHAR_PX > subRoom(w, says ? null : chip);
+      const time = compact ? `<span class="pb-time" data-short="2"${tight ? ' data-tight="1"' : ''}>${esc(short)}</span>` : `<span class="pb-time">${esc(full)}</span>`;
       body = form === 'md' ? `<div class="pb-head"><span class="pb-title">${title}</span>${time}${chipHtml(chip)}</div>`
         : `<div class="pb-head"><span class="pb-title">${title}</span>${chipHtml(says)}</div><div class="pb-sub">${time}${says ? '' : chipHtml(chip)}</div>`;
       list = items.slice(0, fit).map(it => `<li><label class="pb-item${it.done ? ' done' : ''}"><input type="checkbox" data-pitem="${esc(it.id)}"${it.done ? ' checked' : ''}><span>${esc(it.text)}</span>${!it.done && listDone(it) ? '<small>done</small>' : ''}</label></li>`).join('');
@@ -879,7 +898,10 @@
     const live = new Set(on ? entriesOn(shown).filter(e => !e.off && !e.skip && e.start <= m && m < e.end).map(e => e.ref) : []);
     for (const b of grid.querySelectorAll('.pblock[data-ref]')) b.classList.toggle('now', live.has(b.dataset.ref));
     for (const h of els.hours.children) {
-      const d = on ? parseFloat(h.style.top) - nowTop() : Infinity;
+      // Measured to where the label is drawn: the first and the last sit EDGE_HOUR_PX in from
+      // their lines (dashboard.html, .phour:first-child and :last-child).
+      const edge = h === els.hours.firstElementChild ? EDGE_HOUR_PX : h === els.hours.lastElementChild ? -EDGE_HOUR_PX : 0;
+      const d = on ? parseFloat(h.style.top) + edge - nowTop() : Infinity;
       h.dataset.now = Math.abs(d) < NOW_HIDE_PX ? 'at' : Math.abs(d) < NOW_CLEAR_PX ? d < 0 ? 'above' : 'below' : '';
     }
     for (const f of grid.querySelectorAll('.pfree')) f.hidden = isToday(shown) && +f.dataset.from < m;

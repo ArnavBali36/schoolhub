@@ -33,7 +33,9 @@ put them yourself, and writes a static page you open in your browser. Everything
 - **Tells you what changed**: due dates that moved, newly posted assignments, work due within 36
   hours that isn't done, and anything newly missing.
 - **Fails loudly**: if a course website changes shape, the parser refuses to guess — it reports the
-  problem and keeps showing the last good copy.
+  problem and keeps showing the last good copy. The same when Canvas or Gradescope cannot be read
+  (down for an hour, an expired token): the courses a sync could not read stay on the page as their
+  last good copy, marked so, until a sync can read them again.
 
 ## Install
 
@@ -145,11 +147,14 @@ deleted, its items, a meal changed or skipped for a day, an assignment dropped o
 it**, the weekly form and the hours shown). **Cmd+Z** or **Ctrl+Z** takes the last step back;
 **Shift+Cmd+Z**, **Shift+Ctrl+Z** or **Ctrl+Y** makes it again. One action is one step even when it
 saves several things, a new change clears what could be redone, and the page keeps about a hundred
-steps until it is closed or reloaded (a finished **Sync now** reloads it; a sync that runs by itself
-does not). The view and the theme are not data, so they are not steps.
+steps until it is closed or reloaded (a sync does not reload it, whether you pressed **Sync now** or
+it ran by itself). The view and the theme are not data, so they are not steps.
 
 - A toast names what happened, "Undid: moved Lunch to 3:00 PM", with **Redo** (or **Undo**) on it.
-  Deleting a task or a block offers **Undo** on its own toast, as before.
+  Deleting a task or a block offers **Undo** on its own toast, as before. From the moment you ask
+  until then the toast says "Undoing…": the step asks the server first, which can take a moment.
+- A key held down asks once, and at most one request waits behind the one that is running. So
+  presses made while the server is slow do not pile up and go on undoing after the keys are up.
 - While you type in a field the keys are the field's own undo. While a form is open (a task, a
   block, the week) and you are not typing, they do nothing, so nothing changes underneath the form.
 - What you deleted comes back as it was: a task under its own id with its fields, its ✓ and the time
@@ -160,8 +165,10 @@ does not). The view and the theme are not data, so they are not steps.
   on a hosted copy. It first asks the server what is stored now. If that is no longer what the step
   left (the same thing was changed on another device since), it takes back only its own change where
   the two do not touch (your move of one block, beside a block added on the phone), and where they do
-  it changes nothing and says "Can't undo: … It was changed somewhere else since." If the server
-  cannot be reached it changes nothing and the step stays, to try again.
+  it changes nothing and says "Can't undo: … It was changed somewhere else since." A block's start
+  and end are one time: if you changed one and another device the other, and taking yours back
+  would leave an end before its start, that is such a case too. If the server cannot be reached it
+  changes nothing and the step stays, to try again.
 
 `POST /api/mark` takes an optional `marked_at` for this: a mark put back keeps the time it was made
 (a UTC time that is not in the future; anything else is stamped now, as before). The Mac app's Edit
@@ -182,12 +189,20 @@ behind them, all together.
 - **The same answer changes nothing on the page.** A different one (a ✓ made on your phone, a new
   sync) is taken in place: the list is drawn again where it is, an open drawer stays open where you
   were reading, and the undo history stays.
-- **A copy is only shown, never saved from.** A ✓ made in the first moment shows at once and is
-  sent when the server has answered; a task's form waits for the same answer before it saves and
-  closes. The planner can be read from its copy and changed once
+- **A copy is shown, and nothing is saved on its word alone.** A ✓ made in the first moment shows
+  at once and is sent when the server has answered; until then its toast says "· waiting to save".
+  A task's form waits for the same answer before it saves and closes (its button reads "Saving…"
+  and takes no second press). The planner can be read from its copy and changed once
   the server's plan is here, usually well under a second; if that takes more than 1.2 s the day dims
   as it does whenever it loads. If the server does not answer at all, the page becomes the read-only
   view it always was then, and says a change could not be saved.
+- **Unless the page is put away first.** If the tab is hidden or closed (or the phone locked) while
+  a change still waits for that first answer, it is sent at that moment, to where the page saved
+  last time, in a request that outlives the page. Waiting would lose it with the page, after it had
+  shown as made. The server takes it or refuses it like any save.
+- **Two saves of one thing go in order.** A ✓ made and taken back before the first is answered is
+  sent as two requests, the second once the first has been answered, so the last one made is the
+  one that stays.
 - **What is kept:** the last sync's data (what `data.js` holds), your marks and tasks with where the
   page saves, and the planner's two weeks around today. One set per address and path, and per kind of
   site (the phone view has its own). Each copy carries the time it was kept and is ignored after 3
@@ -272,7 +287,7 @@ syncs twice a day. The rule is `next_sync` in `autosync.py`; the loop is in `ser
   whether it read every source (`complete`). So a sync you run from Terminal counts, and restarting
   the server forgets nothing. The file's date is not used: it changes when the file is copied or
   restored, and a sync that could not reach Canvas changes it too (that sync still writes `data.js`,
-  without what it could not read, and marks it incomplete).
+  with the last good copy of what it could not read, and marks it incomplete).
 - **Just awake, it waits two minutes.** After the server starts or the Mac wakes, a sync starts only
   once the Mac has been awake for two minutes in one stretch. That gives Wi-Fi time to come back,
   and it leaves out the short wakes a sleeping Mac makes to keep its network alive (seconds long,
@@ -280,11 +295,25 @@ syncs twice a day. The rule is `next_sync` in `autosync.py`; the loop is in `ser
 - **Offline, it waits for the network.** Before it starts, it checks that a connection to your
   Canvas server can be opened. If not, nothing is run and nothing counts as failed; it checks again
   a minute later, so the sync starts soon after the network is back.
-- **After a failure it tries again** 5 minutes later, then after 10, 20 and 40 minutes, and from
-  then on once an hour until a sync is good again. A failure is a sync that did not run to its end,
-  or one that left a source or a course unread. A file that could not be saved (too big, say) is
-  listed with the sync's issues but does not count: it would fail the same way every time. A good
-  sync or pressing Sync now starts the count again.
+- **After a failure it tries again** 5 minutes later, then after 10, 20 and 40 minutes, three times
+  an hour apart, then after 3 and 6 hours, and from then on every 12 hours, as on a good day. So
+  something that fails every time (an expired Canvas token, a changed Gradescope password) costs
+  about ten tries on the first day and two a day after, not a whole sync with its logins every hour
+  for ever. A failure is a sync that did not run to its end, or one that left a source or a course
+  unread. A file that could not be saved (too big, say) is listed with the sync's issues but does
+  not count: it would fail the same way every time. A good sync or pressing Sync now starts the
+  count again, so after fixing what was wrong, press Sync now rather than wait.
+- **What a sync could not read stays on the page.** A sync that cannot list your Canvas courses, or
+  read one of them, or sign in to Gradescope, keeps the last good copy of those courses (marked
+  "Showing the last good copy") instead of leaving them out, and still counts as a failure, so it
+  is tried again. The date-changed mark and the count of new files stay for a day, not only until
+  the next sync, which may come five minutes later.
+- **While a sync runs the Mac is kept from idle sleep** (macOS's own `caffeinate -i`, for that one
+  process). A sync takes a minute or two, and a Mac on battery left alone for a minute would
+  otherwise freeze it halfway. No setting is changed, and closing the lid still puts the Mac to
+  sleep.
+- **The save to the shared database is tried three times** (with Turso), a few seconds apart,
+  before it is reported with the sync's issues.
 - **Never two at once.** The server runs one sync at a time, and `sync.py` holds `state/sync.lock`
   while it runs: a second one, started from Terminal or cron meanwhile, stops at once.
 - **Off** until `config.json` exists, and with `SCHOOLHUB_AUTOSYNC=0`.
@@ -319,8 +348,10 @@ A hidden page asks nothing and runs no timer.
   (`data_at` differs), the page fetches `data.js` again and draws from it without loading again:
   where you had scrolled to, an open assignment, an open form and the undo history stay as they were.
   Only if that `data.js` cannot be read does the page stay as it is and show "New data · Refresh"
-  above the list. The page never reloads by itself for a sync it did not start; **Sync now** pressed
-  on that page still ends with a reload, to say how the sync went.
+  above the list. The page never reloads by itself for a sync, and **Sync now** pressed on that
+  page ends the same way: its data is taken in place, and a toast says how the sync went.
+- **"Synced 2h ago" keeps time**: it is said again at every look, and turns to its warning colour
+  once the data is over 30 hours old, on a page that has been open all the while too.
 - **A page brought back by the browser's Back or Forward button** (from its back/forward cache) asks
   for your marks, tasks and plan again, as a tab that comes back into view does.
 

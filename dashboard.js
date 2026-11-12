@@ -146,10 +146,25 @@ const dayDiff = d => Math.round((sod(d) - sod(now)) / 864e5);
 // Nothing is sent to be saved before the server itself has said where the page saves (known,
 // settled in "starting"). A page drawn from the copy kept from the last visit shows its ✓ buttons
 // at once, and a change made in that moment waits here: then it goes as it would have, or fails as
-// any save does when the server turns out not to answer.
-let nowKnown;
+// any save does when the server turns out not to answer. While it waits its toast says so (UNSENT).
+//
+// With one exception: the page put away before that answer (leaving: the tab hidden or closed,
+// the phone locked, another page opened). A change still waiting then would be lost with the page,
+// after it had shown as made. So what waits is sent at that moment, to where the copy says the
+// page saves, in a request that outlives the page (keepalive). The server takes it or refuses it
+// as it would any save, and where there turns out to be none it fails as any save does.
+let nowKnown, nowLeaving;
 const known = new Promise(done => { nowKnown = done; });
-const sending = to => known.then(() => { if (WRITE !== to) throw new Error('nowhere to save'); });
+const leaving = new Promise(done => { nowLeaving = done; });
+let answered = false;      // the server has said where the page saves (or has not answered)
+let held = true;           // until then, and until the page is put away, saves wait
+known.then(() => { answered = true; });
+const UNSENT = ' · waiting to save';
+Promise.race([known, leaving]).then(() => { held = false; $('#toast')?.querySelector('.unsent')?.remove(); });
+// It answers whether the save leaves early: before the server's own answer.
+const sending = to => Promise.race([known, leaving]).then(() => { if (WRITE !== to) throw new Error('nowhere to save'); return !answered; });
+document.addEventListener('visibilitychange', () => { if (document.hidden) nowLeaving(); });
+window.addEventListener('pagehide', () => nowLeaving());
 const answer = r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); };
 // Counts every save of a mark or a task as it is sent and as it is answered: marks and tasks read
 // before either moment may be older than the save's own answer, which holds them all, and are not
@@ -160,18 +175,32 @@ const saved = (path, sent) => {
   saves++;
   return sent.finally(() => { saves++; });
 };
-const api = (path, body) => sending('local').then(() => saved(path, fetch(path, {
-  method: 'POST', headers: {'Content-Type': 'application/json', 'X-SchoolHub': '1'}, body: JSON.stringify(body),
+const api = (path, body) => sending('local').then(early => saved(path, fetch(path, {
+  method: 'POST', headers: {'Content-Type': 'application/json', 'X-SchoolHub': '1'}, body: JSON.stringify(body), keepalive: early,
 }))).then(answer).then(r => heard(path, r));
 const getJson = path => fetch(path).then(answer).then(r => heard(path, r));
 const cloudApi = body => {
-  const ask = () => fetch('/api/state/', {
+  const ask = early => fetch('/api/state/', {
     method: body ? 'POST' : 'GET',
     headers: {'Content-Type': 'application/json', 'X-SchoolHub-Key': SITE_KEY},
     body: body ? JSON.stringify(body) : undefined,
+    keepalive: !!early,
   });
-  return (body ? sending('cloud').then(() => saved('cloud', ask())) : ask()).then(answer).then(r => heard('cloud', r));
+  return (body ? sending('cloud').then(early => saved('cloud', ask(early))) : ask()).then(answer).then(r => heard('cloud', r));
 };
+// Two saves of one thing (a ✓ and its taking back, a task saved twice) go in the order they were
+// made, the second once the first is answered. Sent together, as two that waited for the server's
+// first answer would be, either could arrive last, and the last to arrive is what stays. Only a
+// page being put away sends them at once (leaving): the second could not wait for an answer the
+// page will not be there to hear.
+const turns = {};
+function inTurn(id, send){
+  if (!id) return send();
+  const mine = turns[id] = Promise.race([turns[id], leaving]).then(send, send);
+  const done = () => { if (turns[id] === mine) delete turns[id]; };
+  mine.then(done, done);
+  return mine;
+}
 // ---- end of asking and saving ----
 // Same calls whether saving through your Mac's server or the phone site's cloud database.
 const backend = {
@@ -180,10 +209,10 @@ const backend = {
   async mark(id, done, a, as){
     const body = {id, done, name: as?.name ?? a?.name, course: as?.course ?? a?.course?.short};
     if (done && as?.marked_at) body.marked_at = as.marked_at;
-    return WRITE === 'cloud' ? (await cloudApi({action: 'mark', ...body})).marks : api('api/mark', body);
+    return inTurn(id, async () => WRITE === 'cloud' ? (await cloudApi({action: 'mark', ...body})).marks : api('api/mark', body));
   },
-  saveTask: body => WRITE === 'cloud' ? cloudApi({action: 'task', ...body}) : api('api/task', body),
-  deleteTask: id => WRITE === 'cloud' ? cloudApi({action: 'deleteTask', id}) : api('api/task/delete', {id}),
+  saveTask: body => inTurn(body.id, () => WRITE === 'cloud' ? cloudApi({action: 'task', ...body}) : api('api/task', body)),
+  deleteTask: id => inTurn(id, () => WRITE === 'cloud' ? cloudApi({action: 'deleteTask', id}) : api('api/task/delete', {id})),
   // What is stored now: an undo asks before it changes anything (see "undo and redo").
   marks: async () => WRITE === 'cloud' ? (await cloudApi()).marks : getJson('api/marks'),
   tasks: async () => WRITE === 'cloud' ? (await cloudApi()).tasks : (await getJson('api/tasks')).tasks,
@@ -400,7 +429,7 @@ function coursesView(vis){
       : `<li><a href="${esc(it.url || '#')}" target="_blank">${esc(it.name)}</a> <span class="muted">${esc(it.type)}</span></li>`).join('')
   }</ul></details>`).join('');
   return `<div class="courses"><nav class="clist" aria-label="Courses">${left}</nav><div>
-    <div class="chead"><h2>${esc(cur.name)}</h2>${cur.stale ? '<span class="note warn">Showing the last good copy (the site changed; see the issue above)</span>' : ''}
+    <div class="chead"><h2>${esc(cur.name)}</h2>${cur.stale ? '<span class="note warn">Showing the last good copy (the last sync could not read it; see the issue above)</span>' : ''}
       ${cur.url ? `<a href="${esc(cur.url)}" target="_blank">Open ${siteName(cur.url)} ↗</a>` : ''}
       ${cur.folder ? folderLink(cur.folder) : ''}</div>
     ${list.length ? `<div class="list">${list.map(row).join('')}</div>` : '<p class="empty">No assignments to show.</p>'}
@@ -427,7 +456,7 @@ function stats(){
     <div class="stat ${attention ? 'red' : ''}"><b>${attention}</b><span>Need attention</span></div>
     <div class="stat ${soon ? 'amber' : ''}"><b>${soon}</b><span>Due in the next 48h</span></div>
     <div class="stat"><b>${week}</b><span>Due in the next 7 days</span></div>
-    <div class="stat"><b>${D.new_files?.length || 0}</b><span>New files from last sync</span></div>
+    <div class="stat"><b>${D.new_files?.length || 0}</b><span>New files in the last day</span></div>
   </div>`;
 }
 
@@ -456,7 +485,8 @@ function refocus(within, keys){
 // is asked again with nothing to draw (reloadState).
 function showSynced(){
   // A public copy gives data with no sync time before the Mac's first sync has reached it.
-  const hrs = D.generated_at ? (now - new Date(D.generated_at)) / 36e5 : Infinity;
+  // (By the time it is now, not the time the page was opened: a page may stay open for days.)
+  const hrs = D.generated_at ? (Date.now() - new Date(D.generated_at)) / 36e5 : Infinity;
   $('#sync').textContent = D.generated_at ? 'Synced ' + ago(D.generated_at) : 'Not synced yet';
   // Its tooltip: the time itself, and when the Mac syncs next by itself ("the next sync").
   $('#sync').title = [D.generated_at ? new Date(D.generated_at).toLocaleString() : '', noteHere()].filter(Boolean).join('\n');
@@ -649,14 +679,19 @@ function closeDrawer(){
 // ---- mark as done, with undo ----
 let toastTimer = null;
 // action: what the toast's button does, named by label (Undo, unless said). ms: how long it stays.
-function toast(msg, action, {label = 'Undo', ms = UNDO_MS} = {}){
+// wait: it only says that something is on its way ("Undoing…"), until what came of it takes its place.
+function toast(msg, action, {label = 'Undo', ms = UNDO_MS, wait = false} = {}){
   clearTimeout(toastTimer);
   $('#toast')?.remove();
   const el = document.createElement('div');
   el.className = 'toast'; el.id = 'toast'; el.setAttribute('role', 'status');
   // A button for a step of the undo history (offerStep) goes when the next change is made.
   if (action?.step) el.dataset.step = '1';
-  el.innerHTML = `<span>${esc(msg)}</span>${action ? `<button type="button">${esc(label)}</button>` : ''}<i class="timer" style="animation-duration:${ms}ms"></i>`;
+  if (wait) el.dataset.wait = '1';
+  // A change made before the server's first answer has not been sent yet ("asking and saving"):
+  // its toast says so, until it is.
+  const unsent = held && action?.step ? `<span class="unsent">${esc(UNSENT)}</span>` : '';
+  el.innerHTML = `<span>${esc(msg)}${unsent}</span>${action ? `<button type="button">${esc(label)}</button>` : ''}<i class="timer" style="animation-duration:${ms}ms"></i>`;
   markEmoji(el);
   document.body.append(el);
   if (action) el.querySelector('button').onclick = () => { clearTimeout(toastTimer); el.remove(); action(); };
@@ -727,10 +762,13 @@ WIDE.addEventListener('change', () => render());
 // ---- your own tasks ----
 const taskDialog = $('#taskDialog');
 let editingTask = null;
+let taskForms = 0;          // counts the form's openings: a save's answer closes only the form it was pressed in
+let savingTask = false;     // Save was pressed and has not been answered: pressed again, nothing more is sent
 const pad = n => String(n).padStart(2, '0');
 function openTaskForm(id){
   const t = id ? tasks?.[id] : null;
   editingTask = t ? t.id : null;
+  taskForms++;
   $('#taskHeading').textContent = t ? 'Edit task' : 'New task';
   const preferred = t?.course_id || (state.view === 'courses' && state.course) || 'personal';
   $('#tCourse').innerHTML = [['personal', 'Personal'], ...courses.filter(c => c.id !== 'personal').map(c => [c.id, c.short || c.name])]
@@ -764,26 +802,38 @@ function took(m, t){
   if (changed) refreshTasks(t); else tasks = t;
   return changed;
 }
+// Save shows that it is on its way and takes no second press until it is answered (the answer may
+// be a while coming: on a slow connection, and for as long as the server's first answer is awaited).
+// Pressed twice it would make the task twice.
+function taskSaving(on){
+  savingTask = on;
+  const btn = $('#taskForm button[type="submit"]');
+  if (btn) { btn.disabled = on; btn.textContent = on ? 'Saving…' : 'Save'; }
+}
 async function saveTask(e){
   e.preventDefault();
+  if (savingTask) return;
   const name = $('#tName').value.trim();
   if (!name) return $('#tName').focus();
   const date = $('#tDate').value, time = $('#tTime').value;
   const body = {name, course_id: $('#tCourse').value, notes: $('#tNotes').value,
     due_at: date ? new Date(`${date}T${time || '23:59'}`).toISOString() : null, all_day: !!date && !time,
     pinned: $('#tPinned').checked};
-  if (editingTask) body.id = editingTask;
-  const was = editingTask && tasks?.[editingTask] || null;
+  // The task and the form this Save is for: the answer may come after another form was opened.
+  const editing = editingTask, form = taskForms;
+  if (editing) body.id = editing;
+  const was = editing && tasks?.[editing] || null;
+  taskSaving(true);
   try {
     const r = await backend.saveTask(body);
-    taskDialog.close();
+    if (taskForms === form) taskDialog.close();
     refreshTasks(r.tasks);
     // One step for undo, unless Save changed nothing.
     const step = sameTask(was, r.task) ? null : addStep(taskStep(was ? taskEdit(was, r.task) : `added “${name}”`, r.task.id, was, r.task));
-    toast(editingTask ? `Saved “${name}”` : `Added “${name}”`, offerStep(step));
+    toast(editing ? `Saved “${name}”` : `Added “${name}”`, offerStep(step));
   } catch {
     toast("Couldn't save the task. Check your connection and try again.");
-  }
+  } finally { taskSaving(false); }
 }
 function deleteTask(id){
   const removed = tasks?.[id];
@@ -819,6 +869,7 @@ $('#fab').onclick = () => openTaskForm();
 const UNDO_STEPS = 100;
 const steps = {undo: [], redo: []};
 let stepsMade = 0, travelling = Promise.resolve();
+let travels = 0;    // ways back asked for and not done with yet: the one running, and those waiting behind it
 const holds = [];   // while one of these answers true (a drag on the planner), the keys do nothing
 // Equal as stored: the same values whatever the order of an object's keys. Nothing there is null.
 function same(a, b){
@@ -853,28 +904,38 @@ function addStep(step, saved = true){
 function offerStep(step, dir = 'undo'){
   return step ? Object.assign(() => { if (steps[dir][steps[dir].length - 1] === step) travel(dir, {refocus: true}); }, {step: true}) : null;
 }
-const DID = {undo: 'Undid', redo: 'Redid'}, BACK = {undo: 'redo', redo: 'undo'};
+const DID = {undo: 'Undid', redo: 'Redid'}, DOING = {undo: 'Undoing…', redo: 'Redoing…'}, BACK = {undo: 'redo', redo: 'undo'};
+const WAIT_MS = 30000;      // "Undoing…" stays this long at most, should nothing ever come of it
+// The toast that says a way back is on its way goes, where nothing has taken its place.
+const endWait = () => { const el = $('#toast'); if (el?.dataset.wait) { clearTimeout(toastTimer); el.remove(); } };
 // One step back (or forward again). They run one at a time, in the order asked. o: {refocus} from a
 // toast's button.
 function travel(dir, o){
+  travels++;
   return travelling = travelling.then(async () => {
-    const from = steps[dir], to = steps[BACK[dir]], step = from.pop(), at = from.length, toAt = to.length, made = stepsMade;
-    if (!step) return toast(`Nothing to ${dir}`, null, {ms: 2000});
-    let r;
-    try { r = await step.settled ? await step[dir](o) : {ok: false, why: 'gone'}; }
-    catch (err) { console.error(err); r = {ok: false, why: 'failed'}; }
-    // A change made while this ran is the newest step: it cleared what could be redone.
-    const newest = made === stepsMade;
-    if (r.ok) {
-      if (dir === 'redo') to.splice(Math.min(toAt, to.length), 0, step);
-      else if (newest) to.push(step);
-      toast(`${DID[dir]}: ${step.label}`, newest ? offerStep(step, BACK[dir]) : null, {label: dir === 'undo' ? 'Redo' : 'Undo'});
-    } else if (r.why === 'failed') {
-      if (dir === 'undo' || newest) from.splice(Math.min(at, from.length), 0, step);
-      toast(`Couldn't ${dir} that. Check your connection and try again.`);
-    } else if (r.why === 'conflict') {
-      toast(`Can't ${dir}: ${step.label}. It was changed somewhere else since.`);
-    }
+    try {
+      const from = steps[dir], to = steps[BACK[dir]], step = from.pop(), at = from.length, toAt = to.length, made = stepsMade;
+      if (!step) return toast(`Nothing to ${dir}`, null, {ms: 2000});
+      // Said at once. The step waits for its own save and asks the server what is stored before it
+      // changes anything, and with a slow server the page would show nothing of the request until
+      // then (which invites a second press, and that one takes back an older step).
+      toast(DOING[dir], null, {ms: WAIT_MS, wait: true});
+      let r;
+      try { r = await step.settled ? await step[dir](o) : {ok: false, why: 'gone'}; }
+      catch (err) { console.error(err); r = {ok: false, why: 'failed'}; }
+      // A change made while this ran is the newest step: it cleared what could be redone.
+      const newest = made === stepsMade;
+      if (r.ok) {
+        if (dir === 'redo') to.splice(Math.min(toAt, to.length), 0, step);
+        else if (newest) to.push(step);
+        toast(`${DID[dir]}: ${step.label}`, newest ? offerStep(step, BACK[dir]) : null, {label: dir === 'undo' ? 'Redo' : 'Undo'});
+      } else if (r.why === 'failed') {
+        if (dir === 'undo' || newest) from.splice(Math.min(at, from.length), 0, step);
+        toast(`Couldn't ${dir} that. Check your connection and try again.`);
+      } else if (r.why === 'conflict') {
+        toast(`Can't ${dir}: ${step.label}. It was changed somewhere else since.`);
+      } else endWait();     // the change itself was never saved, and has said so
+    } finally { travels--; }
   });
 }
 // Where the keys are the field's own undo while typing: text, not a checkbox or a button.
@@ -883,17 +944,32 @@ const editingText = el => !!el && (!!el.isContentEditable || el.tagName === 'TEX
 // Undo or redo, asked by the keys or by the Mac app's Edit menu (SchoolHub.undo, SchoolHub.redo).
 // true: the page took it: it did it, or left it out on purpose (a form is open over the page, and
 // nothing changes underneath an open form). false: typing in a field, where it is the field's own.
-function requestStep(dir){
+// Each step asks the server before it changes anything, so with a slow one requests could pile up
+// and the page go on undoing for seconds after the keys were up, into steps nobody meant. So at
+// most one waits behind the one that is running (MAX_TRAVELS), and the rest are left out; a key
+// held down (again: the keyboard's own repeat) asks once.
+const MAX_TRAVELS = 2;
+function requestStep(dir, again){
   if (editingText(document.activeElement)) return false;
-  if (!document.querySelector('dialog[open] form') && !holds.some(fn => fn())) travel(dir);
+  if (!again && travels < MAX_TRAVELS && !document.querySelector('dialog[open] form') && !holds.some(fn => fn())) travel(dir);
   return true;
 }
 document.addEventListener('keydown', e => {
   if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
   const k = String(e.key).toLowerCase();
   const dir = k === 'z' ? (e.shiftKey ? 'redo' : 'undo') : k === 'y' && e.ctrlKey && !e.metaKey && !e.shiftKey ? 'redo' : '';
-  if (dir && requestStep(dir)) e.preventDefault();
+  if (dir && requestStep(dir, e.repeat)) e.preventDefault();
 });
+// Focus for a step taken back or made again from a toast's button, which went with its toast: the
+// thing's own ✓ (in the open drawer first: the list behind a drawer takes no focus), else other
+// (a selector), without scrolling. Never moved from where you put it meanwhile.
+function focusMark(id, other){
+  const sel = `[data-mark="${CSS.escape(id)}"]`;
+  for (const s of ['#drawer:not([hidden]) ' + sel, sel, other]) {
+    if (document.activeElement !== document.body) return;
+    if (s) document.querySelector(s)?.focus({preventScroll: true});
+  }
+}
 
 // A ✓ made or taken away. was: the mark before (null for none); now: the one the step left, known
 // once its save has answered. A mark is stored on its own under the assignment's id, so the way
@@ -911,7 +987,7 @@ function markStep(label, id, was){
     if (!left) return {ok: false, why: 'failed'};
     step[side] = left[id] || null;   // as the server keeps it now, for the way back
     // A toast's button went with the toast: focus goes to the assignment's ✓.
-    if (o?.refocus && document.activeElement === document.body) document.querySelector(`[data-mark="${CSS.escape(id)}"]`)?.focus();
+    if (o?.refocus) focusMark(id);
     return {ok: true};
   };
   step.undo = o => go(step.was, step.now, 'was', o);
@@ -930,19 +1006,21 @@ const taskEdit = (was, now) => sameTask({...was, pinned: pinnedTask(now)}, now)
   ? `${pinnedTask(now) ? 'pinned' : 'unpinned'} “${now.name}”` : `edited “${now.name}”`;
 function taskStep(label, id, was, now){
   const step = {label, id, was, now};
-  const go = async (to, from, side) => {
+  const go = async (to, from, side, o) => {
     let stored;
     try { stored = await backend.tasks(); } catch { return {ok: false, why: 'failed'}; }
     if (!sameTask(stored?.[id], from)) { refreshTasks(stored || {}); return {ok: false, why: 'conflict'}; }
-    try {
-      const r = to ? await backend.saveTask(to) : await backend.deleteTask(id);
-      refreshTasks(r.tasks);
-      step[side] = to ? r.task : null;   // as the server keeps it now, for the way back
-      return {ok: true};
-    } catch { return {ok: false, why: 'failed'}; }
+    let r;
+    try { r = to ? await backend.saveTask(to) : await backend.deleteTask(id); } catch { return {ok: false, why: 'failed'}; }
+    refreshTasks(r.tasks);
+    step[side] = to ? r.task : null;   // as the server keeps it now, for the way back
+    // A toast's button went with the toast: focus goes to the task's ✓ where it is there again,
+    // else to the + button, never left on <body>.
+    if (o?.refocus) focusMark(id, '#fab');
+    return {ok: true};
   };
-  step.undo = () => go(step.was, step.now, 'was');
-  step.redo = () => go(step.now, step.was, 'now');
+  step.undo = o => go(step.was, step.now, 'was', o);
+  step.redo = o => go(step.now, step.was, 'now', o);
   return step;
 }
 // ---- end of undo and redo ----
@@ -955,9 +1033,17 @@ function showSyncing(on){
   syncBtn.textContent = on ? 'Syncing…' : 'Sync now';
   if (on) hideSyncNote();
 }
-// Sync now pressed on this page (pressed): the page waits for that sync and loads again when it
-// ends, to say how it went. The only time the page loads again without being asked to.
+// Sync now pressed on this page (pressed): the page waits for that sync, and when it ends takes its
+// data in place, as it does for a sync that ran by itself (heardSync, below), and says how it
+// went. The page is not loaded again for it: a form being filled in and the undo history stay.
 let pressed = false;
+// How a sync went, in a line, from api/sync's answer.
+function syncSaid(s){
+  const lines = (s.output || '').split('\n');
+  const summary = lines.find(l => l.startsWith('[schoolhub]'))?.replace('[schoolhub] ', '') || '';
+  const issues = lines.filter(l => /^(⚠️|🔎|❌)/.test(l)).length;
+  return s.ok ? `Sync finished${summary ? ' · ' + summary : ''}${issues ? ` · ${issues} alert(s)` : ''}` : 'Sync failed. See state/sync.log';
+}
 async function pollSync(){
   let s;
   try { s = await getJson('api/sync'); } catch {
@@ -967,8 +1053,12 @@ async function pollSync(){
     return toast("Couldn't reach the SchoolHub server.");
   }
   if (s.running) { showSyncing(true); return setTimeout(pollSync, 2000); }
-  try { sessionStorage.setItem('sh:synced', JSON.stringify({ok: s.ok, output: s.output})); } catch {}
-  location.reload();
+  pressed = running = false;
+  showSyncing(false);
+  // The new data.js, if the sync left one (a failed one may have, too).
+  try { await heardSync(s); } catch (err) { console.error(err); }
+  toast(syncSaid(s));
+  watchSync();
 }
 
 // The next sync. The Mac's server syncs by itself once the last good sync is over 12 hours old
@@ -1078,13 +1168,16 @@ async function lookAtSync(){
     if (s) await heardSync(s);
     // No answer: Sync now is not left saying "Syncing…" for a sync nobody can see end.
     else if (running && !pressed) { running = false; showSyncing(false); }
+    // "Synced 2h ago" is said for now at every look: a page left open keeps its data across syncs
+    // (it is not loaded again), and the label is what says how old that data is.
+    if (D) showSynced();
   } catch (err) { console.error(err); }
   looking = false;
   watchSync();
 }
 async function heardSync(s){
   setSyncNote(nextSyncNote(s));
-  if (pressed) return;            // Sync now's own wait is on, and ends with its load
+  if (pressed) return;            // Sync now's own wait is on, and takes the data itself when it ends (pollSync)
   soon = false;
   if (s.running) { running = true; return showSyncing(true); }
   if (running) { running = false; showSyncing(false); }
@@ -1137,26 +1230,21 @@ function enableServerFeatures(){
     .catch(() => toast("Couldn't start a sync. Is the SchoolHub server running?"));
   // Whether a sync is running now and when the next will; from here on, whether one ran.
   lookAtSync();
-  let done = null;
-  try { done = JSON.parse(sessionStorage.getItem('sh:synced')); sessionStorage.removeItem('sh:synced'); } catch {}
-  if (done) {
-    const summary = (done.output || '').split('\n').find(l => l.startsWith('[schoolhub]'))?.replace('[schoolhub] ', '') || '';
-    const issues = (done.output || '').split('\n').filter(l => /^(⚠️|🔎|❌)/.test(l)).length;
-    toast(done.ok ? `Sync finished${summary ? ' · ' + summary : ''}${issues ? ` · ${issues} alert(s)` : ''}` : 'Sync failed. See state/sync.log');
-  }
 }
 // ---- end of sync now ----
 
 // Pick up changes made on your other device when you come back to this tab.
-async function reloadState(){
+async function reloadState(tries = 3){
   try {
     const before = saves;
     let s = null;
     if (WRITE === 'cloud') s = await cloudApi();
     else if (WRITE === 'local') s = {marks: await getJson('api/marks'), tasks: (await getJson('api/tasks')).tasks};
     // A save went out or came back meanwhile: its answer is the newer one, and this one is left.
+    // (Asked once or twice more: on your Mac a save's own answer holds the marks or the tasks, not both.)
+    if (s && before !== saves) { if (tries > 1) return reloadState(tries - 1); }
     // Nothing changed: nothing is drawn again, but "Synced 2h ago" is said for now.
-    if (s && before === saves && !took(s.marks, s.tasks)) showSynced();
+    else if (s && !took(s.marks, s.tasks)) showSynced();
   } catch {}
   emit('reload');
 }
@@ -1276,6 +1364,7 @@ function start(){
   // (The tasks not answering alone leaves those of the last sync, as it always did.)
   const asked = PHONE ? cloudApi()
     : Promise.all([getJson('api/marks'), where, getJson('api/tasks').catch(() => null)]).then(([m, at, t]) => ({marks: m, tasks: t?.tasks ?? null, at}));
+  const sent = saves;      // (a save leaves before the answer only when the page is put away: "asking and saving")
   asked.then(got => {
     // Another place than the copy's (or no copy): the page is drawn again whatever the marks are.
     const moved = !copy || (!PHONE && !same(copy.at, got.at));
@@ -1284,7 +1373,10 @@ function start(){
     keepState();
     PROBING = false;
     if (PHONE) $('#fab').hidden = false; else enableServerFeatures();
-    if (!took(got.marks, got.tasks) && moved) refresh();
+    // A save that left before this answer may be newer than the marks and tasks in it, as on
+    // coming back to a tab: they are asked for again (reloadState) rather than taken.
+    if (saves !== sent) { if (moved) refresh(); reloadState(); }
+    else if (!took(got.marks, got.tasks) && moved) refresh();
   }, () => {
     // Asked, and not answered: drawn again without the banner's wait, so a page that cannot save
     // says so. One drawn from a copy goes back to what it is without it.

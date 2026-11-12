@@ -421,7 +421,14 @@ changes to it.
     field, blocks and items by id), cleaned like any edit, so a block added on the phone stays;
   - where the step and the other change touched the same thing (the block was moved again, or the
     step would delete a block that has a new item), nothing is saved, the step goes, and the toast
-    says "Can't undo: … It was changed somewhere else since."
+    says "Can't undo: … It was changed somewhere else since." A start and an end are one time: where
+    the step changed one and the other change the other, and the two merged would leave an end at
+    or before its start, that is a conflict too (cleaning would otherwise quietly make five minutes
+    of it);
+  - the answer to that question carries the settings and the whole week, and they are taken with
+    it: the merged date is cleaned against the week the server has now, not the one the page has
+    had for a while (which would drop a repeating block's to-dos for the day that another device
+    added since);
   - the settings and a weekday going back to the defaults are stored as no key, which is what they
     were before their first change.
 - **Where it shows.** Taking a step back shows the date it happened on. An open details card follows
@@ -429,6 +436,14 @@ changes to it.
   open and no field has focus; in a field they are the field's own.
 - **When it fails.** If the server cannot be asked, nothing changes and the step stays. If the
   change itself failed to save, it is put back on the page and is no step.
+- **Added 2026-11-12, after review.** The toast says "Undoing…" (or "Redoing…") from the request
+  until its result, since the step asks the server first. At most one request waits behind the one
+  running, and a held key asks once. The now line's pill is measured against where the day's first
+  and last hour labels are drawn (3 px in from their lines), so it no longer sits on "12 AM" for a
+  few minutes each evening. On a narrow block's second line a time that does not fit whole is left
+  out (it shows while the block is dragged) rather than cut to "9:30–1…", which read as another
+  time. In Night an item's tick box on a bar is the bar's own ink, and the date and time fields
+  draw their edge as an inner shadow, which WebKit paints where it drops the border.
 
 ### Added 2026-11-11: details on hover
 
