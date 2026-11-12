@@ -250,7 +250,7 @@ class PlannerPageTest(unittest.TestCase):
         # initial with its name in the label, and a block cut by the hours shown is marked so.
         self.assertIn("const INITIAL = {meal: 'M', deep: 'D', social: 'S', other: 'B'};", PLANNER)
         self.assertIn("body = `<span class=\"pb-ini\">${INITIAL[e.kind]}</span>`;", PLANNER)
-        self.assertIn('aria-label="${esc(spoken(e))}"${tip}', PLANNER)
+        self.assertIn('aria-label="${esc(spoken(e))}"></button>', PLANNER)
         self.assertIn("e.cutTop && 'cut-top', e.cutBottom && 'cut-bottom'", PLANNER)
         self.assertIn(".pblock.cut-top{border-top:2px dashed var(--pb-edge)", HTML)
         self.assertIn('<span class="pb-n">+${rest}</span>', PLANNER)
@@ -1552,3 +1552,551 @@ console.log(JSON.stringify({
         self.assertEqual(m["mealItems"], {"meals": {"lunch": {"items": [{"id": "call", "kind": "own", "text": "call", "done": False}]}}})
         self.assertEqual(m["hours"], [{"day_start": 5, "day_end": 23}, "CONFLICT"])
         self.assertEqual(m["same"], [True, True, False, True, False, False])
+
+
+# ---- a preview on hover (planner.js "what the details say", "a preview on hover") ----
+SAYS_START, SAYS_END = "  // ---- what the details say ----", "  // ---- the details card ----"
+TIP_START, TIP_END = "  // ---- a preview on hover ----", "  // ---- the weekly form ----"
+
+
+def tip_section():
+    return PLANNER[PLANNER.index(TIP_START):PLANNER.index(TIP_END)]
+
+
+def _texts(html):
+    """The pieces of text in a piece of HTML, and the names given with aria-label."""
+    return [t.strip() for t in re.split(r"<[^>]*>", html) if t.strip()]
+
+
+class PreviewSourceTest(unittest.TestCase):
+    """Resting the pointer on a block, a flag or their chips (or focusing one from the keyboard)
+    shows its details beside it: where that is wired, and what it must never do."""
+
+    def test_one_element_only_to_read(self):
+        self.assertIn('<div class="ptip" id="planTip" role="tooltip" hidden></div>', HTML)
+        rule = re.search(r"^\.ptip\{.*?\}$", HTML, re.M | re.S).group(0)
+        # It never takes the pointer, floats over the page, and stays within the window.
+        self.assertIn("pointer-events:none", rule)
+        self.assertIn("position:fixed", rule)
+        self.assertIn("max-width:min(300px,calc(100vw - 16px))", rule)
+        self.assertIn(".ptip[hidden]{display:none}", HTML)
+        # Described while it shows, by the block's own button; focus never moves into it.
+        tip = tip_section()
+        self.assertIn("tipButton(el)?.setAttribute('aria-describedby', 'planTip');", tip)
+        self.assertIn("root.querySelector('[aria-describedby=\"planTip\"]')?.removeAttribute('aria-describedby')", tip)
+        self.assertNotIn(".focus(", tip)
+        self.assertNotIn("tabindex", tip.lower())
+        self.assertIn("SH.markEmoji?.(tipEl);", tip)
+
+    def test_what_has_a_preview_has_no_title(self):
+        # A block, a flag and the chips of both carry the preview's key, and no title to say it twice.
+        self.assertEqual(PLANNER.count("""data-tip="${esc('b:' + e.ref)}\""""), 2)   # a block, and its chip in the strip
+        self.assertEqual(PLANNER.count("""data-tip="${esc('d:' + a.id)}\""""), 2)    # a flag, and a chip of something due
+        drawn = [line for line in PLANNER.splitlines() if "data-tip=" in line or "data-open-ref=" in line or "data-plan-due=" in line and "<button" in line]
+        self.assertGreaterEqual(len(drawn), 5)
+        for line in drawn:
+            self.assertNotIn(" title=", line)
+        self.assertNotIn("const tip = ` title=", PLANNER)
+
+    def test_the_card_and_the_preview_are_written_by_the_same_code(self):
+        says = PLANNER[PLANNER.index(SAYS_START):PLANNER.index(SAYS_END)]
+        self.assertIn("${detailsHtml(e, false)}", PLANNER[PLANNER.index(SAYS_END):PLANNER.index(TIP_START)])
+        self.assertIn("return e && !e.off && !e.skip ? detailsHtml(e, true) : '';", tip_section())
+        self.assertIn("return a ? dueHtml(a) : '';", tip_section())
+        # Each fact is written in one place only.
+        for fact in ("${esc(range(e.start, e.end))} · ${esc(duration(e.end - e.start))}", "'At ' + esc(e.place)", "notes.push(`Repeats every ${wdN}`)",
+                     "'Due ' + esc(SH.fmtDue(a.due_at, true, a.all_day))", "const [st, cls] = workStatus(a);"):
+            self.assertEqual(PLANNER.count(fact), 1, fact)
+            self.assertIn(fact, says)
+
+    def test_listeners_are_on_the_planner_and_the_page_and_one_timer_runs(self):
+        # Blocks are drawn anew often: nothing is added to a block, and nothing is left running.
+        tip = tip_section()
+        added = re.findall(r"([\w.]+)\.addEventListener\('(\w+)'", tip)
+        self.assertEqual(sorted(added), sorted([("root", "pointermove"), ("root", "pointerleave"), ("root", "focusin"), ("root", "focusout"),
+                                                ("document", "pointerdown"), ("document", "keydown"), ("document", "focusin"),
+                                                ("window", "scroll"), ("window", "resize"), ("window", "blur")]))
+        self.assertEqual(tip.count("setTimeout("), tip.count("tipTimer = setTimeout("))
+        self.assertEqual(tip.count("setTimeout("), 2)   # the wait before it shows, and before it goes
+        for banned in ("setInterval", "requestAnimationFrame", "MutationObserver", "mouseover", "pointerover", ".onpointer", ".onmouse"):
+            self.assertNotIn(banned, tip)
+        self.assertNotIn("MutationObserver", PLANNER)
+        self.assertIn("    clearTimeout(tipTimer);\n    tipTimer = 0;\n    aim = null;\n    if (!tip) return;", tip)
+
+    def test_when_it_goes_and_when_it_never_comes(self):
+        tip = tip_section()
+        # No touch, no button down, nothing dragged, nothing open over the page.
+        self.assertIn("if (e.pointerType === 'touch' || e.buttons) return;", tip)
+        self.assertIn("const tipBlocked = () => !tipEl || SH.plannerState !== 'on' || !plan || !!drag || SH.drawerOpen() || !!document.querySelector('dialog[open]');", tip)
+        # A press anywhere (seen before the timeline's own handler), Esc, a scroll, focus going elsewhere.
+        self.assertIn("document.addEventListener('pointerdown', e => { tabbed = false; quietTip(tipKey(e.target)); }, true);", tip)
+        self.assertIn("if (e.key === 'Escape' && (tip || aim)) quietTip((tip || aim).key);", tip)
+        self.assertIn("window.addEventListener('scroll', () => { at = null; if (aim?.by !== 'focus') hideTip(); }, true);", tip)
+        self.assertIn("      if (tip && !root.contains(e.target)) hideTip();", tip)
+        # The keyboard's focus only, brought by Tab onto the block's own button: never focus the page
+        # itself puts back (a redraw, a dialog closing, the window coming back to the front).
+        self.assertIn("rest(back || (own && tabbed) ? on : null, 'focus');", tip)
+        self.assertIn("      tabbed = e.key === 'Tab';", tip)
+        self.assertIn("window.addEventListener('blur', () => { at = null; tabbed = false; hideTip(); });", tip)
+        # The card and the drawer opening send it away; a redraw keeps it with the plan.
+        self.assertIn("    if (det) closeDetails(false);\n    quietTip('b:' + entry.ref);", PLANNER)
+        self.assertIn("    if (due) quietTip('d:' + due.dataset.planDue);\n    if (due) return SH.openDrawer(due.dataset.planDue, e.detail === 0);", PLANNER)
+        self.assertIn("    syncDetails();\n    syncTip();\n  }", PLANNER)
+        self.assertIn("const HOVER_MS = 350;", tip)
+
+    def test_its_look_follows_the_theme_motion_and_transparency(self):
+        rules = "\n".join(re.findall(r"^[^\n{]*\.(?:ptip|pd-tick|pd-rest|pd-notes)[^\n{]*\{[^}]*\}", HTML, re.M))
+        self.assertIn("background:var(--glass-thick)", rules)
+        self.assertIn("backdrop-filter:var(--glass-blur-thick)", rules)
+        # Every color is a token, so Night's stay red (no blue) and reduced transparency makes it
+        # solid (the glass tokens), as for the details card.
+        self.assertNotRegex(rules, r"#[0-9a-fA-F]{3,8}\b")
+        self.assertNotRegex(rules, r"rgba?\(|hsla?\(|(?<![-\w])(?:white|black|blue)(?![-\w])")
+        self.assertIn(':root:is([data-theme="dark"],[data-theme="red"]) .ptip{background:var(--surface);border-color:var(--border-strong);-webkit-backdrop-filter:none;backdrop-filter:none}', HTML)
+        self.assertRegex(HTML, r"@media \(prefers-reduced-transparency:reduce\)\{:root,:root\[data-theme\]\{--glass:var\(--surface\);--glass-thick:var\(--surface\);--glass-blur:none;--glass-blur-thick:none\}\}")
+        # Nothing moves for those who ask for less motion.
+        self.assertIn("animation:sh-tip-in var(--dur-1) var(--ease-out)", rules)
+        self.assertIn("aside,dialog.task[open],dialog.pdetail[open],.ptip{animation:none}", HTML)
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class PreviewFactsTest(unittest.TestCase):
+    """What the preview says is what the details card says: planner.js's own detailsHtml and dueHtml,
+    with the list stood in for."""
+
+    @classmethod
+    def setUpClass(cls):
+        plan_pure = PLANNER[PLANNER.index(PLAN_START):PLANNER.index(PLAN_END)]
+        says = PLANNER[PLANNER.index(SAYS_START):PLANNER.index(SAYS_END)]
+        script = esc_source() + plan_pure + """
+const at = (days, h) => { const d = new Date(); d.setDate(d.getDate() + days); d.setHours(h, 0, 0, 0); return d.toISOString(); };
+const list = {
+  'canvas:9': {id: 'canvas:9', name: 'HW 9 <proofs>', course: {name: '21-127 Concepts', short: '21-127'}, due_at: at(1, 12)},
+  'canvas:8': {id: 'canvas:8', name: 'HW 8', course: {short: '21-127'}, due_at: at(-1, 12)},
+  'canvas:7': {id: 'canvas:7', name: 'HW 7', course: {name: '21-127 Concepts'}, due_at: at(-3, 12)},
+  'task:1': {id: 'task:1', is_task: true, name: 'Call home', notes: 'After 6\\nBring the <form>', course: {name: 'Personal'}, due_at: null},
+};
+const done = new Set(['canvas:7']);
+const SH = {byId: id => list[id], isDone: a => done.has(a.id), dot: c => '<span class="dot"></span>', fmtDue: (iso, long, allDay) => 'the ' + new Date(iso).getDate() + 'th'};
+let shown = todayIso(), can = true;
+const settings = () => ({day_start: 5, day_end: 24}), editable = () => can;
+""" + says + """
+const own = (n, isDone) => ({id: 'own' + n, kind: 'own', text: 'To-do ' + n, done: isDone});
+const block = {ref: 'block:b1', kind: 'deep', title: 'Concepts <review>', start: 1215, end: 1320, repeat: true, changed: true, items: [
+  own(1, true), {id: 'w9', kind: 'work', ref: 'canvas:9', text: 'old name', course: '21-127', done: false},
+  {id: 'w8', kind: 'work', ref: 'canvas:8', text: 'HW 8', course: '21-127', done: true}, {id: 'gone', kind: 'work', ref: 'canvas:1', text: 'Dropped quiz', course: '15-122', done: false},
+  {id: 'w7', kind: 'work', ref: 'canvas:7', text: 'HW 7', course: '', done: false}, own(6, false), own(7, false), own(8, true)]};
+const lunch = {ref: 'meal:lunch', kind: 'meal', meal: 'lunch', title: 'Lunch', start: 900, end: 960, place: 'Chipotle & Co', items: []};
+const early = {ref: 'block:b2', kind: 'other', title: 'Run', start: 240, end: 330, items: [own(1, false)]};
+console.log(JSON.stringify({
+  card: detailsHtml(block, false), tip: detailsHtml(block, true),
+  lunchCard: detailsHtml(lunch, false), lunchTip: detailsHtml(lunch, true),
+  noPlace: detailsHtml({...lunch, place: '', placeChanged: false}, true),
+  earlyCard: detailsHtml(early, false), earlyTip: detailsHtml(early, true),
+  locked: (() => { can = false; const h = detailsHtml(early, false); can = true; return h; })(),
+  due: dueHtml(list['canvas:9']), late: dueHtml(list['canvas:8']), finished: dueHtml(list['canvas:7']), task: dueHtml(list['task:1']),
+  wd: wdName(shown), items: TIP_ITEMS,
+}));
+"""
+        cls.out = run_node(script)
+
+    def test_the_preview_says_what_the_card_says(self):
+        o = self.out
+        for card, tip in ((o["card"], o["tip"]), (o["lunchCard"], o["lunchTip"]), (o["earlyCard"], o["earlyTip"])):
+            card_texts = _texts(card)
+            for text in _texts(tip):
+                if not re.fullmatch(r"\+\d+ more", text):
+                    self.assertIn(text, card_texts)
+        texts = _texts(o["tip"])
+        self.assertEqual(texts[:4], ["Deep work", "Concepts &lt;review&gt;", "8:15–10:00 PM · 1 hr 45 min", f"Repeats every {o['wd']} · changed for today only"])
+        self.assertEqual(texts[4], "Things to get done")
+        # A work item: its name as the list has it now, its course, due date and status.
+        self.assertIn("HW 9 &lt;proofs&gt;", texts)
+        self.assertNotIn("old name", texts)
+        at = texts.index("HW 9 &lt;proofs&gt;")
+        self.assertEqual(texts[at + 1:at + 4], ["21-127 Concepts", "Due the " + texts[at + 2].split(" the ")[1], "Due tomorrow"])
+        self.assertEqual(texts[texts.index("HW 8") + 1:texts.index("HW 8") + 4][::2], ["21-127", "Overdue"])
+        self.assertEqual(texts[texts.index("HW 7") + 3], "Done")
+        self.assertEqual(texts[texts.index("Dropped quiz") + 1:texts.index("Dropped quiz") + 3], ["15-122", "No longer in your list"])
+        self.assertEqual(_texts(o["lunchTip"]), ["Meal", "Lunch", "3:00–4:00 PM · 1 hr", "At Chipotle &amp; Co", f"Same every {o['wd']}"])
+        self.assertIn("No place set", _texts(o["noPlace"]))
+        self.assertIn("Runs past the hours shown", _texts(o["earlyTip"]))
+
+    def test_the_preview_is_only_read(self):
+        o = self.out
+        for html in (o["tip"], o["lunchTip"], o["earlyTip"], o["due"], o["task"]):
+            for control in ("<input", "<button", "<a ", "<label", " id=", "data-pd-", "tabindex", "aria-labelledby"):
+                self.assertNotIn(control, html)
+        # The card keeps its boxes to press and its ids; a plan still loading locks them.
+        self.assertEqual(o["card"].count('<input type="checkbox" data-pd-item='), 8)
+        self.assertIn('<h3 id="pdTitle">', o["card"])
+        self.assertIn('data-pd-open="canvas:9"', o["card"])
+        self.assertIn(" disabled>", o["locked"])
+        # The preview draws each item's tick, and names it for a screen reader.
+        self.assertEqual(o["items"], 6)
+        self.assertEqual(o["tip"].count('<span class="pd-tick'), 6)
+        self.assertEqual(re.findall(r'<span class="pd-tick( on)?" role="img" aria-label="(Done|To do)">', o["tip"]),
+                         [(" on", "Done"), ("", "To do"), (" on", "Done"), ("", "To do"), ("", "To do"), ("", "To do")])
+        self.assertEqual(o["tip"].count('<li class="pd-item done">'), 2)
+        # Six items, then how many more; the card lists them all.
+        self.assertIn('<li class="pd-rest">+2 more</li>', o["tip"])
+        self.assertNotIn("To-do 7", o["tip"])
+        self.assertIn("To-do 8", o["card"])
+        self.assertNotIn("pd-rest", o["card"])
+        # A block holding nothing says so on the card, where Edit is at hand.
+        self.assertNotIn("Things to get done", o["lunchTip"])
+        self.assertIn("Nothing yet. Edit the block", o["lunchCard"])
+
+    def test_what_is_due_says_its_course_when_and_how_it_stands(self):
+        o = self.out
+        self.assertEqual(_texts(o["due"])[0], "HW 9 &lt;proofs&gt;")
+        self.assertEqual(_texts(o["due"])[1], "21-127 Concepts")
+        self.assertRegex(_texts(o["due"])[2], r"^Due the \d+th$")
+        self.assertEqual(_texts(o["due"])[3], "Due tomorrow")
+        self.assertIn('<span class="pd-st warn">Due tomorrow</span>', o["due"])
+        self.assertIn('<span class="pd-st bad">Overdue</span>', o["late"])
+        self.assertIn('<span class="pd-st good">Done</span>', o["finished"])
+        self.assertNotIn("pd-notes", o["due"])
+        # A task's notes, escaped.
+        # With no due date that is said once, not again as its status.
+        self.assertEqual(_texts(o["task"]), ["Call home", "Personal", "No due date", "After 6\nBring the &lt;form&gt;"])
+        self.assertIn('<p class="pd-line pd-notes">', o["task"])
+
+
+# The planner's page stood in for, for the preview: elements with a box, a data-tip and a button; the
+# listeners planner.js adds, kept to be fired; and a clock the test moves.
+TIP_PAGE = """
+const timers = [];
+let now = 0, seq = 0;
+const setTimeout = (fn, ms) => { timers.push({id: ++seq, at: now + ms, fn}); return seq; };
+const clearTimeout = id => { const i = timers.findIndex(t => t.id === id); if (i >= 0) timers.splice(i, 1); };
+function tick(ms){
+  const end = now + ms;
+  for (;;) {
+    const due = timers.filter(t => t.at <= end).sort((a, b) => a.at - b.at)[0];
+    if (!due) break;
+    timers.splice(timers.indexOf(due), 1);
+    now = due.at;
+    due.fn();
+  }
+  now = end;
+}
+class El {
+  constructor(name, tip, rect, isButton){ Object.assign(this, {name, dataset: tip ? {tip} : {}, rect, isButton: !!isButton, attrs: {}, kids: []}); }
+  add(kid){ kid.parent = this; this.kids.push(kid); return kid; }
+  closest(sel){ if (sel !== '[data-tip]') throw new Error(sel); for (let e = this; e; e = e.parent) if (e.dataset.tip) return e; return null; }
+  matches(sel){ if (sel === 'button') return this.isButton; if (sel === '.pflag-wrap') return this.name === 'flag'; throw new Error(sel); }
+  querySelector(sel){ if (sel !== 'button') throw new Error(sel); return this.kids.find(k => k.isButton) || null; }
+  getBoundingClientRect(){ return this.rect; }
+  setAttribute(k, v){ this.attrs[k] = v; }
+  removeAttribute(k){ delete this.attrs[k]; }
+}
+const box = (left, top, w, h) => ({left, top, right: left + w, bottom: top + h, width: w, height: h});
+const page = {els: [], dialog: false, drawer: false, focus: null, on: {root: {}, document: {}, window: {}}, vw: 1400, vh: 900};
+const listen = where => (type, fn) => { (page.on[where][type] ||= []).push(fn); };
+const fire = (where, type, e = {}) => { for (const fn of page.on[where][type] || []) fn(e); };
+const blank = new El('the timeline', null, box(840, 150, 440, 700));       // the planner where nothing is
+const elsewhere = new El('the list', null, box(40, 150, 700, 700));        // outside the planner
+const all = () => page.els.flatMap(e => [e, ...e.kids]);
+const root = {addEventListener: listen('root'), contains: el => el === blank || all().includes(el),
+  querySelector(sel){
+    const m = /^\\[data-tip="(.*)"\\]$/.exec(sel);
+    if (m) return page.els.find(e => e.dataset.tip === m[1]) || null;
+    if (sel === '[aria-describedby="planTip"]') return all().find(e => e.attrs['aria-describedby'] === 'planTip') || null;
+    throw new Error(sel);
+  }};
+const tipNode = {hidden: true, innerHTML: '', style: {}, dataset: {}, offsetWidth: 240, offsetHeight: 120};
+const document = {addEventListener: listen('document'), getElementById: id => id === 'planTip' ? tipNode : null, get activeElement(){ return page.focus; },
+  querySelector: sel => sel === 'dialog[open]' && page.dialog ? {} : null, documentElement: {get clientWidth(){ return page.vw; }}};
+const window = {addEventListener: listen('window'), get innerHeight(){ return page.vh; }};
+const CSS = {escape: s => s};
+let marked = 0;
+const SH = {plannerState: 'on', drawerOpen: () => page.drawer, byId: id => id === 'gone' ? null : {id}, markEmoji(){ marked++; }};
+let plan = {}, drag = null;
+const facts = {};
+const entryByRef = ref => facts[ref] || null;
+const detailsHtml = (e, preview) => `${preview ? 'preview' : 'card'} of ${e.title}`;
+const dueHtml = a => `due ${a.id}`;
+"""
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class PreviewBehaviourTest(unittest.TestCase):
+    """planner.js's own preview code against a stand-in for the page: when it shows, when it goes,
+    where it is put, and that nothing is left waiting."""
+
+    @classmethod
+    def setUpClass(cls):
+        script = TIP_PAGE + tip_section() + """
+// Two blocks one under the other, a flag in the lane and a chip in the strip. draw() draws them anew
+// as render() does: new elements, focus put back on the one that had it, then syncTip().
+function draw(boxes = {}){
+  const block = (name, ref, r) => { const el = new El(name, 'b:' + ref, r); el.add(new El(name + "'s button", null, r, true)); el.add(new El(name + "'s checkbox", null, r)); return el; };
+  const flag = new El('flag', 'd:hw9', boxes.flag || box(1290, 800, 82, 22));
+  flag.add(new El("flag's button", null, flag.rect, true));
+  const had = page.focus?.name;
+  page.els = [block('Lunch', 'meal:lunch', boxes.lunch || box(906, 500, 363, 20)), block('Gym', 'block:gym', boxes.gym || box(906, 522, 363, 60)), flag,
+    new El('chip', 'b:block:late', box(860, 160, 120, 26), true)].filter(e => !(boxes.without || []).includes(e.name));
+  if (had) { page.focus = el(had) || null; if (page.focus) arrive(page.focus); }
+  syncTip();
+}
+Object.assign(facts, {'meal:lunch': {title: 'Lunch'}, 'block:gym': {title: 'Gym'}, 'block:late': {title: 'Late'}});
+function el(name){ return all().find(e => e.name === name); }
+const move = (target, x, y, o = {}) => fire('root', 'pointermove', {target, clientX: x, clientY: y, pointerType: 'mouse', buttons: 0, ...o});
+const onto = (name, o) => { const t = el(name), r = t.rect; move(t.kids[0] || t, (r.left + r.right) / 2, (r.top + r.bottom) / 2, o); };
+const off = () => move(blank, 1000, 300);
+const press = (name, o = {}) => fire('document', 'pointerdown', {target: name ? el(name).kids[0] || el(name) : elsewhere, pointerType: 'mouse', ...o});
+// Focus comes onto an element as in a page: the planner hears focusin first, then the document. tab:
+// the Tab key brought it; without, a click or the page put it there.
+const key = k => fire('document', 'keydown', {key: k});
+const arrive = t => { page.focus = t; if (root.contains(t)) fire('root', 'focusin', {target: t}); fire('document', 'focusin', {target: t}); };
+const focus = (name, {tab = true} = {}) => { const t = el(name); if (tab) key('Tab'); arrive(t); };
+const blur = to => { const from = page.focus; page.focus = to || null; fire('root', 'focusout', {target: from, relatedTarget: to || null}); if (to) fire('document', 'focusin', {target: to}); };
+const described = () => all().filter(e => e.attrs['aria-describedby'] === 'planTip').map(e => e.name);
+const see = () => tipNode.hidden ? 'hidden' + (described().length ? ', yet described: ' + described() : '') : tipNode.innerHTML + ' beside ' + (described().join(' and ') || 'nothing');
+const waiting = () => timers.length;
+// Each case starts from a page just drawn, with nothing shown, nothing waiting and the clock at rest.
+function fresh(){
+  fire('window', 'blur');
+  quiet = null;
+  Object.assign(page, {dialog: false, drawer: false, focus: null, vw: 1400, vh: 900});
+  drag = null; plan = {}; SH.plannerState = 'on';
+  Object.assign(tipNode, {offsetWidth: 240, offsetHeight: 120});
+  draw();
+  tick(5000);
+  if (timers.length || !tipNode.hidden) throw new Error('not at rest');
+}
+const cases = {
+  rests(){ onto('Lunch'); const a = see(); tick(349); const b = see(); tick(1); return [a, b, see(), waiting()]; },
+  leaves(){ onto('Lunch'); tick(350); off(); const a = see(); tick(119); const b = see(); tick(1); return [a, b, see(), waiting()]; },
+  leavesThePlanner(){ onto('Lunch'); tick(350); fire('root', 'pointerleave', {pointerType: 'mouse'}); tick(120); return [see(), waiting()]; },
+  passesOver(){ onto('Lunch'); tick(200); off(); tick(2000); return [see(), waiting()]; },
+  movesAboutOnIt(){ onto('Lunch'); tick(200); move(el("Lunch's checkbox"), 1001, 511); tick(100); move(el("Lunch's button"), 1003, 512); const a = see(); tick(50); return [a, see()]; },
+  nextAtOnce(){ onto('Lunch'); tick(350); onto('Gym'); const a = see(); tick(2000); onto('flag'); return [a, see(), waiting()]; },
+  backBeforeItGoes(){ onto('Lunch'); tick(350); off(); tick(100); onto('Lunch'); tick(2000); return [see(), waiting()]; },
+  press(){ onto('Lunch'); tick(350); press('Lunch'); const a = [see(), waiting()]; move(el("Lunch's button"), 1000, 512); tick(2000); const b = see(); off(); onto('Lunch'); tick(350); return [...a, b, see()]; },
+  pressWhileWaiting(){ onto('Lunch'); tick(200); press('Lunch'); const n = waiting(); tick(2000); return [see(), n]; },
+  pressElsewhere(){ onto('Lunch'); tick(350); press(null); return [see(), waiting()]; },
+  pressAfterAScroll(){ onto('Lunch'); tick(350); fire('window', 'scroll'); press('Lunch'); move(el("Lunch's button"), 1001, 511); tick(2000); const a = see(); off(); onto('Lunch'); tick(350); return [a, see(), waiting()]; },
+  buttonDown(){ onto('Lunch', {buttons: 1}); tick(2000); const a = see(); onto('Gym', {buttons: 1}); tick(2000); return [a, see(), waiting()]; },
+  dragging(){ drag = {}; onto('Lunch'); tick(2000); return [see(), waiting()]; },
+  afterADrag(){ onto('Lunch'); tick(350); press('Lunch'); onto('Lunch', {buttons: 1}); move(blank, 1000, 700, {buttons: 1}); draw({lunch: box(906, 690, 363, 20)}); move(el("Lunch's button"), 1000, 700); tick(2000); return [see(), waiting()]; },
+  touch(){ onto('Lunch', {pointerType: 'touch'}); tick(2000); const a = see(); press('Lunch', {pointerType: 'touch'}); tick(2000); return [a, see(), waiting()]; },
+  pen(){ onto('Lunch', {pointerType: 'pen'}); tick(350); return [see()]; },
+  escape(){ onto('Lunch'); tick(350); key('Escape'); const a = [see(), waiting()]; move(el("Lunch's checkbox"), 1001, 511); tick(2000); const b = see(); off(); onto('Lunch'); tick(350); return [...a, b, see()]; },
+  otherKeys(){ onto('Lunch'); tick(350); key('z'); return [see()]; },
+  scroll(){ onto('Lunch'); tick(350); fire('window', 'scroll'); const a = [see(), waiting()]; tick(2000); const b = see(); move(el("Lunch's button"), 1001, 511); tick(350); return [...a, b, see()]; },
+  scrollWhileWaiting(){ onto('Lunch'); tick(100); fire('window', 'scroll'); const n = waiting(); tick(2000); return [see(), n]; },
+  resize(){ onto('Lunch'); tick(350); fire('window', 'resize'); return [see(), waiting()]; },
+  dialogOpens(){ onto('Lunch'); tick(350); page.dialog = true; fire('document', 'focusin', {target: elsewhere}); const a = [see(), waiting()]; off(); onto('Gym'); tick(2000); return [...a, see(), waiting()]; },
+  dialogOpensWhileWaiting(){ onto('Lunch'); tick(100); page.dialog = true; tick(2000); return [see(), waiting()]; },
+  drawerOpen(){ page.drawer = true; onto('Lunch'); tick(2000); return [see(), waiting()]; },
+  cardOpens(){ onto('Lunch'); tick(350); quietTip('b:meal:lunch'); const a = [see(), waiting()]; move(el("Lunch's button"), 1001, 511); tick(2000); return [...a, see()]; },
+  plannerOff(){ SH.plannerState = 'off'; onto('Lunch'); tick(2000); const a = see(); SH.plannerState = 'on'; plan = null; off(); onto('Lunch'); tick(2000); return [a, see(), waiting()]; },
+  drawnAnew(){ onto('Lunch'); tick(350); const before = el("Lunch's button"); facts['meal:lunch'] = {title: 'Lunch at noon'}; draw(); const a = [see(), all().filter(e => e.attrs['aria-describedby']).length, el("Lunch's button") !== before];
+    facts['meal:lunch'] = {title: 'Lunch'}; draw({lunch: box(906, 300, 363, 20)}); const b = [see(), waiting()]; return [...a, ...b]; },
+  drawnAnewWithoutIt(){ onto('Lunch'); tick(350); draw({without: ['Lunch']}); return [see(), waiting()]; },
+  mealTakenOff(){ onto('Lunch'); tick(350); facts['meal:lunch'] = {title: 'Lunch', off: true}; draw(); const a = see(); facts['meal:lunch'] = {title: 'Lunch'}; return [a, waiting()]; },
+  drawnUnderAStillPointer(){ off(); draw({gym: box(906, 280, 363, 60)}); tick(2000); return [see(), waiting()]; },
+  movedAwayWhileWaiting(){ onto('Lunch'); tick(200); draw({lunch: box(906, 300, 363, 20)}); tick(2000); return [see(), waiting()]; },
+  flag(){ onto('flag'); tick(350); return [see(), tipNode.dataset.side, tipNode.style.left, tipNode.style.top]; },
+  chip(){ onto('chip'); tick(350); return [see()]; },
+  goneFromTheList(){ const f = el('flag'); f.dataset.tip = 'd:gone'; onto('flag'); tick(350); return [see(), waiting()]; },
+  focus(){ focus("Gym's button"); const a = see(); tick(350); const b = see(); blur(elsewhere); return [a, b, see(), waiting()]; },
+  focusMovesOn(){ focus("Gym's button"); tick(350); const from = page.focus; focus("flag's button"); const a = see(); blur(); tick(119); const b = see(); tick(1); return [a, b, see(), waiting()]; },
+  focusFromAClick(){ key('Tab'); press('Gym'); focus("Gym's button", {tab: false}); off(); tick(2000); return [see(), waiting()]; },
+  focusPutThereByThePage(){ key('Enter'); focus("Gym's button", {tab: false}); tick(2000); const a = see(); key('Tab'); press(null); focus("Gym's button", {tab: false}); tick(2000); return [a, see(), waiting()]; },
+  windowComesBack(){ focus("Gym's button"); tick(350); const a = see(); fire('window', 'blur'); const b = see(); arrive(page.focus); tick(2000); return [a, b, see(), waiting()]; },
+  drawnAnewWhileThePointerIsElsewhere(){ focus("Gym's button"); tick(350); onto('Lunch'); const a = see(); draw(); tick(2000); return [a, see(), waiting()]; },
+  escapeOnTheFocused(){ focus("Gym's button"); tick(350); key('Escape'); const a = see(); draw(); tick(2000); const b = see(); focus("Lunch's button"); focus("Gym's button"); tick(350); return [a, b, see()]; },
+  focusOnACheckbox(){ focus("Gym's checkbox"); tick(2000); return [see(), waiting()]; },
+  focusOnTheChip(){ focus('chip'); tick(350); return [see()]; },
+  focusScrollsIntoView(){ focus("Gym's button"); tick(16); fire('window', 'scroll'); tick(334); return [see()]; },
+  focusBackFromTheCard(){ focus("Gym's button"); tick(350); key('Enter'); quietTip('b:block:gym'); blur(elsewhere); tick(1000); key('Escape'); focus("Gym's button", {tab: false}); tick(2000); const a = see(); focus("Lunch's button"); tick(350); return [a, see()]; },
+  focusLostAndPutBack(){ focus("Gym's button"); tick(350); const t = page.focus; blur(); tick(60); arrive(t); tick(2000); const a = see(); blur(); tick(120); return [a, see(), waiting()]; },
+  focusKeptThroughADraw(){ focus("Gym's button"); tick(350); const before = page.focus; facts['block:gym'] = {title: 'Gym, ticked'}; draw(); const a = [see(), page.focus !== before];
+    facts['block:gym'] = {title: 'Gym'}; draw({without: ['Gym']}); return [...a, see(), waiting()]; },
+  pointerLeavesTheFocused(){ focus("Gym's button"); tick(350); onto('Lunch'); const a = see(); off(); tick(120); return [a, see(), waiting()]; },
+  emojiMarked(){ const n = marked; onto('Lunch'); tick(350); return [marked - n]; },
+  windowLeft(){ onto('Lunch'); tick(350); fire('window', 'blur'); return [see(), waiting()]; },
+};
+const out = {};
+for (const [name, run] of Object.entries(cases)) { fresh(); out[name] = run(); }
+
+// Where it is put: tipPlace(the block's box, the preview's width and height, the window's).
+const put = (r, w, h, vw, vh, under) => { const p = tipPlace(r, w, h, vw, vh, under); return p && [p.side, p.left, p.top, p.maxW, p.maxH]; };
+out.put = {
+  left: put(box(906, 371, 363, 36), 240, 120, 1400, 900),
+  lowDown: put(box(906, 840, 363, 20), 240, 300, 1400, 900),
+  right: put(box(60, 300, 200, 40), 240, 120, 1400, 900),
+  below: put(box(70, 200, 290, 20), 300, 120, 375, 812),
+  above: put(box(70, 700, 290, 20), 300, 120, 375, 812),
+  farRight: put(box(300, 200, 60, 20), 300, 120, 375, 812),
+  cutBelow: put(box(70, 300, 290, 300), 300, 400, 375, 812),
+  cutBeside: put(box(300, 0, 900, 900), 400, 300, 1400, 900),
+  noRoom: put(box(40, 40, 300, 700), 300, 200, 375, 812),
+  tiny: put(box(600, 400, 20, 20), 60, 30, 700, 500),
+  // A flag in the lane on the right, at rest and grown to the left to show its name; and the day's last.
+  flag: put(box(1286, 634, 75, 22), 300, 165, 1400, 900, true),
+  flagGrown: put(box(1098, 634, 263, 22), 300, 165, 1400, 900, true),
+  flagLast: put(box(1279, 857, 82, 22), 300, 85, 1400, 900, true),
+  flagBeside: put(box(700, 60, 82, 22), 300, 165, 800, 150, true),
+};
+// Whatever the block and the window, the preview is wholly in the window and never over the block.
+const bad = [];
+let tried = 0, placed = 0;
+for (const [vw, vh] of [[1400, 900], [1100, 700], [800, 514], [375, 812], [320, 480]])
+  for (const [w, h] of [[168, 96], [240, 160], [300, 420], [300, 900]])
+    for (let x = -40; x < vw; x += Math.round(vw / 9))
+      for (let y = -40; y < vh; y += Math.round(vh / 9))
+        for (const [bw, bh] of [[20, 20], [82, 22], [363, 20], [363, 300], [vw - 90, 20], [vw - 90, vh - 200]]) for (const under of [false, true]) {
+          const r = box(x, y, bw, bh), tw = Math.min(w, vw - 16), p = tipPlace(r, tw, h, vw, vh, under);
+          tried++;
+          if (!p) continue;
+          placed++;
+          const pw = p.maxW || tw, ph = p.maxH || h, right = p.left + pw, bottom = p.top + ph;
+          const inside = p.left >= 8 && p.top >= 8 && right <= vw - 8 && bottom <= vh - 8;
+          const clear = right <= r.left - 8 || p.left >= r.right + 8 || bottom <= r.top - 8 || p.top >= r.bottom + 8;
+          const whole = !p.maxW && !p.maxH;
+          // A side with room in the window for all of it is never passed over for a cut.
+          const beside = Math.max(Math.min(r.left - 8, vw - 8) - 8, vw - 8 - Math.max(r.right + 8, 8));
+          const overUnder = Math.max(Math.min(r.top - 8, vh - 8) - 8, vh - 8 - Math.max(r.bottom + 8, 8));
+          const fits = (beside >= tw && vh - 16 >= h) || overUnder >= h;
+          // A flag's preview is in the same place whether the flag has grown to the left or not.
+          const grown = under && tipPlace({...r, left: r.left - 200}, tw, h, vw, vh, true);
+          const steady = !grown || !['below', 'above'].includes(p.side) || (grown.side === p.side && grown.left === p.left && grown.top === p.top);
+          if (!inside || !clear || (fits && !whole) || !steady) bad.push([r, tw, h, vw, vh, under, p]);
+        }
+out.sweep = {tried, placed, bad: bad.slice(0, 5)};
+// How it is put on the page: measured, placed, and described by the block's button.
+fresh();
+onto('Lunch'); tick(350);
+out.shown = {style: {...tipNode.style}, side: tipNode.dataset.side, cut: tipNode.dataset.cut, hidden: tipNode.hidden};
+fresh();
+Object.assign(page, {vw: 375, vh: 812});
+draw({lunch: box(70, 300, 290, 300)});
+tipNode.offsetHeight = 400; tipNode.offsetWidth = 300;
+onto('Lunch'); tick(350);
+out.cut = {style: {...tipNode.style}, side: tipNode.dataset.side, cut: tipNode.dataset.cut};
+fresh();
+out.atRest = [see(), waiting(), tipNode.innerHTML];
+console.log(JSON.stringify(out));
+"""
+        cls.out = run_node(script)
+
+    def test_it_shows_after_the_pointer_rests_and_goes_soon_after_it_leaves(self):
+        o = self.out
+        lunch = "preview of Lunch beside Lunch's button"
+        self.assertEqual(o["rests"], ["hidden", "hidden", lunch, 0])
+        self.assertEqual(o["leaves"], [lunch, lunch, "hidden", 0])
+        self.assertEqual(o["leavesThePlanner"], ["hidden", 0])
+        self.assertEqual(o["passesOver"], ["hidden", 0])
+        # The wait runs from when the pointer came onto the block, however it moves about on it.
+        self.assertEqual(o["movesAboutOnIt"], ["hidden", lunch])
+        # While one shows, the next shows at once; back on it before it goes, it stays.
+        self.assertEqual(o["nextAtOnce"], ["preview of Gym beside Gym's button", "due hw9 beside flag's button", 0])
+        self.assertEqual(o["backBeforeItGoes"], [lunch, 0])
+        self.assertEqual(o["pen"], [lunch])
+        # The flag, low in the day: its preview over it, their right edges in line.
+        self.assertEqual(o["flag"], ["due hw9 beside flag's button", "above", f"{1290 + 82 - 240}px", f"{800 - 8 - 120}px"])
+        self.assertEqual(o["chip"], ["preview of Late beside chip"])
+        self.assertEqual(o["goneFromTheList"], ["hidden", 0])
+        self.assertEqual(o["emojiMarked"], [1])
+        self.assertEqual(o["atRest"], ["hidden", 0, ""])
+
+    def test_a_press_a_drag_and_a_touch_never_show_it(self):
+        o = self.out
+        lunch = "preview of Lunch beside Lunch's button"
+        # Gone at once on the press, nothing waiting, and none again until the pointer has left.
+        self.assertEqual(o["press"], ["hidden", 0, "hidden", lunch])
+        self.assertEqual(o["pressWhileWaiting"], ["hidden", 0])
+        self.assertEqual(o["pressElsewhere"], ["hidden", 0])
+        self.assertEqual(o["pressAfterAScroll"], ["hidden", lunch, 0])
+        self.assertEqual(o["buttonDown"], ["hidden", "hidden", 0])
+        self.assertEqual(o["dragging"], ["hidden", 0])
+        self.assertEqual(o["afterADrag"], ["hidden", 0])
+        self.assertEqual(o["touch"], ["hidden", "hidden", 0])
+
+    def test_esc_a_scroll_and_anything_opening_send_it_away(self):
+        o = self.out
+        lunch = "preview of Lunch beside Lunch's button"
+        self.assertEqual(o["escape"], ["hidden", 0, "hidden", lunch])
+        self.assertEqual(o["otherKeys"], [lunch])
+        # After a scroll it comes again once the pointer moves and rests.
+        self.assertEqual(o["scroll"], ["hidden", 0, "hidden", lunch])
+        self.assertEqual(o["scrollWhileWaiting"], ["hidden", 0])
+        self.assertEqual(o["resize"], ["hidden", 0])
+        self.assertEqual(o["windowLeft"], ["hidden", 0])
+        self.assertEqual(o["dialogOpens"], ["hidden", 0, "hidden", 0])
+        self.assertEqual(o["dialogOpensWhileWaiting"], ["hidden", 0])
+        self.assertEqual(o["drawerOpen"], ["hidden", 0])
+        self.assertEqual(o["cardOpens"], ["hidden", 0, "hidden"])
+        self.assertEqual(o["plannerOff"], ["hidden", "hidden", 0])
+
+    def test_it_follows_the_plan_when_the_planner_is_drawn_anew(self):
+        o = self.out
+        # The new block's button is described, the old one no longer; a block that moved from under
+        # the pointer, went, or was taken off loses its preview; a still pointer brings none.
+        self.assertEqual(o["drawnAnew"], ["preview of Lunch at noon beside Lunch's button", 1, True, "hidden", 0])
+        self.assertEqual(o["drawnAnewWithoutIt"], ["hidden", 0])
+        self.assertEqual(o["mealTakenOff"], ["hidden", 0])
+        self.assertEqual(o["drawnUnderAStillPointer"], ["hidden", 0])
+        self.assertEqual(o["movedAwayWhileWaiting"], ["hidden", 0])
+
+    def test_the_keyboards_focus_shows_it_too(self):
+        o = self.out
+        gym = "preview of Gym beside Gym's button"
+        self.assertEqual(o["focus"], ["hidden", gym, "hidden", 0])
+        self.assertEqual(o["focusMovesOn"], ["due hw9 beside flag's button", "due hw9 beside flag's button", "hidden", 0])
+        self.assertEqual(o["focusFromAClick"], ["hidden", 0])
+        # Only Tab bringing it there counts: not focus put back by the page after another key or a
+        # press, not the window coming back to the front, not a redraw (which must not take the
+        # preview from the block the pointer is on).
+        self.assertEqual(o["focusPutThereByThePage"], ["hidden", "hidden", 0])
+        self.assertEqual(o["windowComesBack"], [gym, "hidden", "hidden", 0])
+        self.assertEqual(o["drawnAnewWhileThePointerIsElsewhere"], ["preview of Lunch beside Lunch's button"] * 2 + [0])
+        self.assertEqual(o["escapeOnTheFocused"], ["hidden", "hidden", gym])
+        self.assertEqual(o["focusOnACheckbox"], ["hidden", 0])
+        self.assertEqual(o["focusOnTheChip"], ["preview of Late beside chip"])
+        self.assertEqual(o["focusScrollsIntoView"], [gym])
+        # Back from the card it opened, the block shows none until focus has been elsewhere.
+        self.assertEqual(o["focusBackFromTheCard"], ["hidden", "preview of Lunch beside Lunch's button"])
+        self.assertEqual(o["focusKeptThroughADraw"], ["preview of Gym, ticked beside Gym's button", True, "hidden", 0])
+        # Focus taken from the block and put straight back (the block was drawn anew) keeps it.
+        self.assertEqual(o["focusLostAndPutBack"], [gym, "hidden", 0])
+        self.assertEqual(o["pointerLeavesTheFocused"], ["preview of Lunch beside Lunch's button", "hidden", 0])
+
+    def test_it_is_put_beside_the_block_in_the_window_and_never_over_it(self):
+        put = self.out["put"]
+        # Left of the block first, its top with the block's; lower down, moved up into the window.
+        self.assertEqual(put["left"], ["left", 906 - 8 - 240, 371, 0, 0])
+        self.assertEqual(put["lowDown"], ["left", 658, 900 - 8 - 300, 0, 0])
+        self.assertEqual(put["right"], ["right", 268, 300, 0, 0])
+        # No room beside it: under it, or over it near the bottom, kept within the window's width.
+        self.assertEqual(put["below"], ["below", 67, 228, 0, 0])
+        self.assertEqual(put["above"], ["above", 67, 700 - 8 - 120, 0, 0])
+        self.assertEqual(put["farRight"], ["below", 67, 228, 0, 0])
+        # Room for only part of it: cut to the side with the most room, still clear of the block.
+        self.assertEqual(put["cutBelow"], ["above", 67, 8, 0, 284])
+        self.assertEqual(put["cutBeside"], ["left", 8, 8, 300 - 16, 0])
+        self.assertIsNone(put["noRoom"])
+        self.assertEqual(put["tiny"], ["left", 532, 400, 0, 0])
+        # A flag grows to the left while pointed at: its preview goes under it (over it at the end
+        # of the day), right edges in line, so it is in the same place either way and never over
+        # the name the flag then shows. Only with no room under or over it, beside it.
+        self.assertEqual(put["flag"], ["below", 1361 - 300, 634 + 22 + 8, 0, 0])
+        self.assertEqual(put["flagGrown"], put["flag"])
+        self.assertEqual(put["flagLast"], ["above", 1361 - 300, 857 - 8 - 85, 0, 0])
+        self.assertEqual(put["flagBeside"][0], "left")
+        sweep = self.out["sweep"]
+        self.assertGreater(sweep["tried"], 10000)
+        self.assertGreater(sweep["placed"], sweep["tried"] * 0.9)
+        self.assertEqual(sweep["bad"], [])
+
+    def test_it_is_measured_then_placed(self):
+        shown = self.out["shown"]
+        self.assertEqual(shown, {"style": {"left": "658px", "top": "500px", "maxWidth": "", "maxHeight": ""}, "side": "left", "cut": "", "hidden": False})
+        # A long block in a phone-sized window: over it, cut to the room there, and marked so (it fades).
+        cut = self.out["cut"]
+        self.assertEqual(cut, {"style": {"left": "67px", "top": "8px", "maxWidth": "", "maxHeight": "284px"}, "side": "above", "cut": "1"})
+        self.assertIn('.ptip[data-cut="1"]::after{', HTML)

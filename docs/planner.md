@@ -304,10 +304,60 @@ changes to it.
 - **When it fails.** If the server cannot be asked, nothing changes and the step stays. If the
   change itself failed to save, it is put back on the page and is no step.
 
+### Added 2026-11-11: details on hover
+
+The learner asked to see a calendar block's details on hover "instead of just the click thing".
+Blocks can be 20 px tall with one cut line, which is where it helps most. Clicking still opens the
+card; the preview comes first, and is only read.
+
+- **What shows it.** A mouse, trackpad or pen pointer that comes onto a block and stays for 350 ms.
+  The same for a flag of something due at a time, and for the chips in the strip (a block outside
+  the hours shown, something due with no time). While one preview shows, going on to the next block
+  shows that one at once.
+- **From the keyboard.** Tab onto a block, flag or chip shows the same preview after the same wait.
+  It has `role="tooltip"`, and the block's button is `aria-describedby` it while it shows. Focus never
+  moves into it. Focus the page itself puts back (after a redraw, a dialog or the drawer closing,
+  the window coming back to the front) brings no preview.
+- **What it says** is what the details card says, written by the same functions (`detailsHtml`,
+  `dueHtml`, `workLine` in planner.js), so the two cannot drift apart:
+  - a block: its kind, full title, time range and length, the place for a meal, "Repeats every
+    Wednesday" or "Changed for today only", and its items, each with its tick drawn (named "Done" or
+    "To do" for a screen reader) and, for work, its course, due date and status. It lists six items,
+    then "+3 more". A block holding nothing has no "Things to get done" line (the card has, with
+    the hint to edit).
+  - something due: its full name, its course, when it is due, its status in the list, and a task's
+    notes (four lines).
+- **Where it goes.** Beside the block, left of it first (the planner is on the right), else right,
+  else under or over it. Its top is in line with the block's, moved up where it would leave the
+  window. It is always 8 px inside the window and never over the block. A flag's preview goes
+  under or over the flag, their right edges in line, because a flag grows to the left to show its
+  name while pointed at. Where no side has room for all of it (a long block in a phone-sized
+  window with a mouse), it takes the side with the most room, is cut there and fades out.
+- **It never gets in the way.** It takes no pointer (`pointer-events: none`), so everything under
+  it stays clickable. It goes at once on any press (so making, moving, resizing and dragging in
+  work as before, and it does not come back for that block until the pointer has left it), on a
+  scroll, on Esc, when a dialog or the drawer opens, when the window is resized or left, and 120 ms
+  after the pointer or the focus leaves. No preview shows while a block is dragged or while a
+  dialog or the drawer is open.
+- **A touch never shows it** (`pointerType` "touch" is ignored); a tap opens the card as before.
+- **No doubled tooltip.** Blocks, flags and chips no longer carry a `title`.
+- **It follows the plan.** After a redraw (an item ticked, a step undone, the day changed) a preview
+  that shows is filled in again, and goes if its block went or is no longer under the pointer. A
+  block drawn under a pointer that lies still shows nothing until the pointer moves.
+- **How it is wired.** One element (`#planTip` in dashboard.html), one timer, and listeners on the
+  planner and the page only (`pointermove` and `pointerleave`, `focusin` and `focusout`; a press,
+  a key, a scroll). Nothing is added to a block, which carries only `data-tip` (`b:` and the block's
+  ref, or `d:` and the assignment's id). No MutationObserver.
+- **Look.** The details card's material, smaller: thick glass in light, solid `--surface` in dark
+  and Night, solid where transparency is reduced; a 140 ms fade that is off under reduced motion.
+  Every colour is a token, so Night's preview has no blue. Emoji in it are marked as everywhere.
+
 ### Access
 
 - Every control has a label.
 - Blocks are buttons that open their details card (Edit there opens the editor).
+- A block's, flag's or chip's preview also shows when Tab brings focus onto it, and describes its
+  button while it shows (see "details on hover").
 - The timeline is a list in reading order for screen readers ("Lunch, 4:00 to 5:00 PM, at …, 2
   things to get done").
 - Contrast follows the existing tokens, and nothing depends on colour alone.

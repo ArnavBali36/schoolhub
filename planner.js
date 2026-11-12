@@ -645,7 +645,7 @@
     // The kind's name is written, so colour is never the only cue: a meal's is its title, and so is
     // a block's titled with it. Any other block shows the name as a tag on its line where there is
     // room for it beside the title (and the time, on one line), else the kind's initial as a badge
-    // before the title. The tooltip and the label say it in full.
+    // before the title. The preview on hover or focus and the label say it in full.
     const kindName = !meal && e.title !== KIND_NAME[e.kind] ? KIND_NAME[e.kind] : '';
     const items = e.items;
     let {fit, inline} = itemsFit(h, form, items.length), kindAt = kindName ? 'badge' : '';
@@ -687,10 +687,11 @@
     }
     const left = e.col / e.cols * 100, width = 100 / e.cols;
     const cls = ['pblock', 'k-' + e.kind, form, e.cutTop && 'cut-top', e.cutBottom && 'cut-bottom', det?.ref === e.ref && 'shown'].filter(Boolean).join(' ');
-    // Where words may be cut short, the whole of them on hover, the kind's name with them.
-    const tip = ` title="${esc(`${kindName ? kindName + ': ' : ''}${meal ? e.title + (e.place ? ' · ' + e.place : '') : e.title} · ${range(e.start, e.end)}`)}"`;
-    return `<div class="${cls}" role="listitem" data-ref="${esc(e.ref)}" style="top:${top}px;height:${h}px;left:calc((100% - var(--lane, 0px)) * ${left / 100} + 2px);width:calc((100% - var(--lane, 0px)) * ${width / 100} - 4px)">`
-      + `<button type="button" class="pb-open" data-open-ref="${esc(e.ref)}" aria-label="${esc(spoken(e))}"${tip}></button>`
+    // Where words are cut short, the whole of them is in the preview shown while the pointer rests on
+    // the block or it has the keyboard's focus (data-tip, "a preview on hover"): no title, which
+    // would say it twice.
+    return `<div class="${cls}" role="listitem" data-ref="${esc(e.ref)}" data-tip="${esc('b:' + e.ref)}" style="top:${top}px;height:${h}px;left:calc((100% - var(--lane, 0px)) * ${left / 100} + 2px);width:calc((100% - var(--lane, 0px)) * ${width / 100} - 4px)">`
+      + `<button type="button" class="pb-open" data-open-ref="${esc(e.ref)}" aria-label="${esc(spoken(e))}"></button>`
       + `<div class="pb-body" aria-hidden="true">${body}</div>${list}${more}`
       + '<span class="pb-rs top" data-edge="top" aria-hidden="true"></span><span class="pb-rs bottom" data-edge="bottom" aria-hidden="true"></span></div>';
   }
@@ -699,7 +700,7 @@
     return `${when}: ${a.name}, ${a.course?.short || a.course?.name || ''}${SH.isDone(a) ? ', done' : ''}`;
   }
   function flagHtml(a, m, top){
-    return `<div class="pflag-wrap" role="listitem" style="top:${top}px"><button type="button" class="pflag${SH.isDone(a) ? ' done' : ''}" data-plan-due="${esc(a.id)}" aria-label="${esc(dueLabel(a, m))}" title="${esc(a.name)}">${SH.dot(a.course)}<span><b>${esc(clock(m))}</b><span class="pf-name"> · ${esc(a.name)}</span></span></button></div>`;
+    return `<div class="pflag-wrap" role="listitem" data-tip="${esc('d:' + a.id)}" style="top:${top}px"><button type="button" class="pflag${SH.isDone(a) ? ' done' : ''}" data-plan-due="${esc(a.id)}" aria-label="${esc(dueLabel(a, m))}">${SH.dot(a.course)}<span><b>${esc(clock(m))}</b><span class="pf-name"> · ${esc(a.name)}</span></span></button></div>`;
   }
   // The hour's height now, and whether the day fits (fit) or the timeline scrolls; set by measure().
   let hourPx = 48, scrolling = false, padBottom = 7;
@@ -786,9 +787,9 @@
     // a repeating block skipped this day, which can come back.
     const chips = [];
     for (const {a, m} of untimed.sort((p, q) => p.m - q.m))
-      chips.push(`<button type="button" class="pchip${SH.isDone(a) ? ' done' : ''}" data-plan-due="${esc(a.id)}" aria-label="${esc(dueLabel(a, m))}" title="${esc(a.name)}">${SH.dot(a.course)}<span>${a.all_day ? 'Due' : esc(clock(m))} · ${esc(a.name)}</span></button>`);
+      chips.push(`<button type="button" class="pchip${SH.isDone(a) ? ' done' : ''}" data-plan-due="${esc(a.id)}" data-tip="${esc('d:' + a.id)}" aria-label="${esc(dueLabel(a, m))}">${SH.dot(a.course)}<span>${a.all_day ? 'Due' : esc(clock(m))} · ${esc(a.name)}</span></button>`);
     for (const e of outside.sort((p, q) => p.start - q.start))
-      chips.push(`<button type="button" class="pchip k-${e.kind}" data-pedit="${esc(e.ref)}" aria-label="${esc(spoken(e))}"><span>${esc(e.title)} · ${esc(range(e.start, e.end))}</span></button>`);
+      chips.push(`<button type="button" class="pchip k-${e.kind}" data-pedit="${esc(e.ref)}" data-tip="${esc('b:' + e.ref)}" aria-label="${esc(spoken(e))}"><span>${esc(e.title)} · ${esc(range(e.start, e.end))}</span></button>`);
     for (const e of entries.filter(e => e.kind === 'meal' && e.dayOff))
       chips.push(`<button type="button" class="pchip" data-pmeal-on="${e.meal}"><span>No ${e.meal} ${thisDay(shown)} · <b>Bring it back</b></span></button>`);
     for (const e of entries.filter(e => e.repeat && e.skip))
@@ -838,6 +839,7 @@
     if (scrolledFor !== shown && scrollToStart()) scrolledFor = shown;
     if (key) root.querySelector(key)?.focus();
     syncDetails();
+    syncTip();
   }
 
   // The hour's height follows the room: on resize (the window, the phone's visible area, the strip or
@@ -1160,6 +1162,8 @@
       return entry && openDetails(entry, open.closest('.pblock') || open);
     }
     const due = t.closest('[data-plan-due]');
+    // The drawer opens: the flag's or chip's preview goes, and stays away until it is left.
+    if (due) quietTip('d:' + due.dataset.planDue);
     if (due) return SH.openDrawer(due.dataset.planDue, e.detail === 0);
     const back = t.closest('[data-pmeal-on]');
     if (back && editable()) {
@@ -1461,6 +1465,13 @@
   let det = null;                // {ref, back: the selector of the block's button or chip}
   let closedAt = null;           // {ref, t}: a click outside closed it, so the same click does not reopen it
 
+  // ---- what the details say ----
+  // A block's facts (its kind, title, time and length, a meal's place, what is particular to the day,
+  // and its items, each with its tick and, for work, its course, due date and status) are written by
+  // one function for the details card and for the preview shown while the pointer rests on the block
+  // ("a preview on hover"), so the two never drift apart. The preview is only read: its ticks are
+  // drawn rather than boxes to press, it has no Open, and it lists at most TIP_ITEMS items.
+  const TIP_ITEMS = 6;
   // A work item's assignment as the list has it: "Done", "Overdue", "Due today", "Due in 2 days".
   function workStatus(a){
     if (SH.isDone(a)) return ['Done', 'good'];
@@ -1470,24 +1481,33 @@
     if (days < 0 || (!a.all_day && due < new Date())) return ['Overdue', 'bad'];
     return [days === 0 ? 'Due today' : days === 1 ? 'Due tomorrow' : `Due in ${days} days`, days <= 1 ? 'warn' : ''];
   }
-  function detailItem(it, can){
+  // An assignment or task in a line: its course, when it is due and how it stands in the list. For a
+  // work item in a block's details, and for the preview of a flag or chip of something due.
+  function workLine(a, course = ''){
+    const [st, cls] = workStatus(a);
+    return `${SH.dot(a.course)}<span>${esc(a.course?.name || a.course?.short || course)}</span>`
+      + `<span>${a.due_at ? 'Due ' + esc(SH.fmtDue(a.due_at, true, a.all_day)) : 'No due date'}</span>`
+      // With no due date and not done, the status would only say "No due date" again.
+      + (st === 'No due date' ? '' : `<span class="pd-st ${cls}">${esc(st)}</span>`);
+  }
+  function detailItem(it, can, preview){
     const a = it.kind === 'work' ? SH.byId(it.ref) : null;
     let work = '';
     if (it.kind === 'work') {
       if (a) {
-        const [st, cls] = workStatus(a);
-        work = `<div class="pd-work">${SH.dot(a.course)}<span>${esc(a.course?.name || a.course?.short || it.course)}</span>`
-          + `<span>${a.due_at ? 'Due ' + esc(SH.fmtDue(a.due_at, true, a.all_day)) : 'No due date'}</span>`
-          + `<span class="pd-st ${cls}">${esc(st)}</span>`
-          + `<button type="button" class="linkish" data-pd-open="${esc(a.id)}" aria-label="Open ${esc(a.name)}">Open</button></div>`;
+        work = `<div class="pd-work">${workLine(a, it.course)}`
+          + (preview ? '' : `<button type="button" class="linkish" data-pd-open="${esc(a.id)}" aria-label="Open ${esc(a.name)}">Open</button>`) + '</div>';
       } else {
         work = `<div class="pd-work">${it.course ? `<span>${esc(it.course)}</span>` : ''}<span>No longer in your list</span></div>`;
       }
     }
-    return `<li class="pd-item${it.done ? ' done' : ''}"><label class="pd-check"><input type="checkbox" data-pd-item="${esc(it.id)}"${it.done ? ' checked' : ''}${can ? '' : ' disabled'}>`
-      + `<span class="pd-text">${esc(a ? a.name : it.text)}</span></label>${work}</li>`;
+    const text = `<span class="pd-text">${esc(a ? a.name : it.text)}</span>`;
+    // The preview takes no press: the tick is drawn, and named for a screen reader.
+    const check = preview ? `<div class="pd-check"><span class="pd-tick${it.done ? ' on' : ''}" role="img" aria-label="${it.done ? 'Done' : 'To do'}"></span>${text}</div>`
+      : `<label class="pd-check"><input type="checkbox" data-pd-item="${esc(it.id)}"${it.done ? ' checked' : ''}${can ? '' : ' disabled'}>${text}</label>`;
+    return `<li class="pd-item${it.done ? ' done' : ''}">${check}${work}</li>`;
   }
-  function fillDetails(e){
+  function detailsHtml(e, preview){
     const meal = e.kind === 'meal', wdN = wdName(shown), can = editable();
     const notes = [];
     if (e.repeat) notes.push(`Repeats every ${wdN}`);
@@ -1498,20 +1518,37 @@
     const lo = s.day_start * 60, hi = s.day_end * 60;
     if (e.end <= lo || e.start >= hi) notes.push('Outside the hours shown');
     else if (e.start < lo || e.end > hi) notes.push('Runs past the hours shown');
-    const items = e.items.map(it => detailItem(it, can)).join('');
+    const listed = preview ? e.items.slice(0, TIP_ITEMS) : e.items, rest = e.items.length - listed.length;
+    const items = listed.map(it => detailItem(it, can, preview)).join('') + (rest ? `<li class="pd-rest">+${rest} more</li>` : '');
+    // The card's title and list are named by id (aria-labelledby); the preview is a second copy of
+    // them on the page, so it carries no ids. A block holding nothing says so only on the card,
+    // where Edit is at hand.
+    return `<div class="pd-kind k-${e.kind}"><i aria-hidden="true"></i>${meal ? 'Meal' : KIND_NAME[e.kind]}</div>
+      <h3${preview ? '' : ' id="pdTitle"'}>${esc(e.title)}</h3>
+      <p class="pd-line pd-time">${esc(range(e.start, e.end))} · ${esc(duration(e.end - e.start))}</p>
+      ${meal ? `<p class="pd-line">${e.place ? 'At ' + esc(e.place) : 'No place set'}</p>` : ''}
+      ${notes.length ? `<p class="pd-line pd-note">${esc(notes.join(' · '))}</p>` : ''}
+      ${preview && !items ? '' : `<div class="pd-sec"${preview ? '' : ' id="pdItems"'}>Things to get done</div>`}
+      ${items ? `<ul class="pd-items"${preview ? '' : ' aria-labelledby="pdItems"'}>${items}</ul>` : preview ? '' : '<p class="pd-none">Nothing yet. Edit the block to add a to-do or something from your list.</p>'}`;
+  }
+  // What the preview says of something due (a flag on the timeline, a chip in the strip): its name,
+  // the line a work item has in a block's details, and a task's notes.
+  function dueHtml(a){
+    return `<h3>${esc(a.name)}</h3>
+      <div class="pd-work">${workLine(a)}</div>
+      ${a.is_task && a.notes ? `<p class="pd-line pd-notes">${esc(a.notes)}</p>` : ''}`;
+  }
+
+  // ---- the details card ----
+  function fillDetails(e){
+    const can = editable();
     // Keeps the focused control across a redraw (a box ticked here redraws the planner and the card).
     const el = document.activeElement, keep = card.contains(el) && el !== card
       ? ['data-pd-item', 'data-pd-open', 'data-pd-edit', 'data-pd-del', 'data-pd-close'].find(k => el.hasAttribute(k)) : null;
     const keepSel = keep && `[${keep}="${CSS.escape(el.getAttribute(keep))}"]`;
     card.className = 'pdetail' + (SHEET.matches ? ' sheet' : '');
     card.innerHTML = `<button type="button" class="close" data-pd-close="x" aria-label="Close">×</button>
-      <div class="pd-kind k-${e.kind}"><i aria-hidden="true"></i>${meal ? 'Meal' : KIND_NAME[e.kind]}</div>
-      <h3 id="pdTitle">${esc(e.title)}</h3>
-      <p class="pd-line pd-time">${esc(range(e.start, e.end))} · ${esc(duration(e.end - e.start))}</p>
-      ${meal ? `<p class="pd-line">${e.place ? 'At ' + esc(e.place) : 'No place set'}</p>` : ''}
-      ${notes.length ? `<p class="pd-line pd-note">${esc(notes.join(' · '))}</p>` : ''}
-      <div class="pd-sec" id="pdItems">Things to get done</div>
-      ${items ? `<ul class="pd-items" aria-labelledby="pdItems">${items}</ul>` : '<p class="pd-none">Nothing yet. Edit the block to add a to-do or something from your list.</p>'}
+      ${detailsHtml(e, false)}
       <div class="pd-buttons">
         <button type="button" class="btn small danger" data-pd-del="1"${can ? '' : ' disabled'}>${esc(removeLabel(e, shown))}</button><span class="grow"></span>
         <button type="button" class="btn small" data-pd-close="1">Close</button>
@@ -1545,6 +1582,7 @@
     if (!card) return openEditor(shown, entry);
     if (closedAt?.ref === entry.ref && performance.now() - closedAt.t < 400) { closedAt = null; return; }
     if (det) closeDetails(false);
+    quietTip('b:' + entry.ref);
     const chip = anchor?.matches?.('.pchip');
     det = {ref: entry.ref, back: chip ? `[data-pedit="${CSS.escape(entry.ref)}"]` : `[data-open-ref="${CSS.escape(entry.ref)}"]`};
     fillDetails(entry);
@@ -1624,6 +1662,198 @@
     window.addEventListener('resize', follow);
     window.addEventListener('scroll', follow, true);
     SHEET.addEventListener?.('change', () => closeDetails(false));
+  }
+
+  // ---- a preview on hover ----
+  // A mouse, trackpad or pen pointer resting for a moment on a block, on a flag of something due or
+  // on their chips in the strip shows its details beside it; so does the keyboard's focus, when Tab
+  // brings it onto one.
+  // The preview says what the details card says (detailsHtml, dueHtml) and is only read: it takes no
+  // pointer and no focus, and a click still opens the card. It goes at once on a press (so making,
+  // moving, resizing and dragging in go on as before), on a scroll, on Esc and when a dialog or the
+  // drawer opens, and a moment after the pointer or the focus has left. A touch never shows it.
+  // One element (#planTip, role="tooltip"), one timer, and listeners on the planner and the page
+  // only: blocks are drawn anew often, so nothing is kept on a block but its data-tip, "b:" and the
+  // block's ref or "d:" and the assignment's id.
+  const tipEl = document.getElementById('planTip');
+  const HOVER_MS = 350;          // the pointer rests this long before the preview shows
+  const LEAVE_MS = 120;          // and the preview stays this long once it has left
+  const TIP_GAP = 8;             // px between the preview and its block
+  const TIP_EDGE = 8;            // px kept between the preview and the window's edges
+  const TIP_MIN = 96;            // with less room than this on every side, no preview
+  let tip = null;                // the preview shown: {key, by: 'pointer' or 'focus'}
+  let aim = null;                // the one to show when the wait is over: {key, by}
+  let tipTimer = 0;              // the one timer: the wait before it shows, or before it goes
+  let quiet = null;              // a key pressed, opened or sent away with Esc: no preview until it is left
+  let at = null;                 // where the pointer last moved: {key, x, y}
+  let tabbed = false;            // Tab was the last key down, and no focus has moved since: the next is the keyboard's
+
+  // Where the preview goes: beside the block's box r (left of it first: the planner is on the
+  // right), else under or over it; always wholly in the window (vw by vh) and never over the block.
+  // w and h are the preview's size. A flag (under) has its preview under or over it first, their
+  // right edges in line: a flag grows to the left to show its name while pointed at, and its preview
+  // must be where that growth cannot reach. Where no side has room for all of it, it takes the side
+  // with the most and is cut to that room (maxW, maxH); with next to no room anywhere, null.
+  function tipPlace(r, w, h, vw, vh, under = false){
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const fullW = vw - 2 * TIP_EDGE, fullH = vh - 2 * TIP_EDGE;
+    // The room on each side of the block, within the window (a block may lie partly outside it).
+    const room = {left: Math.min(r.left - TIP_GAP, vw - TIP_EDGE) - TIP_EDGE, right: vw - TIP_EDGE - Math.max(r.right + TIP_GAP, TIP_EDGE),
+      below: vh - TIP_EDGE - Math.max(r.bottom + TIP_GAP, TIP_EDGE), above: Math.min(r.top - TIP_GAP, vh - TIP_EDGE) - TIP_EDGE};
+    const beside = s => s === 'left' || s === 'right';
+    const sides = under ? ['below', 'above', 'left', 'right'] : ['left', 'right', 'below', 'above'];
+    // The share of the preview a side would show: all of it (1) where it fits.
+    const share = s => beside(s) ? Math.min(1, room[s] / w) * Math.min(1, fullH / h) : Math.min(1, room[s] / h) * Math.min(1, fullW / w);
+    const side = sides.find(s => share(s) === 1) || sides.reduce((best, s) => share(s) > share(best) ? s : best);
+    if (room[side] < Math.min(TIP_MIN, beside(side) ? w : h)) return null;
+    const maxW = Math.floor(Math.min(w, beside(side) ? room[side] : fullW)), maxH = Math.floor(Math.min(h, beside(side) ? fullH : room[side]));
+    // A block partly out of the window still has its preview wholly in it (which only takes it
+    // further from the block).
+    const left = clamp(side === 'left' ? r.left - TIP_GAP - maxW : side === 'right' ? r.right + TIP_GAP : under ? r.right - maxW : r.left, TIP_EDGE, vw - TIP_EDGE - maxW);
+    const top = clamp(side === 'below' ? r.bottom + TIP_GAP : side === 'above' ? r.top - TIP_GAP - maxH : r.top, TIP_EDGE, vh - TIP_EDGE - maxH);
+    return {side, left: Math.round(left), top: Math.round(top), maxW: maxW < w ? maxW : 0, maxH: maxH < h ? maxH : 0};
+  }
+
+  const tipAnchor = key => root.querySelector(`[data-tip="${CSS.escape(key)}"]`);
+  // The control a block, flag or chip is used through: the one the preview describes.
+  const tipButton = el => el.matches('button') ? el : el.querySelector('button');
+  const tipKey = t => { const el = t?.closest?.('[data-tip]'); return el && root.contains(el) ? el.dataset.tip : null; };
+  // No preview while a block is dragged or anything is open over the page.
+  const tipBlocked = () => !tipEl || SH.plannerState !== 'on' || !plan || !!drag || SH.drawerOpen() || !!document.querySelector('dialog[open]');
+  // Whether el is still what the focus is on, or what lies under where the pointer last moved.
+  function tipHolds(el, by){
+    if (by === 'focus') return document.activeElement === tipButton(el);
+    const r = el.getBoundingClientRect();
+    return !!at && at.x >= r.left - 1 && at.x <= r.right + 1 && at.y >= r.top - 1 && at.y <= r.bottom + 1;
+  }
+  function tipHtml(key){
+    if (key.startsWith('b:')) {
+      const e = entryByRef(key.slice(2));
+      return e && !e.off && !e.skip ? detailsHtml(e, true) : '';
+    }
+    const a = SH.byId(key.slice(2));
+    return a ? dueHtml(a) : '';
+  }
+  const undescribe = () => root.querySelector('[aria-describedby="planTip"]')?.removeAttribute('aria-describedby');
+  function showTip(key, by){
+    const el = tipBlocked() ? null : tipAnchor(key), html = el ? tipHtml(key) : '';
+    if (!html) return hideTip();
+    undescribe();
+    tip = {key, by};
+    tipEl.innerHTML = html;
+    SH.markEmoji?.(tipEl);
+    Object.assign(tipEl.style, {left: '', top: '', maxWidth: '', maxHeight: ''});
+    tipEl.hidden = false;
+    // Measured at its own size, then put in its place; cut narrower, it is measured once more.
+    const box = el.getBoundingClientRect(), vw = document.documentElement.clientWidth, vh = window.innerHeight, under = el.matches('.pflag-wrap');
+    let to = tipPlace(box, tipEl.offsetWidth, tipEl.offsetHeight, vw, vh, under);
+    if (to?.maxW) {
+      tipEl.style.maxWidth = to.maxW + 'px';
+      to = tipPlace(box, tipEl.offsetWidth, tipEl.offsetHeight, vw, vh, under);
+    }
+    if (!to) return hideTip();
+    Object.assign(tipEl.style, {left: to.left + 'px', top: to.top + 'px', maxHeight: to.maxH ? to.maxH + 'px' : ''});
+    // For the page's CSS: the side it grows from, and whether its end is cut off (it fades there).
+    Object.assign(tipEl.dataset, {side: to.side, cut: to.maxH ? '1' : ''});
+    tipButton(el)?.setAttribute('aria-describedby', 'planTip');
+  }
+  // Gone at once, and nothing waiting to show.
+  function hideTip(){
+    clearTimeout(tipTimer);
+    tipTimer = 0;
+    aim = null;
+    if (!tip) return;
+    tip = null;
+    undescribe();
+    tipEl.hidden = true;
+    tipEl.innerHTML = '';
+  }
+  // A block pressed or opened, or its preview sent away with Esc: none for it until it is left.
+  function quietTip(key){
+    quiet = key;
+    hideTip();
+  }
+  // The pointer or the focus (by) has come onto the thing with this key, or onto nothing that has a
+  // preview (null). The first preview waits HOVER_MS; while one shows, the next shows at once, and
+  // the one left stays LEAVE_MS, so going from block to block reads them one after another.
+  function rest(key, by){
+    if (!key || key === quiet || tipBlocked()) {
+      if (aim?.by === by) { clearTimeout(tipTimer); tipTimer = 0; aim = null; }
+      if (tip?.by === by && !tipTimer) tipTimer = setTimeout(hideTip, LEAVE_MS);
+      return;
+    }
+    clearTimeout(tipTimer);
+    tipTimer = 0;
+    aim = null;
+    if (tip) {
+      if (tip.key === key) tip.by = by; else showTip(key, by);
+      return;
+    }
+    aim = {key, by};
+    tipTimer = setTimeout(() => {
+      tipTimer = 0;
+      aim = null;
+      // Only if it is still there, and still under the pointer or focused: the planner may have been
+      // drawn anew meanwhile.
+      const el = tipAnchor(key);
+      if (el && tipHolds(el, by)) showTip(key, by);
+    }, HOVER_MS);
+  }
+  // Called after every render: the preview follows the plan as the details card does (an item
+  // ticked, a step undone), and goes when its block went or is no longer under the pointer or
+  // focused. Still on it, a leave that was only the old block being taken away is forgotten.
+  function syncTip(){
+    if (!tip) return;
+    const el = tipAnchor(tip.key);
+    if (!el || !tipHolds(el, tip.by)) return hideTip();
+    clearTimeout(tipTimer);
+    tipTimer = 0;
+    showTip(tip.key, tip.by);
+  }
+  if (tipEl) {
+    // The pointer counts only when it moves, with no button down: a block drawn under a pointer
+    // that lies still shows nothing, and neither does a drag.
+    root.addEventListener('pointermove', e => {
+      if (e.pointerType === 'touch' || e.buttons) return;
+      const key = tipKey(e.target), was = at ? at.key : null;
+      at = {key, x: e.clientX, y: e.clientY};
+      if (key === was) return;
+      if (key !== quiet) quiet = null;
+      rest(key, 'pointer');
+    });
+    root.addEventListener('pointerleave', e => {
+      if (e.pointerType === 'touch') return;
+      at = quiet = null;
+      rest(null, 'pointer');
+    });
+    // The keyboard's focus, on the block's, flag's or chip's own button, and only when Tab brought
+    // it there. Focus the page itself puts on a block (after a redraw, a dialog or the drawer
+    // closing, the window coming back to the front) brings no preview; but put back on the block
+    // whose preview it already shows (the block was drawn anew), the preview stays.
+    root.addEventListener('focusin', e => {
+      const el = e.target.closest('[data-tip]'), on = el ? el.dataset.tip : null, own = !!el && tipButton(el) === e.target;
+      if (on !== quiet) quiet = null;
+      const back = own && tip?.key === on && tip.by === 'focus';
+      rest(back || (own && tabbed) ? on : null, 'focus');
+    });
+    root.addEventListener('focusout', e => { if (!root.contains(e.relatedTarget)) rest(null, 'focus'); });
+    // Any press, anywhere: the preview goes before a click, a drag or a touch begins.
+    document.addEventListener('pointerdown', e => { tabbed = false; quietTip(tipKey(e.target)); }, true);
+    document.addEventListener('keydown', e => {
+      tabbed = e.key === 'Tab';
+      if (e.key === 'Escape' && (tip || aim)) quietTip((tip || aim).key);
+    }, true);
+    // Focus going anywhere outside the planner: a dialog or the drawer opened, or the keyboard moved
+    // on. (The planner's own focusin, above, has run by now: the Tab is used up.)
+    document.addEventListener('focusin', e => {
+      tabbed = false;
+      if (tip && !root.contains(e.target)) hideTip();
+    });
+    // A scroll moves what is under the pointer (a block focused from the keyboard may scroll into
+    // view first: its preview still comes). A window resized or left: gone.
+    window.addEventListener('scroll', () => { at = null; if (aim?.by !== 'focus') hideTip(); }, true);
+    window.addEventListener('resize', hideTip);
+    window.addEventListener('blur', () => { at = null; tabbed = false; hideTip(); });
   }
 
   // ---- the weekly form ----

@@ -567,6 +567,37 @@ dialog.pdetail .close{top:10px;right:10px}
 .pd-none{margin:0;font-size:13px;color:var(--muted)}
 .pd-buttons{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px}
 .pd-buttons .grow{flex:1}
+/* The preview of a block, or of something due, while the pointer rests on it or it has the
+   keyboard's focus (planner.js, "a preview on hover", places it beside the block): what the details
+   card says, smaller and only to read. It never takes the pointer. The card's material: thick glass
+   in light, solid in dark and Night; solid too where transparency is reduced (the glass tokens). */
+.ptip{position:fixed;left:0;top:0;z-index:11;width:max-content;max-width:min(300px,calc(100vw - 16px));max-height:calc(100vh - 16px);max-height:calc(100dvh - 16px);overflow:hidden;
+  padding:11px 14px 12px;border:1px solid var(--glass-edge);border-radius:var(--radius);background:var(--glass-thick);-webkit-backdrop-filter:var(--glass-blur-thick);backdrop-filter:var(--glass-blur-thick);color:var(--text);
+  box-shadow:var(--glass-rim),var(--shadow-md);pointer-events:none;user-select:none;-webkit-user-select:none;animation:sh-tip-in var(--dur-1) var(--ease-out)}
+.ptip[hidden]{display:none}
+@keyframes sh-tip-in{from{opacity:0;transform:scale(.97)}}
+.ptip[data-side="left"]{transform-origin:100% 12px}.ptip[data-side="right"]{transform-origin:0 12px}
+.ptip[data-side="below"]{transform-origin:24px 0}.ptip[data-side="above"]{transform-origin:24px 100%}
+:root:is([data-theme="dark"],[data-theme="red"]) .ptip{background:var(--surface);border-color:var(--border-strong);-webkit-backdrop-filter:none;backdrop-filter:none}
+/* With no room for all of it (a long block in a small window) it is cut short, and fades out there. */
+.ptip[data-cut="1"]::after{content:"";position:absolute;left:0;right:0;bottom:0;height:40px;background:linear-gradient(to top,var(--glass-thick),transparent)}
+:root:is([data-theme="dark"],[data-theme="red"]) .ptip[data-cut="1"]::after{background:linear-gradient(to top,var(--surface),transparent)}
+.ptip h3{margin:4px 0 3px;font-size:14.5px;font-weight:650;letter-spacing:-.01em;line-height:1.3;overflow-wrap:anywhere}
+.ptip > h3:first-child{margin-top:0}
+.ptip .pd-kind{margin-right:0;font-size:10.5px}
+.ptip .pd-kind i{width:10px;height:10px}
+.ptip .pd-line{margin:1px 0;font-size:12.5px}
+.ptip .pd-sec{margin:10px 0 6px;font-size:10.5px}
+.ptip .pd-items{gap:7px}
+.ptip .pd-check{gap:7px;font-size:13px;cursor:default}
+.ptip .pd-work{margin:2px 0 0 21px;font-size:11.5px}
+.ptip > .pd-work{margin:3px 0 0}
+/* An item's tick as the preview draws it, where the card has a box to press. */
+.pd-tick{flex:none;width:14px;height:14px;margin-top:2px;border:1.5px solid var(--border-input);border-radius:4px;background:var(--surface)}
+.pd-tick.on{display:grid;place-content:center;border-color:var(--accent);background:var(--accent)}
+.pd-tick.on::before{content:"";width:8px;height:4px;margin-top:-2px;border:solid var(--on-accent);border-width:0 0 2px 2px;transform:rotate(-45deg)}
+.pd-rest{margin-left:21px;font-size:12px;color:var(--muted)}
+.pd-notes{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;line-clamp:4;overflow:hidden;margin-top:5px;white-space:pre-line}
 
 /* The block editor and the weekly form, built like the task dialog. */
 dialog.task input[type=checkbox],dialog.task input[type=radio]{width:16px;height:16px;margin:0;padding:0}
@@ -663,7 +694,7 @@ dialog.task .wk-hours label{flex:1 1 160px}
 }
 /* Nothing moves for those who ask for less motion. */
 @media (prefers-reduced-motion:reduce){
-  aside,dialog.task[open],dialog.pdetail[open]{animation:none}
+  aside,dialog.task[open],dialog.pdetail[open],.ptip{animation:none}
   .btn,.fab,.check,.pblock,.app-seg a,.views button,.theme-btn,.close,.ph-step,.row,.clist button{transition:none}
   .btn:active,.fab:hover,.fab:active,.check:active,.check.on{transform:none}
 }
@@ -758,6 +789,7 @@ dialog.task .wk-hours label{flex:1 1 160px}
 
 <!-- A block's details (planner.js fills it in and places it). -->
 <dialog class="pdetail" id="planDetail" aria-labelledby="pdTitle"></dialog>
+<div class="ptip" id="planTip" role="tooltip" hidden></div>
 
 <script src="data.js"></script>
 <script src="dashboard.js"></script>

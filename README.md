@@ -108,8 +108,10 @@ midnight by default. It holds the three meals, each with where you eat it, and b
 **Deep work**, **Socialize** or a plain **Block**. Each block lists the things to get done in it:
 assignments and tasks dragged in from the list, or to-dos you type. A meal's place and time and a
 block marked to repeat are set once per weekday in the weekly form (**Week…**), so set Sunday's lunch
-place once and every Sunday shows it; a change made on one day stays on that day. The whole design is
-in [docs/planner.md](docs/planner.md).
+place once and every Sunday shows it; a change made on one day stays on that day. Resting the pointer
+on a block (or on a flag of something due) shows its details beside it, as does Tab from the
+keyboard; a click opens the same details as a card you can act on. The whole design is in
+[docs/planner.md](docs/planner.md).
 
 It is saved through `GET /api/plan?from=&to=` and `POST /api/plan`, one key per object (`settings`,
 `week:sun` … `week:sat`, `day:YYYY-MM-DD`). Every save is checked by `plan.py`, which refuses what
