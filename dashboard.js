@@ -503,9 +503,13 @@ function render(){
   $('.page').dataset.plan = plannerState;
   showSynced();
   const vis = visible(), main = $('#main'), key = focusKey(main);
+  // The page stays where it was scrolled to. WebKit (Safari, the Mac app) moves it when the rows
+  // are drawn anew in place: a ✓ far down the list sent the page back to its top.
+  const x = window.scrollX, y = window.scrollY;
   main.innerHTML = stats() + (view === 'courses' ? coursesView(vis) : upcomingView(vis));
   markEmoji(main);
   refocus(main, key);
+  if (window.scrollY !== y || window.scrollX !== x) window.scrollTo(x, y);
   emit('render');
 }
 

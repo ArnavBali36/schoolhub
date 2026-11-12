@@ -182,7 +182,7 @@ class PlannerPageTest(unittest.TestCase):
         self.assertIn("let plannerState = PHONE || LOCAL_FILES ? 'off' : 'unknown';", JS)
         # Told when the list is drawn, when marks and tasks are fetched again, and once the page knows
         # where it saves (kept, for a planner.js that loads after the answer).
-        self.assertIn("  refocus(main, key);\n  emit('render');\n}", JS)
+        self.assertIn("  if (window.scrollY !== y || window.scrollX !== x) window.scrollTo(x, y);\n  emit('render');\n}", JS)
         self.assertRegex(JS, r"catch \{\}\n  emit\('reload'\);\n\}")
         # Once the server has answered, or at once when the page is drawn from the last visit's copy
         # of its answer; never twice.
@@ -4412,6 +4412,32 @@ out.live = LIVE;
         # The drawer stays where it was read, and the list is drawn in its own box.
         self.assertIn("const top = drawerId === id ? drawer.scrollTop : 0;", JS)
         self.assertIn("  main.innerHTML = stats() + (view === 'courses' ? coursesView(vis) : upcomingView(vis));", JS)
+
+    def test_the_list_drawn_anew_leaves_the_page_where_it_was_scrolled_to(self):
+        # Seen in the Mac app (WebKit): with the page scrolled down, a ✓ drew the rows anew in place
+        # and the engine sent the page back to its top. render() puts it back where it was, before
+        # anything that listens for the drawing (the planner) measures the page.
+        out = run_node("""
+const said = [];
+const main = {html: '', set innerHTML(v){ this.html = v; if (jumps) window.scrollY = 5; }, get innerHTML(){ return this.html; }};
+const els = {'#main': main, '#views [data-view="day"]': {}, '.page': {dataset: {}}};
+const $ = sel => els[sel];
+const document = {querySelectorAll: () => []};
+const window = {scrollX: 0, scrollY: 300, scrollTo(x, y){ said.push('to ' + x + ',' + y); this.scrollX = x; this.scrollY = y; }};
+let D = {}, plannerState = 'on', jumps = true;
+const shownView = () => 'upcoming', showSynced = () => {}, visible = () => [], focusKey = () => null, stats = () => 'S',
+  upcomingView = () => 'U', coursesView = () => 'C', markEmoji = () => {}, refocus = () => {},
+  emit = what => said.push(what + ' at ' + window.scrollY);
+""" + source_of("function render") + """
+render();
+const moved = said.splice(0);
+jumps = false; window.scrollY = 300;
+render();
+console.log(JSON.stringify({moved, still: said, drawn: main.innerHTML}));
+""")
+        self.assertEqual(out["moved"], ["to 0,300", "render at 300"])
+        self.assertEqual(out["still"], ["render at 300"])
+        self.assertEqual(out["drawn"], "SU")
 
     def test_sync_now_keeps_its_own_wait_and_takes_its_data_in_place(self):
         out = boot(BOOT_MAC, WATCH_STARTED + """
