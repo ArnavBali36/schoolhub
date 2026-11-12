@@ -104,12 +104,16 @@ class RuleTest(unittest.TestCase):
         # A wake time ahead of the clock (the clock was set back) is not waited for.
         self.assertTrue(self.due(T0, None, awake_since=T0 + 24 * HOUR)[0])
 
-    def test_the_wait_after_failures_grows_to_an_hour_and_no_further(self):
-        self.assertEqual([autosync.retry_delay(n) for n in range(9)],
-                         [0, 300, 600, 1200, 2400, 3600, 3600, 3600, 3600])
+    def test_the_wait_after_failures_grows_to_twelve_hours_and_no_further(self):
+        # 5, 10, 20 and 40 minutes; three tries an hour apart; 3 and 6 hours; then the 12 hours
+        # between good syncs. Never every hour for ever: each try is a whole sync, with its logins.
+        self.assertEqual([autosync.retry_delay(n) for n in range(13)],
+                         [0, 300, 600, 1200, 2400, 3600, 3600, 3600, 3 * HOUR, 6 * HOUR, 12 * HOUR, 12 * HOUR, 12 * HOUR])
+        self.assertEqual(autosync.RETRY[-1], autosync.SYNC_AFTER)
+        self.assertEqual(list(autosync.RETRY), sorted(autosync.RETRY))
 
     def test_after_a_failure_the_next_try_waits(self):
-        for failures, wait in ((1, 300), (2, 600), (3, 1200), (4, 2400), (5, 3600), (40, 3600)):
+        for failures, wait in ((1, 300), (2, 600), (3, 1200), (4, 2400), (5, 3600), (8, 3 * HOUR), (40, 12 * HOUR)):
             with self.subTest(failures=failures):
                 tried = T0 - 60
                 self.assertEqual(self.due(T0, None, tried, failures), (False, tried + wait, "retry"))
@@ -352,18 +356,36 @@ class LoopTest(unittest.TestCase):
         write_data(self.hub, T0 - 13 * HOUR)
         self.outcome = "crash"
         self.loop(6 * HOUR)
-        expected = self.tries(120, [300, 600, 1200, 2400] + [3600] * 8)
+        expected = self.tries(120, [300, 600, 1200, 2400, 3600, 3600, 3600, 3 * HOUR, 6 * HOUR])
         self.assertEqual(self.starts, [t for t in expected if t <= 6 * HOUR])
-        self.assertEqual(expected[:6], [120, 480, 1140, 2400, 4860, 8520])  # 5, 10, 20 and 40 minutes, then hourly
-        self.assertEqual(len(self.starts), 9)  # in six hours of failing: not one a minute
+        self.assertEqual(expected[:6], [120, 480, 1140, 2400, 4860, 8520])  # 5, 10, 20 and 40 minutes, then an hour
+        self.assertEqual(len(self.starts), 8)  # in six hours of failing: not one a minute
         status = self.state()
-        self.assertEqual((status["state"], status["failures"]), ("retrying", 9))
-        self.assertEqual(status["next_at"], stamp(T0 + self.starts[-1] + 45 + 3600))
+        self.assertEqual((status["state"], status["failures"]), ("retrying", 8))
+        self.assertEqual(status["next_at"], stamp(T0 + self.starts[-1] + 45 + 3 * HOUR))  # and the waits go on growing
         self.assertIn("sync failed (1 in a row): the next try by itself is in 5 min at the earliest", self.logged)
+
+    def test_a_source_that_fails_every_time_is_not_synced_every_hour_for_ever(self):
+        # An expired Canvas token, a changed Gradescope password: every sync ends incomplete, for a
+        # week. Ten tries on the first day, then the two a day of a good week (it was 24 a day).
+        write_data(self.hub, T0 - 13 * HOUR)
+        self.outcome = "incomplete"
+        self.loop(7 * 24 * HOUR)
+        day = 24 * HOUR
+        self.assertEqual([sum(1 for s in self.starts if d * day <= s < (d + 1) * day) for d in range(7)], [10, 2, 2, 2, 2, 2, 2])
+        status = self.state()
+        self.assertEqual((status["state"], status["failures"]), ("retrying", 22))
+        self.assertEqual(status["next_at"], stamp(T0 + self.starts[-1] + 45 + 12 * HOUR))
+        # The first good sync ends it: the next is 12 hours after that one, and a failure then
+        # starts at 5 minutes again.
+        self.outcome = "good"
+        self.loop(8 * day)
+        self.assertEqual(self.state()["failures"], 0)
+        self.assertEqual(self.state()["state"], "waiting")
 
     def test_a_sync_that_could_not_read_canvas_counts_as_a_failure(self):
         write_data(self.hub, T0 - 13 * HOUR)
-        self.outcome = "incomplete"  # sync.py ran to the end and wrote a data.js without the Canvas courses
+        self.outcome = "incomplete"  # sync.py ran to the end, and its data.js says Canvas could not be read
         self.loop(15 * 60)
         self.assertEqual(self.starts, [120, 480])  # again after 5 minutes, not after 12 hours
         self.assertIsNone(self.state()["last_good_at"])
@@ -440,6 +462,43 @@ class LoopTest(unittest.TestCase):
         self.loop(opened + 600)
         self.assertEqual(self.starts, [opened + 120])
 
+    def test_a_sleep_while_canvas_is_asked_for_is_a_sleep_too(self):
+        # A sync is due and the network slow: the lid closes while the look waits to hear whether
+        # Canvas can be reached, and the answer comes a second into the next wake, eight hours on.
+        # Nothing starts in that wake's first second: the Mac gets its two minutes again.
+        write_data(self.hub, T0 - 13 * HOUR)
+        naps = [8 * HOUR]
+
+        def slow_network(url):
+            if naps:
+                self.t += naps.pop() + 1  # asleep with the question open; answered a second after waking
+                self.up += 1
+            return True
+        with mock.patch.object(autosync, "reachable", slow_network):
+            self.loop(120)  # the second look: due, and Canvas is asked for
+            woke = 120 + 8 * HOUR
+            self.assertEqual(self.starts, [])
+            self.assertEqual(self.state()["state"], "settling")
+            self.loop(9 * HOUR)
+        self.assertEqual(len(self.starts), 1)
+        self.assertGreaterEqual(self.starts[0] - woke, autosync.SETTLE)
+        self.assertLessEqual(self.starts[0] - woke, autosync.SETTLE + 2 * autosync.TICK + 1)
+
+    def test_a_sleep_anywhere_in_a_look_is_seen_at_the_next(self):
+        # The two clocks are compared from one look to the next, not only across the wait between.
+        write_data(self.hub, T0 - 13 * HOUR)
+        real, naps = server.auto_tick, [3 * HOUR]
+
+        def tick(now, *clocks):
+            if naps:
+                self.t += naps.pop()  # the Mac slept in the middle of this look
+                return False
+            return real(now, *clocks)
+        with mock.patch.object(server, "auto_tick", tick):
+            self.loop(4 * HOUR)
+        # Seen at the look after it (at 3 h + 2 min), and the sync waits its two minutes from there.
+        self.assertEqual(self.starts, [3 * HOUR + 120 + autosync.SETTLE])
+
     def test_offline_is_not_a_failure(self):
         write_data(self.hub, T0 - 13 * HOUR)
         self.online = False
@@ -501,11 +560,11 @@ class LoopTest(unittest.TestCase):
         write_data(self.hub, T0 - 13 * HOUR)
         real, calls = server.auto_tick, []
 
-        def tick(now):
+        def tick(now, *clocks):
             calls.append(now)
             if len(calls) == 1:
                 raise RuntimeError("boom")
-            return real(now)
+            return real(now, *clocks)
         with mock.patch.object(server, "auto_tick", tick):
             self.loop(5 * 60)
         self.assertEqual(self.logged[0], "looking whether a sync is due failed: boom")
@@ -587,7 +646,7 @@ class SyncPyTest(unittest.TestCase):
 
     def run_sync(self, canvas=None):
         out, err = io.StringIO(), io.StringIO()
-        canvas = canvas or (lambda cv, cfg, store, errors, now: [])
+        canvas = canvas or (lambda cv, cfg, store, errors, now, previous=None: [])
         with mock.patch.object(sync, "sync_canvas", canvas), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             sync.main()
         text = (self.hub / "data.js").read_text()
@@ -610,7 +669,7 @@ class SyncPyTest(unittest.TestCase):
         self.assertIn("Canvas: couldn't list courses", out.getvalue())
 
     def test_a_course_or_a_source_that_fails_is_incomplete(self):
-        def one_course_down(cv, cfg, store, errors, now):
+        def one_course_down(cv, cfg, store, errors, now, previous=None):
             errors.append("Canvas Calculus: HTTP Error 500")
             return []
         data, out, err = self.run_sync(one_course_down)
@@ -620,7 +679,7 @@ class SyncPyTest(unittest.TestCase):
 
     def test_a_file_that_could_not_be_saved_leaves_it_complete(self):
         # Too big, or a link that answers 403: it would fail the same way at every sync.
-        def one_file_skipped(cv, cfg, store, errors, now):
+        def one_file_skipped(cv, cfg, store, errors, now, previous=None):
             store.errors.append("Skipped lecture.mov: 300 MB is over the size limit")
             return []
         data, out, err = self.run_sync(one_file_skipped)
@@ -628,6 +687,168 @@ class SyncPyTest(unittest.TestCase):
         self.assertEqual(data["errors"], ["Skipped lecture.mov: 300 MB is over the size limit"])
         self.assertIn("⚠️ Skipped lecture.mov", out)
         self.assertIn("1 errors", err)
+
+    # ---- what could not be read keeps its last good copy ----
+
+    @staticmethod
+    def a_course(cid, source="canvas", name=None, due="2026-12-01T05:00:00+00:00"):
+        prefix = "canvas" if source == "canvas" else source
+        return {"id": f"{prefix}:{cid}", "source": source, "name": name or f"Course {cid}", "short": f"C{cid}", "color": None, "url": None,
+                "folder": None, "materials": [],
+                "assignments": [{"id": f"{prefix}:{cid}:1", "name": "HW 1", "due_at": due, "points": 10, "status": "todo", "score": None,
+                                 "grade": None, "submitted_at": None, "late": False, "platform": "Canvas", "verifiable": True, "url": None,
+                                 "folder": None, "files": [], "submitted_files": [], "description_html": "", "comments": []}]}
+
+    def last_data(self, courses, **more):
+        data = {"generated_at": autosync.datetime.now(autosync.timezone.utc).isoformat(), "complete": True, "errors": [], "new_files": [],
+                "courses": courses, **more}
+        (self.hub / "data.js").write_text("window.SCHOOL_DATA = " + json.dumps(data) + ";\n")
+
+    def real_sync(self, listed=None, broken=(), gradescope=None):
+        """sync.py's own run with its own sync_canvas: Canvas lists `listed` (or cannot be reached
+        when None), and reading a course in `broken` fails."""
+        def get_all(cv, path, **params):
+            if listed is None:
+                raise urllib.error.HTTPError("https://canvas.invalid", 401, "Unauthorized", None, None)
+            return [{"id": cid, "name": f"Course {cid}"} for cid in listed]
+
+        def read(cv, course, folder, store, now):
+            if course["id"] in broken:
+                raise urllib.error.HTTPError("https://canvas.invalid", 500, "Internal Server Error", None, None)
+            return self.a_course(course["id"], name=course["name"] + " (read now)")
+        patches = [mock.patch.object(sync.Canvas, "get_all", get_all), mock.patch.object(sync, "sync_canvas_course", read)]
+        if gradescope:
+            cfg = json.loads((self.hub / "config.json").read_text())
+            cfg["gradescope"] = {"email": "someone@example.edu", "password": "not-a-real-password"}
+            (self.hub / "config.json").write_text(json.dumps(cfg))
+            patches.append(mock.patch.dict(sys.modules, {"gradescope_source": types.SimpleNamespace(sync=gradescope)}))
+        with contextlib.ExitStack() as stack, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            for p in patches:
+                stack.enter_context(p)
+            sync.main()
+        data = json.loads((self.hub / "data.js").read_text().split("=", 1)[1].strip().rstrip(";"))
+        return data, {c["id"]: c for c in data["courses"]}
+
+    def test_canvas_out_of_reach_keeps_the_last_good_copy_of_its_courses(self):
+        # It used to write a data.js with no Canvas course at all, and that now reaches an open
+        # page and the public site by itself, minutes after the lid opens.
+        self.last_data([self.a_course(1), self.a_course(2), self.a_course(7, source="gradescope")])
+        data, by_id = self.real_sync(listed=None)
+        self.assertEqual(sorted(by_id), ["canvas:1", "canvas:2"])     # (no Gradescope login in this config: not a source)
+        self.assertEqual([by_id["canvas:1"]["stale"], by_id["canvas:2"]["stale"]], [True, True])
+        self.assertEqual(by_id["canvas:1"]["assignments"][0]["name"], "HW 1")
+        # Still not a good sync: it is tried again soon, and the page says what is wrong.
+        self.assertIs(data["complete"], False)
+        self.assertIn("Canvas: couldn't list courses", data["errors"][0])
+        self.assertEqual(autosync.last_sync(self.hub / "data.js")[1], False)
+        # The retry that gets through shows them fresh again.
+        data, by_id = self.real_sync(listed=[1, 2])
+        self.assertEqual([data["complete"], by_id["canvas:1"].get("stale"), by_id["canvas:1"]["name"]], [True, None, "Course 1 (read now)"])
+
+    def test_one_course_that_fails_keeps_its_last_good_copy(self):
+        self.last_data([self.a_course(1), self.a_course(2), self.a_course(9)])
+        data, by_id = self.real_sync(listed=[1, 2, 3], broken={2, 3})
+        # Read now; kept from the last sync; never read before, so nothing to keep; and a course
+        # Canvas no longer lists is gone, as before.
+        self.assertEqual(sorted(by_id), ["canvas:1", "canvas:2"])
+        self.assertEqual([by_id["canvas:1"].get("stale"), by_id["canvas:1"]["name"]], [None, "Course 1 (read now)"])
+        self.assertEqual([by_id["canvas:2"].get("stale"), by_id["canvas:2"]["name"]], [True, "Course 2"])
+        self.assertIs(data["complete"], False)
+        self.assertEqual(len(data["errors"]), 2)
+
+    def test_gradescope_failing_keeps_its_own_classes_and_never_shows_one_twice(self):
+        def down(gs, root, store, canvas_courses, now):
+            raise RuntimeError("login failed")
+        self.last_data([self.a_course(1), self.a_course(7, source="gradescope")])
+        data, by_id = self.real_sync(listed=[1], gradescope=down)
+        self.assertEqual(sorted(by_id), ["canvas:1", "gradescope:7"])
+        self.assertEqual([by_id["canvas:1"].get("stale"), by_id["gradescope:7"]["stale"]], [None, True])
+        self.assertEqual([data["complete"], data["errors"]], [False, ["Gradescope: login failed"]])
+        # Canvas out of reach while Gradescope answers: Gradescope is given the kept Canvas
+        # courses to merge into, as on any day, so it makes no second copy of a class.
+        given = []
+
+        def up(gs, root, store, canvas_courses, now):
+            given.append(sorted(c["id"] for c in canvas_courses))
+            return []
+        self.last_data([self.a_course(1), self.a_course(2)])
+        data, by_id = self.real_sync(listed=None, gradescope=up)
+        self.assertEqual(given, [["canvas:1", "canvas:2"]])
+        self.assertEqual(sorted(by_id), ["canvas:1", "canvas:2"])
+
+    # ---- what a sync noticed stays for a day ----
+
+    def test_a_date_that_moved_stays_marked_for_a_day_not_until_the_next_sync(self):
+        first, moved = "2026-12-01T05:00:00+00:00", "2026-12-03T05:00:00+00:00"
+        due = {"at": first, "fail": False}
+
+        def canvas(cv, cfg, store, errors, now, previous=None):
+            if due["fail"]:
+                errors.append("Canvas Other: HTTP Error 500")
+            return [self.a_course(1, due=due["at"])]
+        hw = lambda data: data["courses"][0]["assignments"][0]  # noqa: E731
+        data, _, _ = self.run_sync(canvas)
+        self.assertNotIn("due_changed_from", hw(data))
+        # The sync that notices the move also leaves something unread, so it is tried again in 5 minutes.
+        due.update(at=moved, fail=True)
+        data, out, _ = self.run_sync(canvas)
+        self.assertEqual([hw(data)["due_changed_from"], data["complete"]], [first, False])
+        noticed = hw(data)["due_changed_at"]
+        self.assertEqual(noticed, data["generated_at"])
+        self.assertIn("📅 C1: HW 1 moved from", out)
+        # The retry sees the same date as five minutes ago: the mark stays, and is not announced twice.
+        due["fail"] = False
+        data, out, _ = self.run_sync(canvas)
+        self.assertEqual([hw(data)["due_changed_from"], hw(data)["due_changed_at"], data["complete"]], [first, noticed, True])
+        self.assertNotIn("📅", out)
+        # A day after it was noticed it goes (the file's times are set back, in place of waiting).
+        old = (autosync.datetime.fromisoformat(noticed) - sync.timedelta(hours=25)).isoformat()
+        data["generated_at"] = hw(data)["due_changed_at"] = old
+        (self.hub / "data.js").write_text("window.SCHOOL_DATA = " + json.dumps(data) + ";\n")
+        data, _, _ = self.run_sync(canvas)
+        self.assertNotIn("due_changed_from", hw(data))
+        self.assertNotIn("due_changed_at", hw(data))
+        # A data.js from before the time was kept: noticed by the sync that wrote it.
+        now = autosync.datetime.now(autosync.timezone.utc)
+        course, before = self.a_course(1, due=moved), self.a_course(1, due=moved)
+        before["assignments"][0]["due_changed_from"] = first
+        sync.detect_changes([course], {"generated_at": (now - sync.timedelta(hours=2)).isoformat(), "courses": [before]}, now)
+        self.assertEqual(course["assignments"][0]["due_changed_from"], first)
+        course = self.a_course(1, due=moved)
+        sync.detect_changes([course], {"generated_at": (now - sync.timedelta(hours=30)).isoformat(), "courses": [before]}, now)
+        self.assertNotIn("due_changed_from", course["assignments"][0])
+
+    def test_new_files_stay_counted_for_a_day(self):
+        found = []
+
+        def canvas(cv, cfg, store, errors, now, previous=None):
+            store.new.extend(found)
+            return []
+        found[:] = ["/School/C1/a.pdf"]
+        data, _, err = self.run_sync(canvas)
+        self.assertEqual(data["new_files"], ["/School/C1/a.pdf"])
+        since = data["new_files_since"]
+        self.assertEqual(since, data["generated_at"])
+        self.assertIn("1 new files", err)
+        # The next sync, minutes or hours later, found one more: both are counted, the older first.
+        found[:] = ["/School/C1/b.pdf"]
+        data, _, err = self.run_sync(canvas)
+        self.assertEqual([data["new_files"], data["new_files_since"]], [["/School/C1/a.pdf", "/School/C1/b.pdf"], since])
+        self.assertIn("1 new files", err)          # the sync's own line says what this sync saved
+        found[:] = []
+        data, _, _ = self.run_sync(canvas)
+        self.assertEqual(len(data["new_files"]), 2)
+        # A day after the first of them was found, they go.
+        data["new_files_since"] = (autosync.datetime.fromisoformat(since) - sync.timedelta(hours=25)).isoformat()
+        (self.hub / "data.js").write_text("window.SCHOOL_DATA = " + json.dumps(data) + ";\n")
+        data, _, _ = self.run_sync(canvas)
+        self.assertEqual(data["new_files"], [])
+        # A data.js from before, or one with nothing to tell the time by, is handled.
+        now = autosync.datetime.now(autosync.timezone.utc)
+        recent = (now - sync.timedelta(hours=3)).isoformat()
+        self.assertEqual(sync.new_files(["b"], {"generated_at": recent, "new_files": ["a", "b"]}, now), (["a", "b"], recent))
+        self.assertEqual(sync.new_files(["b"], {"new_files": ["a"]}, now), (["b"], now.isoformat()))
+        self.assertEqual(sync.new_files([], {"generated_at": "not a time", "new_files": ["a"]}, now), ([], now.isoformat()))
 
     def test_one_sync_at_a_time(self):
         lock = self.hub / "state" / "sync.lock"
@@ -641,6 +862,100 @@ class SyncPyTest(unittest.TestCase):
         self.run_sync()
         self.run_sync()
         self.assertTrue((self.hub / "data.js").is_file())
+
+
+class FakeProcess:
+    """A process as server.py starts one: what it was started with, and what was done to it."""
+
+    def __init__(self, argv, world, **options):
+        self.argv, self.options, self.world = [str(a) for a in argv], options, world
+        self.pid = 4242 + len(world.started)
+        self.returncode = None
+        self.done = []
+        world.started.append(self)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.done.append("waited")
+        return False
+
+    def communicate(self, timeout=None):
+        self.done.append(f"communicate {timeout}")
+        if self.world.hangs:
+            raise server.subprocess.TimeoutExpired(self.argv, timeout)
+        self.returncode = self.world.exit
+        return "[schoolhub] 9 courses\n", ""
+
+    def kill(self):
+        self.done.append("killed")
+
+    def terminate(self):
+        self.done.append("terminated")
+
+    def wait(self, timeout=None):
+        self.done.append("reaped")
+
+
+class KeepAwakeTest(unittest.TestCase):
+    """While the server runs a sync, the Mac is kept from idle sleep by macOS's own caffeinate, held
+    beside the sync (never around it: the 30-minute limit must still stop sync.py itself). No
+    process is started here."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tool = Path(tmp.name) / "caffeinate"
+        self.tool.write_text("")
+        self.started, self.hangs, self.exit = [], False, 0
+        for name, value in (("Popen", lambda argv, **options: FakeProcess(argv, self, **options)),):
+            p = mock.patch.object(server.subprocess, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        p = mock.patch.object(server, "CAFFEINATE", self.tool)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_the_sync_is_started_as_ever_and_caffeinate_waits_on_it(self):
+        self.assertEqual(server.sync_py(), (True, "[schoolhub] 9 courses"))
+        sync_process, keeper = self.started
+        self.assertEqual(sync_process.argv, [sys.executable, str(server.HUB / "sync.py")])
+        self.assertEqual(sync_process.done, ["communicate 1800", "waited"])
+        # No idle sleep (-i) for as long as that process lives (-w), and nothing else.
+        self.assertEqual(keeper.argv, [str(self.tool), "-i", "-w", str(sync_process.pid)])
+        self.assertEqual(keeper.done, ["terminated", "reaped"])
+        # The tool is macOS's own, by its full path (stood in for here by an empty file).
+        self.assertIn('CAFFEINATE = Path("/usr/bin/caffeinate")', (REPO / "server.py").read_text())
+
+    def test_without_caffeinate_the_sync_runs_all_the_same(self):
+        self.tool.unlink()
+        self.assertEqual(server.sync_py(), (True, "[schoolhub] 9 courses"))
+        self.assertEqual(len(self.started), 1)
+        # Or with one that cannot be started.
+        self.tool.write_text("")
+        real = server.subprocess.Popen
+
+        def no_tool(argv, **options):
+            if str(argv[0]) == str(self.tool):
+                raise OSError("cannot run")
+            return real(argv, **options)
+        with mock.patch.object(server.subprocess, "Popen", no_tool):
+            self.assertEqual(server.sync_py(), (True, "[schoolhub] 9 courses"))
+
+    def test_a_sync_that_fails_or_runs_out_of_time(self):
+        self.exit = 1
+        self.assertEqual(server.sync_py(), (False, "[schoolhub] 9 courses"))
+        # Thirty minutes: sync.py itself is stopped (not only what keeps the Mac awake), and
+        # nothing is left running.
+        self.started.clear()
+        self.hangs = True
+        ok, out = server.sync_py()
+        self.assertFalse(ok)
+        self.assertIn("timed out after 1800 seconds", out)
+        sync_process, keeper = self.started
+        self.assertEqual(sync_process.done, ["communicate 1800", "killed", "waited"])
+        self.assertEqual(keeper.done, ["terminated", "reaped"])
 
 
 if __name__ == "__main__":

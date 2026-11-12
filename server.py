@@ -61,13 +61,47 @@ def sync_log():
     return HUB / "state" / "sync.log"
 
 
-def sync_py():
-    """Runs sync.py to its end: (whether it got there, what it printed)."""
+CAFFEINATE = Path("/usr/bin/caffeinate")  # macOS's own tool: keeps the Mac awake while a process runs
+
+
+def stay_awake(pid):
+    """Keeps the Mac from going to sleep by itself while the process with this id runs: macOS's own
+    caffeinate, told to hold off idle sleep (-i) for as long as that process lives (-w). A sync takes
+    a minute or two, and a Mac on battery left alone for one minute would otherwise freeze it
+    halfway. It changes no setting and ends with the sync; closing the lid still puts the Mac to
+    sleep. Returns the caffeinate process, or None where there is no such tool (not a Mac)."""
+    if not CAFFEINATE.is_file():
+        return None
     try:
-        p = subprocess.run([sys.executable, str(HUB / "sync.py")], capture_output=True, text=True, timeout=1800)
-        return p.returncode == 0, (p.stdout + p.stderr).strip()
+        return subprocess.Popen([str(CAFFEINATE), "-i", "-w", str(pid)], stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return None
+
+
+def sync_py():
+    """Runs sync.py to its end: (whether it got there, what it printed). At most 30 minutes: then
+    it is stopped, and that counts as a failure."""
+    keeper = None
+    try:
+        with subprocess.Popen([sys.executable, str(HUB / "sync.py")], stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, text=True) as p:
+            keeper = stay_awake(p.pid)
+            try:
+                out, err = p.communicate(timeout=1800)
+            except BaseException:  # the time ran out (or the server is stopping): the sync does not run on alone
+                p.kill()
+                raise
+        return p.returncode == 0, (out + err).strip()
     except Exception as e:
         return False, str(e)
+    finally:
+        if keeper:  # it ends by itself with the sync; this only tidies up after it
+            try:
+                keeper.terminate()
+                keeper.wait(timeout=5)
+            except Exception:
+                pass
 
 
 def run_sync(clock=time.time):
@@ -136,17 +170,26 @@ def sync_status(now=None):
                 "auto": AUTO.status(now, on_disk, sync_state["running"], auto_on())}
 
 
-def auto_tick(now):
+def auto_tick(now, clock=time.time, awake=time.monotonic):
     """One look: starts a sync if the last good one is over 12 hours old, the Mac has been awake a
-    moment, no retry is being waited for and Canvas can be reached. Returns whether it started one."""
+    moment, no retry is being waited for and Canvas can be reached. Returns whether it started one.
+    `clock` and `awake` are the loop's two clocks (auto_sync_loop)."""
     with SYNC_LOCK:
         if sync_state["running"] or not auto_on() or not AUTO.due(now, synced()):
             return False
     # Asked outside the lock (it waits on the network). Offline is not a failed try: the next look asks
     # again, so the sync starts within a minute or so of the network coming back.
     url = canvas_url()
+    asked, up = clock(), awake()
     online = not url or autosync.reachable(url)
+    wall, awake_for = clock() - asked, awake() - up
     with SYNC_LOCK:
+        # The answer can take seconds on a network that is up but slow, and the lid may close in
+        # them: the answer then comes at some later wake, which may itself last only seconds. That
+        # is a sleep like any other: the Mac is given its moment again, and nothing starts now.
+        if autosync.woke(wall, awake_for):
+            AUTO.waited(asked + wall, wall, awake_for)
+            return False
         AUTO.offline = not online
         if not online or not start_sync():
             return False
@@ -500,14 +543,17 @@ def auto_sync_loop(clock=time.time, sleep=time.sleep, awake=time.monotonic):
     """Looks once a minute whether a sync is due (auto_tick). `awake` is a clock that stops while
     the Mac sleeps: a wait that took longer by the wall clock than by that one was partly slept
     through, and the Mac is then given a moment (autosync.SETTLE) before a sync starts."""
+    # The two clocks are compared from one look to the next, not only across the wait between
+    # them, so a sleep that began while a look was busy is seen at the next one too.
+    before, up = clock(), awake()
     while True:
-        before, up = clock(), awake()
         sleep(autosync.TICK)
-        now = clock()
+        now, now_up = clock(), awake()
         try:
             with SYNC_LOCK:
-                AUTO.waited(now, now - before, awake() - up)
-            auto_tick(now)
+                AUTO.waited(now, now - before, now_up - up)
+            before, up = now, now_up
+            auto_tick(now, clock, awake)
         except Exception as e:  # the loop outlives anything a look runs into
             log(f"looking whether a sync is due failed: {e}")
 

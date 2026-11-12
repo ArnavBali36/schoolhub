@@ -10,8 +10,8 @@ memory:
 - sync.py writes data.js only when it runs to the end, in one move, with the time the sync began
   (`generated_at`) and whether it read every source (`complete`). A sync that crashed or was killed
   leaves the old file, so the old time still stands. One that could not reach Canvas does write a
-  new file (without what it could not read), marked incomplete: that is not a good sync, and it is
-  tried again soon rather than in 12 hours.
+  new file (with the last good copy of what it could not read), marked incomplete: that is not a
+  good sync, and it is tried again soon rather than in 12 hours.
 - The file's date says less: it changes when the file is copied or restored, and a failed sync
   changes it too.
 - The server's memory is gone at every restart. All it keeps here is how many syncs failed in a row
@@ -35,12 +35,17 @@ SYNC_AFTER = 12 * 3600  # a sync starts by itself once the last good one is this
 TICK = 60  # the loop looks this often
 WAKE_GAP = 15  # the two clocks this far apart over one wait: the Mac slept in it
 SETTLE = 120  # awake (or the server running) this long in one stretch before a sync starts by itself
-RETRY = (300, 600, 1200, 2400, 3600)  # the wait after 1, 2, 3, 4 and 5 or more failures in a row
+# The wait after 1, 2, 3 … failures in a row: 5 minutes, doubling to an hour, three tries an hour
+# apart, then 3 and 6 hours, and from the tenth on the 12 hours of a good day. A source that fails
+# every time (an expired Canvas token, a changed Gradescope password) is so tried about ten times in
+# the first day and twice a day after, not every hour for ever, each try a whole sync with its logins.
+RETRY = (300, 600, 1200, 2400, 3600, 3600, 3600, 10800, 21600, SYNC_AFTER)
 FUTURE = 300  # a time further ahead than this comes from a clock that was wrong: not believed
 
 
 def retry_delay(failures):
-    """Seconds to wait after this many failed syncs in a row: 5 minutes, doubling, an hour at most."""
+    """Seconds to wait after this many failed syncs in a row (RETRY): 5 minutes, growing to the 12
+    hours between good syncs and no further."""
     return RETRY[min(failures, len(RETRY)) - 1] if failures > 0 else 0
 
 

@@ -44,8 +44,9 @@ class ShareDataTest(unittest.TestCase):
         self.fake = FakeTurso()
         self.addCleanup(self.fake.close)
         # sync.py imports cloud when it runs; give it cloud.py reading this folder's cloud.env.
+        # (No test waits: the pauses between tries at saving to the shared database are none here.)
         patches = [mock.patch.dict(sys.modules, {"cloud": load_cloud(self.env)}),
-                   mock.patch.object(sys, "argv", ["sync.py"])]
+                   mock.patch.object(sys, "argv", ["sync.py"]), mock.patch.object(sync, "SHARE_PAUSES", (0, 0))]
         for name, path in {"HUB": hub, "STATE": hub / "state", "MANIFEST": hub / "state" / "manifest.json",
                            "ALERTED": hub / "state" / "alerted.json", "MARKS": hub / "state" / "marks.json",
                            "TASKS": hub / "state" / "tasks.json", "DATA_JS": hub / "data.js"}.items():
@@ -141,6 +142,32 @@ class ShareDataTest(unittest.TestCase):
                 self.assertNotIn(self.fake.token, errors[0])
         self.assertEqual(self.shared(), [])
 
+    def test_a_save_that_fails_is_tried_again(self):
+        # One upload, and the network gone for a moment: the hosted copy would otherwise show the
+        # sync before this one until the next, twelve hours on.
+        self.use_turso()
+        turso, now = sys.modules["cloud"].Turso, datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)
+        real, tries, pauses = turso.save_data, [], []
+
+        def flaky(db, text, at, fail=1):
+            tries.append(at)
+            if len(tries) <= fail:
+                raise OSError("network is unreachable")
+            return real(db, text, at)
+        with mock.patch.object(turso, "save_data", flaky), mock.patch.object(sync, "SHARE_PAUSES", (2, 5)), \
+                mock.patch.object(sync.time, "sleep", pauses.append):
+            errors = []
+            sync.share_data({"courses": []}, now, errors)
+            self.assertEqual((errors, len(tries), pauses), ([], 2, [2]))
+            self.assertEqual(self.shared(), [('window.SCHOOL_DATA = {"courses": []};\n', int(now.timestamp() * 1000))])
+            # Down for good: three tries, then it is said with the sync's other problems, once.
+            del tries[:], pauses[:]
+            with mock.patch.object(turso, "save_data", lambda db, text, at: flaky(db, text, at, fail=9)):
+                sync.share_data({"courses": ["later"]}, now, errors)
+            self.assertEqual((len(tries), pauses), (3, [2, 5]))
+            self.assertEqual(errors, ["Couldn't save data.js to the Turso database: network is unreachable"])
+        self.assertEqual(len(self.shared()), 1)
+
     # ---- a whole sync (Canvas stood in for) ----
 
     def course(self, now):
@@ -155,7 +182,7 @@ class ShareDataTest(unittest.TestCase):
 
     def run_sync(self):
         out, err = io.StringIO(), io.StringIO()
-        canvas = lambda cv, cfg, store, errors, now: [self.course(now)]  # noqa: E731
+        canvas = lambda cv, cfg, store, errors, now, previous=None: [self.course(now)]  # noqa: E731
         with mock.patch.object(sync, "sync_canvas", canvas), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             sync.main()
         return out.getvalue(), err.getvalue()

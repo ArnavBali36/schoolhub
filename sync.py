@@ -385,7 +385,20 @@ def sync_canvas_course(cv, course, folder, store, now):
     }
 
 
-def sync_canvas(cv, cfg, store, errors, now):
+def last_good(previous, keep):
+    """The courses of the last data.js that `keep` picks, marked stale: what a sync could not read
+    goes on showing as its last good copy (the page says so), rather than leaving the dashboard and
+    the public site until some later sync can read it. Syncs run by themselves now, so a Canvas that
+    is down for an hour would otherwise empty the list with nobody having pressed anything."""
+    out = []
+    for c in (previous or {}).get("courses", []):
+        if keep(c):
+            c["stale"] = True
+            out.append(c)
+    return out
+
+
+def sync_canvas(cv, cfg, store, errors, now, previous=None):
     root = Path(cfg["school_root"]).expanduser()
     mapping = cfg.get("canvas_courses", {})
     try:
@@ -393,7 +406,7 @@ def sync_canvas(cv, cfg, store, errors, now):
     except Exception as e:
         hint = " (token expired or revoked? make a new one in Canvas settings)" if "401" in str(e) else ""
         errors.append(f"Canvas: couldn't list courses: {e}{hint}")
-        return []
+        return last_good(previous, lambda c: c.get("source") == "canvas")
     out = []
     for course in courses:
         ccfg = mapping.get(str(course["id"]), {})
@@ -407,6 +420,7 @@ def sync_canvas(cv, cfg, store, errors, now):
             out.append(c)
         except Exception as e:
             errors.append(f"Canvas {course['name']}: {e}")
+            out += last_good(previous, lambda c: c.get("id") == f"canvas:{course['id']}")
         store.save()
     return out
 
@@ -500,6 +514,9 @@ def public_copy(value, home=None):
     return walk(value)
 
 
+SHARE_PAUSES = (2, 5)  # seconds waited before the second and the third try at saving data.js to the shared database
+
+
 def share_data(data, now, errors):
     """With the Turso database (state/cloud.env), save this sync's data.js there too (school_data), for
     a hosted copy of the dashboard that reads the same database: the public copy (public_copy), since
@@ -515,7 +532,16 @@ def share_data(data, now, errors):
         return
     try:
         text = "window.SCHOOL_DATA = " + json.dumps(public_copy(data)) + ";\n"
-        db.save_data(text, int(now.timestamp() * 1000))
+        # One upload, tried up to three times: were a moment without the network to lose it, the
+        # hosted copy would show the sync before this one until the next, twelve hours on.
+        for pause in (*SHARE_PAUSES, None):
+            try:
+                db.save_data(text, int(now.timestamp() * 1000))
+                break
+            except Exception:
+                if pause is None:
+                    raise
+                time.sleep(pause)
     except Exception as e:
         errors.append(f"Couldn't save data.js to the Turso database: {e}")
 
@@ -573,7 +599,7 @@ def apply_marks(courses):
 
 # ---------- Gradescope (optional) ----------
 
-def sync_gradescope(cfg, store, canvas_courses, errors, now):
+def sync_gradescope(cfg, store, canvas_courses, errors, now, previous=None):
     gs = cfg.get("gradescope") or {}
     if not (gs.get("email") and gs.get("password")):
         return []
@@ -582,7 +608,8 @@ def sync_gradescope(cfg, store, canvas_courses, errors, now):
         return gradescope_source.sync(gs, Path(cfg["school_root"]).expanduser(), store, canvas_courses, now)
     except Exception as e:
         errors.append(f"Gradescope: {e}")
-        return []
+        # The classes that are on Gradescope alone keep their last good copy.
+        return last_good(previous, lambda c: c.get("source") == "gradescope")
 
 
 # ---------- change detection ----------
@@ -606,8 +633,32 @@ def load_previous():
         return {"courses": []}
 
 
-def detect_changes(courses, previous):
-    """Due dates that moved and assignments that appeared since the last sync."""
+KEEP_NOTICED = timedelta(hours=24)  # what a sync noticed (a date that moved, new files) stays on the page this long
+
+
+def noticed_at(stamp, now):
+    """When something was noticed, if that is under a day ago (KEEP_NOTICED), else None."""
+    try:
+        at = parse_ts(stamp)
+        return at if at and timedelta(0) <= now - at < KEEP_NOTICED else None
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def new_files(found, previous, now):
+    """(files, since): the files this sync saved, after those the syncs of the last day saved, and
+    when the first of them was found. A sync says what is new since the one before it, and the one
+    before it may be five minutes old (a retry) or twelve hours: the count on the page would be
+    gone before it was seen."""
+    since = noticed_at(previous.get("new_files_since") or previous.get("generated_at"), now)
+    kept = [f for f in previous.get("new_files") or [] if f not in found] if since else []
+    return kept + list(found), (since if kept else now).isoformat()
+
+
+def detect_changes(courses, previous, now=None):
+    """Due dates that moved and assignments that appeared since the last sync. A date an earlier
+    sync saw move stays marked for a day (KEEP_NOTICED), for the same reason as new_files."""
+    now = now or datetime.now(timezone.utc)
     before = {c["id"]: {a["id"]: a for a in c["assignments"]} for c in previous.get("courses", [])}
     moved, added = [], []
     for c in courses:
@@ -624,7 +675,13 @@ def detect_changes(courses, previous):
             new_due, old_due = parse_ts(a.get("due_at")), parse_ts(prev.get("due_at"))
             if new_due and old_due and abs((new_due - old_due).total_seconds()) > 60:
                 a["due_changed_from"] = prev["due_at"]
+                a["due_changed_at"] = now.isoformat()
                 moved.append((c, a))
+            elif prev.get("due_changed_from"):
+                # (A data.js from before the time was kept: noticed by the sync that wrote it.)
+                at = noticed_at(prev.get("due_changed_at") or previous.get("generated_at"), now)
+                if at:
+                    a["due_changed_from"], a["due_changed_at"] = prev["due_changed_from"], at.isoformat()
     return moved, added
 
 
@@ -711,9 +768,9 @@ def run(cfg):
     watchdog(int(os.environ.get("SCHOOLHUB_TIMEOUT", "900")))
     courses = []
     try:
-        courses = sync_canvas(cv, cfg, store, errors, now)
+        courses = sync_canvas(cv, cfg, store, errors, now, previous)
         courses += sync_web(cfg, store, errors, now, previous)
-        courses += sync_gradescope(cfg, store, courses, errors, now)
+        courses += sync_gradescope(cfg, store, courses, errors, now, previous)
     except SyncTimeout as e:
         errors.append(f"{e}; keeping the last good copy of whatever it didn't reach")
         seen = {c["id"] for c in courses}
@@ -731,10 +788,11 @@ def run(cfg):
     errors += store.errors
     add_tasks(courses, now)
     flagged = apply_marks(courses)
-    changes = detect_changes(courses, previous)
+    changes = detect_changes(courses, previous, now)
+    files, since = new_files(store.new, previous, now)
 
-    data = {"generated_at": now.isoformat(), "complete": complete, "errors": errors, "new_files": store.new,
-            "courses": courses}
+    data = {"generated_at": now.isoformat(), "complete": complete, "errors": errors, "new_files": files,
+            "new_files_since": since, "courses": courses}
     data_js = "window.SCHOOL_DATA = " + json.dumps(data) + ";\n"
     tmp = HUB / "data.js.tmp"
     tmp.write_text(data_js)
