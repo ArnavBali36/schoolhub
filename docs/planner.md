@@ -248,7 +248,7 @@ A dialog, built like the task dialog, with these fields:
     that adds the one picked;
   - a work item whose assignment is done in the list shows "done" beside it.
 - **Delete:** for a one-off block, delete. For a repeating block, skip today. For a meal, "No lunch
-  today" (`off`). Each comes with the toast's Undo.
+  today" (`off`). Each comes with the toast's Undo, which is the page's undo for that step.
 
 Items can also be ticked straight on the timeline.
 
@@ -266,10 +266,43 @@ every week. Changes on one day in the calendar stay on that day."
 ### Saving
 
 - Changes show at once and save to `/api/plan` for that key.
-- A failed save shows the toast "Couldn't save the plan" and loads the plan again.
+- A failed save shows the toast "Couldn't save the plan", puts back what the server last had for the
+  keys being saved, and loads the plan again.
 - The plan loads for the shown date ±7 days, and again when the date leaves that range.
 - Loading and saving use the same `X-SchoolHub` header and base path as tasks.
 - The plan is reloaded with the marks and tasks: on focus, and after reloadState.
+
+### Added 2026-11-11: undo and redo
+
+The learner asked for "some ctrl z option" for anything done to a task or the calendar. Cmd+Z or
+Ctrl+Z takes back the last change; Shift+Cmd+Z, Shift+Ctrl+Z or Ctrl+Y makes it again. The history
+is the page's (dashboard.js, "undo and redo"), shared with marks and tasks; the planner adds its
+changes to it.
+
+- **One action is one step**, whatever it saves. Every change goes through `record(label, date, ref,
+  fn)`, which notes each key saved inside `fn` with its value before and the value left. Making a
+  block repeat saves `week:wed` and `day:…` and is still one step. A save that changes nothing is no
+  step. A test fails if a change is added outside `record()`.
+- **The label** is what the toast says after "Undid:" or "Redid:": "moved Lunch to 3:00 PM",
+  "resized “Gym” to 8:00–9:30 AM", "deleted “Gym”", "ticked “Read chapter 3” in “Deep work”",
+  "skipped lunch today", "set Lunch’s place to “Chipotle”", "changed your week".
+- **The way back** saves through `save()` like the change itself, the week before the date. Each key
+  is stored whole, so saving its old value blindly would also undo whatever another device saved to
+  the same date since. So the step first asks `GET /api/plan` what is stored now:
+  - a key still as the step left it gets the value it had, exactly: a deleted block is back with its
+    id, fields, items, their ticks and its place in the list;
+  - a key changed since gets only the step's own change taken back (`rebase()`: objects field by
+    field, blocks and items by id), cleaned like any edit, so a block added on the phone stays;
+  - where the step and the other change touched the same thing (the block was moved again, or the
+    step would delete a block that has a new item), nothing is saved, the step goes, and the toast
+    says "Can't undo: … It was changed somewhere else since."
+  - the settings and a weekday going back to the defaults are stored as no key, which is what they
+    were before their first change.
+- **Where it shows.** Taking a step back shows the date it happened on. An open details card follows
+  the plan as after any change. The keys do nothing while a block is dragged, or while a form is
+  open and no field has focus; in a field they are the field's own.
+- **When it fails.** If the server cannot be asked, nothing changes and the step stays. If the
+  change itself failed to save, it is put back on the page and is no step.
 
 ### Access
 

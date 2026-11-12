@@ -210,6 +210,51 @@ class ServerTest(unittest.TestCase):
         # The server is still answering.
         self.assertEqual(self.request("GET", "/api/marks")[0], 200)
 
+    def post(self, path, body):
+        status, _, data = self.request("POST", path, json.dumps(body).encode(), {"X-SchoolHub": "1"})
+        return status, json.loads(data) if status == 200 else data
+
+    def test_a_mark_put_back_keeps_the_time_it_was_made(self):
+        # The page's undo of taking a mark away sends the mark's own time, so the nightly check's
+        # answer for that mark (data.js's marked_done) still applies to it.
+        made = "2026-10-07T12:00:00.123456+00:00"
+        status, marks = self.post("/api/mark", {"id": "canvas:77", "done": True, "name": "HW 7", "course": "15-122", "marked_at": made})
+        self.assertEqual(status, 200)
+        self.assertEqual(marks["canvas:77"], {"marked_at": made, "name": "HW 7", "course": "15-122"})
+        # As the phone view writes a time, too.
+        _, marks = self.post("/api/mark", {"id": "canvas:77", "done": True, "marked_at": "2026-10-07T12:00:00.123Z"})
+        self.assertEqual(marks["canvas:77"]["marked_at"], "2026-10-07T12:00:00.123Z")
+        # A mark made now, as ever, when no time is sent or it is not a past time with a zone.
+        _, marks = self.post("/api/mark", {"id": "canvas:77", "done": True, "marked_at": "2026-10-07T12:00:00+00:00"})
+        self.assertEqual(marks["canvas:77"]["marked_at"], "2026-10-07T12:00:00+00:00")
+        # A mark made now, as ever, when no time is sent or it is not a real past time written that way.
+        for given in (None, "", "yesterday", "2026-10-07T12:00:00", "2999-01-01T00:00:00+00:00", 5, ["2026-10-07T12:00:00+00:00"],
+                      "2026-10-07T12:00:00+00:00\n", "2026-13-07T12:00:00+00:00", "2026-10-07 12:00:00+00:00",
+                      "2026-10-07T12:00:00+05:00", "2026-10-07T12:00:00.1Z", "２０２６-10-07T12:00:00Z"):
+            with self.subTest(given=given):
+                before = self.server_mod.datetime.now(self.server_mod.timezone.utc)
+                body = {"id": "canvas:78", "done": True} if given is None else {"id": "canvas:78", "done": True, "marked_at": given}
+                _, marks = self.post("/api/mark", body)
+                when = self.server_mod.datetime.fromisoformat(marks["canvas:78"]["marked_at"])
+                self.assertGreaterEqual(when, before)
+        # Taking a mark away is as before.
+        _, marks = self.post("/api/mark", {"id": "canvas:77", "done": False, "marked_at": made})
+        self.assertNotIn("canvas:77", marks)
+        self.post("/api/mark", {"id": "canvas:78", "done": False})
+
+    def test_a_deleted_task_comes_back_under_its_id(self):
+        # The page's undo of a delete saves the task again as it was: the same id and fields and the
+        # time it was made; only the server's own stamp of the save (updated_at) is new.
+        _, made = self.post("/api/task", {"name": "Buy milk", "notes": "2%", "due_at": "2026-10-09T03:59:00.000Z", "all_day": True, "pinned": False})
+        task = made["task"]
+        _, gone = self.post("/api/task/delete", {"id": task["id"]})
+        self.assertEqual(gone["removed"], task)
+        self.assertNotIn(task["id"], gone["tasks"])
+        _, back = self.post("/api/task", task)
+        self.assertEqual({k: v for k, v in back["task"].items() if k != "updated_at"}, {k: v for k, v in task.items() if k != "updated_at"})
+        self.assertEqual(back["tasks"][task["id"]], back["task"])
+        self.post("/api/task/delete", {"id": task["id"]})
+
     def test_security_headers(self):
         status, h, _ = self.request("GET", "/", full=True)
         self.assertEqual(status, 200)

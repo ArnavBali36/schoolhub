@@ -881,3 +881,674 @@ console.log(JSON.stringify(Object.fromEntries(Object.entries(items).map(([k, a])
         self.assertEqual(out["checkin"], {"state": "flagged", "done": True, "attention": False})
         self.assertEqual(out["sent"]["attention"], False)
         self.assertEqual(out["late"], {"state": "missing", "done": False, "attention": True})
+
+
+# ---- undo and redo (dashboard.js "undo and redo", planner.js "undo") ----
+UNDO_START, UNDO_END = "// ---- undo and redo ----", "// ---- end of undo and redo ----"
+PLAN_KEPT_START, PLAN_KEPT_END = "  // ---- the plan, loaded and saved ----", "  // ---- what shows on a date ----"
+
+
+def source_of(name):
+    """A top-level function or object of dashboard.js: from its first line to its closing brace."""
+    m = re.search(r"^" + re.escape(name) + r".*?^\}[;]?$", JS, re.M | re.S)
+    assert m, name
+    return m.group(0)
+
+
+# The page's undo history with the page stood in for: toasts are collected, the focused element and
+# an open form are set by the test, and the keydown handler is kept to be called.
+UNDO_PAGE = """
+const toasts = [];
+let toastTimer = null, lastAction = null;
+const $ = () => null;
+const toast = (msg, action, o = {}) => { toasts.push(msg + (action ? ' [' + (o.label || 'Undo') + ']' : '')); lastAction = action; };
+const page = {focus: {tagName: 'BODY'}, form: false, keydown: null};
+const document = {get activeElement(){ return page.focus; }, body: {tagName: 'BODY'}, addEventListener: (type, fn) => { page[type] = fn; },
+  querySelector: sel => sel === 'dialog[open] form' && page.form ? {} : null};
+const CSS = {escape: s => s};
+const console = {error(){}, log: (...a) => globalThis.console.log(...a)};
+const pinnedTask = t => typeof t.pinned === 'boolean' ? t.pinned : !t.due_at;
+const refresh = () => {};
+let marks = {}, tasks = {};
+const refreshTasks = next => { tasks = next; };
+"""
+
+
+def undo_section():
+    return JS[JS.index(UNDO_START):JS.index(UNDO_END)]
+
+
+class UndoSourceTest(unittest.TestCase):
+    """Undo and redo for everything the page changes: where the keys go, and that no change is made
+    without a step."""
+
+    def test_the_keys(self):
+        # Cmd+Z and Ctrl+Z undo; with Shift, and Ctrl+Y, redo. Typing in a field keeps the field's own.
+        self.assertIn("const dir = k === 'z' ? (e.shiftKey ? 'redo' : 'undo') : k === 'y' && e.ctrlKey && !e.metaKey && !e.shiftKey ? 'redo' : '';", JS)
+        self.assertIn("if (dir && requestStep(dir)) e.preventDefault();", JS)
+        self.assertIn("if (editingText(document.activeElement)) return false;", JS)
+        # Nothing changes underneath an open form, or during a drag on the planner.
+        self.assertIn("if (!document.querySelector('dialog[open] form') && !holds.some(fn => fn())) travel(dir);", JS)
+        self.assertIn("SH.holdUndo?.(() => !!drag);", PLANNER)
+        # The forms are the three dialogs with a form; the details card has none, so it follows an undo.
+        self.assertEqual(len(re.findall(r"<dialog[^>]*>\s*<form", HTML)), 3)
+        self.assertIn('<dialog class="pdetail" id="planDetail" aria-labelledby="pdTitle"></dialog>', HTML)
+
+    def test_the_mac_app_can_ask(self):
+        # Its Edit menu calls these: true when the page took the request, false when it is the field's.
+        self.assertIn("  undo: () => requestStep('undo'),\n  redo: () => requestStep('redo'),", JS)
+        self.assertIn("same, addStep, offerStep, holdUndo: fn => { holds.push(fn); },", JS)
+
+    def test_about_a_hundred_steps(self):
+        self.assertIn("const UNDO_STEPS = 100;", JS)
+        self.assertIn("if (steps.undo.length > UNDO_STEPS) steps.undo.shift();", JS)
+
+    def test_toasts_name_the_step_and_offer_the_way_back(self):
+        self.assertIn("toast(`${DID[dir]}: ${step.label}`, newest ? offerStep(step, BACK[dir]) : null, {label: dir === 'undo' ? 'Redo' : 'Undo'});", JS)
+        self.assertIn("if (!step) return toast(`Nothing to ${dir}`, null, {ms: 2000});", JS)
+        # Announced as every toast is.
+        self.assertIn("el.className = 'toast'; el.id = 'toast'; el.setAttribute('role', 'status');", JS)
+        # Deleting a task or a block offers Undo on its own toast.
+        self.assertIn("toast(`Deleted “${removed.name}”`, offerStep(step));", JS)
+        self.assertIn("      SH.toast(`Deleted “${name}”`, undo);", PLANNER)
+
+    def test_marks_and_tasks_are_steps(self):
+        # Every save of a mark or a task from the page's own controls makes a step, or is one's way back.
+        self.assertIn("const step = unsavedMark[id] = addStep(markStep(done ? `marked “${a.name}” done` : `unmarked “${a.name}”`, id, was), saved.then(async stored => {", JS)
+        self.assertIn("const step = sameTask(was, r.task) ? null : addStep(taskStep(was ? taskEdit(was, r.task) : `added “${name}”`, r.task.id, was, r.task));", JS)
+        self.assertIn("const step = addStep(taskStep(`deleted “${removed.name}”`, id, removed, null), saved);", JS)
+        outside = JS[:JS.index(UNDO_START)] + JS[JS.index(UNDO_END):]
+        self.assertEqual(len(re.findall(r"backend\.(saveTask|deleteTask)\(", outside)), 2)
+        self.assertEqual(len(re.findall(r"\bsetMark\(", outside)), 2)   # its definition, and toggleMark
+        self.assertEqual(len(re.findall(r"backend\.mark\(", JS)), 1)     # setMark
+        # A mark put back carries its own time, and the way back first asks what is stored now.
+        self.assertIn("if (done && as?.marked_at) body.marked_at = as.marked_at;", JS)
+        self.assertIn("try { stored = await backend.marks(); } catch { return {ok: false, why: 'failed'}; }", JS)
+        self.assertIn("try { stored = await backend.tasks(); } catch { return {ok: false, why: 'failed'}; }", JS)
+
+    def test_every_change_to_the_plan_is_a_step(self):
+        # save() is the only way to the server, and outside the step's own way back it is only
+        # reached inside record(): a change added later without one fails here.
+        self.assertEqual(len(re.findall(r"SH\.api\('api/plan'", PLANNER)), 1)
+        self.assertNotIn("snapshot(", PLANNER)
+        lines = PLANNER.splitlines()
+        own = ("function save(", "function editDay(", "function editWeek(", "sent.push(save(key, none ? null : v));",
+               "save('day:' + date, cleanDay(v, weekOf(wdOf(date))));", "save('week:' + wd, cleanWeek(v));")
+        checked = 0
+        for i, line in enumerate(lines):
+            if not re.search(r"\b(save|editDay|editWeek)\(", line) or line.lstrip().startswith("//") or any(x in line for x in own):
+                continue
+            checked += 1
+            # Going up from the call, record( comes before the start of the function or handler it is in.
+            for j in range(i, -1, -1):
+                if "record(" in lines[j]:
+                    break
+                self.assertNotRegex(lines[j], r"^  (async )?function |^  \S.*addEventListener\(", f"line {i + 1} saves outside record(): {line.strip()}")
+        self.assertGreaterEqual(checked, 20)
+
+    def test_a_failed_save_of_the_plan_is_put_back(self):
+        self.assertIn("for (const [k, v] of confirmed) setKey(k, v);", PLANNER)
+        self.assertIn("return SH.offerStep(SH.addStep(step, Promise.all(rec.sent).then(all => all.every(Boolean))));", PLANNER)
+
+    def test_tasks_show_in_the_order_they_were_made(self):
+        # A task an undo puts back is stored last; it still shows where it was.
+        self.assertIn("for (const t of Object.values(tasks).sort((x, y) => made(x) - made(y)))", JS)
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class UndoHistoryTest(unittest.TestCase):
+    """dashboard.js's undo history, run under Node with the page stood in for."""
+
+    @classmethod
+    def setUpClass(cls):
+        script = UNDO_PAGE + "const backend = {};\nasync function setMark(){ return true; }\n" + undo_section() + """
+const out = {};
+const log = [];
+const mk = (label, how = {}) => ({label, undo: async o => { log.push('undo ' + label + (o?.refocus ? ' (refocus)' : '')); return how.undo || {ok: true}; },
+  redo: async () => { log.push('redo ' + label); return how.redo || {ok: true}; }});
+const reset = () => { steps.undo.length = steps.redo.length = toasts.length = log.length = 0; };
+(async () => {
+  // In reverse order; a new change clears what could be redone.
+  for (const l of ['a', 'b', 'c']) addStep(mk(l));
+  await travel('undo'); await travel('undo'); await travel('redo');
+  addStep(mk('d'));
+  await travel('redo'); await travel('undo'); await travel('undo'); await travel('undo'); await travel('undo');
+  out.order = {log: [...log], toasts: [...toasts]};
+  // About a hundred steps.
+  reset();
+  for (let i = 1; i <= 105; i++) addStep(mk('s' + i));
+  for (let i = 0; i < 101; i++) await travel('undo');
+  out.cap = {undone: log.length, first: log[0], last: log[log.length - 1], end: toasts[toasts.length - 1], redo: steps.redo.length};
+  // A way back that could not be saved stays, to try again; one that would overwrite another change goes.
+  reset();
+  addStep(mk('kept')); addStep(mk('offline', {undo: {ok: false, why: 'failed'}}));
+  await travel('undo'); await travel('undo');
+  out.failed = {log: [...log], toasts: [...toasts], left: steps.undo.map(s => s.label)};
+  reset();
+  addStep(mk('kept')); addStep(mk('moved Lunch to 3:00 PM', {undo: {ok: false, why: 'conflict'}}));
+  await travel('undo'); await travel('undo');
+  out.conflict = {log: [...log], toasts: [...toasts], left: steps.undo.map(s => s.label), redo: steps.redo.map(s => s.label)};
+  // A change whose own save failed was never made: its step goes. One that throws counts as failed.
+  reset();
+  addStep(mk('kept')); addStep(mk('never saved'), Promise.resolve(false)); addStep(mk('rejected'), Promise.reject(new Error('x')));
+  await travel('undo');
+  addStep({label: 'throws', undo: async () => { throw new Error('boom'); }, redo: async () => ({ok: true})});
+  await travel('undo');
+  out.gone = {log: [...log], toasts: [...toasts], left: steps.undo.map(s => s.label)};
+  // A toast's button is for its own step, while that is the next one; it asks for focus to be placed.
+  reset();
+  const first = addStep(mk('first')), offerFirst = offerStep(first);
+  const second = addStep(mk('second')), offerSecond = offerStep(second);
+  offerFirst(); await travelling;
+  const before = [...log];
+  offerSecond(); await travelling;
+  out.offer = {before, after: [...log], isStepButton: offerFirst.step === true, none: offerStep(null)};
+  // The keys and SchoolHub.undo(): typing keeps the field's own; a form open or a drag swallows it.
+  reset();
+  addStep(mk('k1')); addStep(mk('k2')); addStep(mk('k3'));
+  const key = async (k, mods, focus, form) => {
+    page.focus = focus || {tagName: 'BODY'}; page.form = !!form;
+    let prevented = false;
+    page.keydown({key: k, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...mods, preventDefault(){ prevented = true; }});
+    await travelling;
+    return prevented;
+  };
+  const field = type => ({tagName: 'INPUT', type});
+  out.keys = {
+    typingText: await key('z', {metaKey: true}, field('text')),
+    typingTime: await key('z', {ctrlKey: true}, field('time')),
+    typingArea: await key('Z', {metaKey: true, shiftKey: true}, {tagName: 'TEXTAREA'}),
+    editable: await key('z', {metaKey: true}, {tagName: 'DIV', isContentEditable: true}),
+    formOpenOnButton: await key('z', {metaKey: true}, {tagName: 'BUTTON'}, true),
+    plain: await key('z', {}), alt: await key('z', {metaKey: true, altKey: true}), cmdY: await key('y', {metaKey: true}),
+    ctrlShiftY: await key('y', {ctrlKey: true, shiftKey: true}), other: await key('x', {metaKey: true}),
+    nothingYet: [...log],
+    cmdZ: await key('z', {metaKey: true}), onCheckbox: await key('z', {ctrlKey: true}, field('checkbox')),
+    shiftCmdZ: await key('Z', {metaKey: true, shiftKey: true}), ctrlY: await key('y', {ctrlKey: true}), shiftCtrlZ: await key('z', {ctrlKey: true, shiftKey: true}),
+    log: [...log],
+  };
+  holds.push(() => true);
+  page.focus = {tagName: 'BODY'}; page.form = false;
+  const held = requestStep('undo'); await travelling;
+  holds.length = 0;
+  out.keys.heldDuringDrag = [held, log.length];
+  page.focus = field('search');
+  out.keys.apiWhileTyping = requestStep('undo');
+  console.log(JSON.stringify(out));
+})();
+"""
+        cls.out = run_node(script)
+
+    def test_steps_go_back_in_reverse_and_a_new_change_clears_redo(self):
+        o = self.out["order"]
+        self.assertEqual(o["log"], ["undo c", "undo b", "redo b", "undo d", "undo b", "undo a"])
+        self.assertEqual(o["toasts"], ["Undid: c [Redo]", "Undid: b [Redo]", "Redid: b [Undo]", "Nothing to redo",
+                                       "Undid: d [Redo]", "Undid: b [Redo]", "Undid: a [Redo]", "Nothing to undo"])
+
+    def test_about_a_hundred_steps_are_kept(self):
+        self.assertEqual(self.out["cap"], {"undone": 100, "first": "undo s105", "last": "undo s6", "end": "Nothing to undo", "redo": 100})
+
+    def test_a_way_back_that_fails_stays_and_one_that_conflicts_goes(self):
+        f = self.out["failed"]
+        self.assertEqual(f["log"], ["undo offline", "undo offline"])
+        self.assertEqual(f["toasts"], ["Couldn't undo that. Check your connection and try again."] * 2)
+        self.assertEqual(f["left"], ["kept", "offline"])
+        c = self.out["conflict"]
+        self.assertEqual(c["log"], ["undo moved Lunch to 3:00 PM", "undo kept"])
+        self.assertEqual(c["toasts"], ["Can't undo: moved Lunch to 3:00 PM. It was changed somewhere else since.", "Undid: kept [Redo]"])
+        self.assertEqual((c["left"], c["redo"]), ([], ["kept"]))
+
+    def test_a_change_that_was_never_saved_is_no_step(self):
+        g = self.out["gone"]
+        self.assertEqual(g["log"], ["undo kept"])
+        self.assertEqual(g["toasts"], ["Undid: kept [Redo]", "Couldn't undo that. Check your connection and try again."])
+        self.assertEqual(g["left"], ["throws"])
+
+    def test_a_toasts_button_is_for_its_own_step(self):
+        o = self.out["offer"]
+        self.assertEqual(o["before"], [])                       # the first step is no longer the next one
+        self.assertEqual(o["after"], ["undo second (refocus)"])
+        self.assertTrue(o["isStepButton"])
+        self.assertIsNone(o["none"])
+
+    def test_the_keys_and_what_the_mac_app_is_told(self):
+        k = self.out["keys"]
+        # Typing in a field: not taken (the field's own undo runs), and nothing is undone.
+        self.assertEqual([k["typingText"], k["typingTime"], k["typingArea"], k["editable"]], [False] * 4)
+        # A form open with focus on a button: taken, and nothing is undone underneath it.
+        self.assertTrue(k["formOpenOnButton"])
+        # Not the page's keys at all.
+        self.assertEqual([k["plain"], k["alt"], k["cmdY"], k["ctrlShiftY"], k["other"]], [False] * 5)
+        self.assertEqual(k["nothingYet"], [])
+        # Cmd+Z, Ctrl+Z (a checkbox is no text field); Shift+Cmd+Z, Ctrl+Y, Shift+Ctrl+Z.
+        self.assertEqual([k["cmdZ"], k["onCheckbox"], k["shiftCmdZ"], k["ctrlY"], k["shiftCtrlZ"]], [True] * 5)
+        self.assertEqual(k["log"], ["undo k3", "undo k2", "redo k2", "redo k3"])
+        self.assertEqual(k["heldDuringDrag"], [True, 4])
+        self.assertFalse(k["apiWhileTyping"])
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class UndoMarksAndTasksTest(unittest.TestCase):
+    """A ✓ and a task taken back: dashboard.js's own store calls and steps against a stand-in for
+    server.py's routes (a mark is stamped with the time given or now, a task with updated_at)."""
+
+    @classmethod
+    def setUpClass(cls):
+        script = UNDO_PAGE + """
+let WRITE = 'local', clock = 0, down = false;
+const server = {marks: {}, tasks: {}}, sent = [];
+const copy = v => JSON.parse(JSON.stringify(v));
+const stamp = () => '2026-11-11T10:00:0' + (clock++) + '+00:00';
+const api = async (path, body) => {
+  if (down) throw new Error('down');
+  sent.push([path, copy(body)]);
+  if (path === 'api/mark') {
+    if (body.done) server.marks[body.id] = {marked_at: body.marked_at || stamp(), name: body.name ?? null, course: body.course ?? null}; else delete server.marks[body.id];
+    return copy(server.marks);
+  }
+  if (path === 'api/task') {
+    const id = body.id || 'task:new' + clock, old = server.tasks[id];
+    const task = {id, name: body.name, course_id: body.course_id || 'personal', due_at: body.due_at || null, all_day: !!body.all_day,
+      pinned: 'pinned' in body ? !!body.pinned : !body.due_at, notes: body.notes || '', created_at: old?.created_at || body.created_at || stamp(), updated_at: stamp()};
+    delete server.tasks[id]; server.tasks[id] = task;
+    return {task: copy(task), tasks: copy(server.tasks)};
+  }
+  const removed = server.tasks[body.id] || null; delete server.tasks[body.id];
+  return {removed, tasks: copy(server.tasks)};
+};
+const getJson = async path => { if (down) throw new Error('down'); return copy(path === 'api/marks' ? server.marks : {tasks: server.tasks}); };
+const cloudApi = async () => { throw new Error('not here'); };
+const byId = {'canvas:1': {id: 'canvas:1', name: 'HW 1', course: {short: '15-122'}}};
+""" + source_of("const backend = {") + "\n" + source_of("async function setMark(id, done, as){") + "\n" + source_of("const unsavedMark = {};") + "\n" + undo_section() + """
+const out = {};
+(async () => {
+  // The ✓ clicked twice before the first save answers: two steps, and both go back.
+  byId['canvas:2'] = {id: 'canvas:2', name: 'Lab 2', course: {short: '15-122'}};
+  toggleMark('canvas:2'); toggleMark('canvas:2');
+  await Promise.all(steps.undo.map(s => s.settled));
+  out.twice = {steps: steps.undo.map(s => s.label), marked: 'canvas:2' in server.marks};
+  await travel('undo');
+  out.twice.first = [toasts[toasts.length - 1], 'canvas:2' in server.marks];
+  await travel('undo');
+  out.twice.second = [toasts[toasts.length - 1], 'canvas:2' in server.marks];
+  steps.undo.length = steps.redo.length = 0;
+  // A mark made long ago, taken away, and put back by undo: the same mark, with its own time.
+  server.marks['canvas:1'] = {marked_at: '2026-10-01T09:00:00.123456+00:00', name: 'HW 1 (old name)', course: '15-122'};
+  marks = copy(server.marks);
+  const was = marks['canvas:1'];
+  const saved = setMark('canvas:1', false);
+  const step = addStep(markStep('unmarked “HW 1”', 'canvas:1', was), saved.then(stored => { step.now = stored && stored['canvas:1'] || null; return !!stored; }));
+  await saved;
+  out.unmarked = copy(server.marks);
+  await travel('undo');
+  out.markBack = copy(server.marks);
+  out.markSent = sent[sent.length - 1];
+  await travel('redo');
+  out.markRedone = copy(server.marks);
+  await travel('undo');
+  // Another device takes the mark away and makes it again: no longer the mark the step left.
+  server.marks['canvas:1'] = {marked_at: stamp(), name: 'HW 1', course: '15-122'};
+  const n = sent.length;
+  await travel('redo');
+  out.markConflict = {toast: toasts[toasts.length - 1], wrote: sent.length - n, local: marks['canvas:1'].marked_at === server.marks['canvas:1'].marked_at};
+  // The server cannot be asked: nothing changes, and the step stays.
+  steps.undo.length = steps.redo.length = 0;
+  const had = copy(server.marks['canvas:1']), made = setMark('canvas:1', false);
+  const s2 = addStep(markStep('unmarked “HW 1”', 'canvas:1', had), made.then(stored => { s2.now = null; return !!stored; }));
+  await made;
+  down = true;
+  await travel('undo');
+  out.markDown = {toast: toasts[toasts.length - 1], left: steps.undo.length, marked: 'canvas:1' in server.marks};
+  down = false;
+  await travel('undo');
+  out.markUp = {toast: toasts[toasts.length - 1], marked: 'canvas:1' in server.marks};
+
+  // A task from before the pinned choice, deleted and put back: same id, fields and time made.
+  steps.undo.length = steps.redo.length = 0;
+  const old = {id: 'task:abc12345', name: 'Buy milk', course_id: 'personal', due_at: null, all_day: false, notes: '2%', created_at: '2026-09-16T14:20:24+00:00', updated_at: '2026-09-16T14:20:24+00:00'};
+  server.tasks = {[old.id]: copy(old), 'task:zzz99999': {id: 'task:zzz99999', name: 'Other', course_id: 'personal', due_at: null, all_day: false, pinned: true, notes: '', created_at: '2026-09-17T00:00:00+00:00', updated_at: '2026-09-17T00:00:00+00:00'}};
+  tasks = copy(server.tasks);
+  await backend.deleteTask(old.id).then(r => refreshTasks(r.tasks));
+  addStep(taskStep('deleted “Buy milk”', old.id, copy(old), null));
+  await travel('undo');
+  out.taskBack = {toast: toasts[toasts.length - 1], task: copy(server.tasks[old.id]), sentId: sent[sent.length - 1][1].id, sentPinned: 'pinned' in sent[sent.length - 1][1], local: !!tasks[old.id]};
+  await travel('redo');
+  out.taskRedone = {toast: toasts[toasts.length - 1], gone: !(old.id in server.tasks)};
+  await travel('undo');
+  // An edit, then the same task edited on another device: the edit is not taken back over it.
+  const before = copy(server.tasks[old.id]);
+  const r = await backend.saveTask({...before, name: 'Buy oat milk', pinned: false, due_at: '2026-11-13T20:00:00.000Z'});
+  refreshTasks(r.tasks);
+  out.editLabel = taskEdit(before, r.task);
+  out.pinLabel = [taskEdit(before, {...before, pinned: false}), taskEdit({...before, pinned: false}, {...before, pinned: true})];
+  addStep(taskStep(out.editLabel, old.id, before, r.task));
+  // The server's stamp alone moving (a save that changed nothing) is no other change.
+  await api('api/task', copy(server.tasks[old.id]));
+  await travel('undo');
+  out.editUndone = {toast: toasts[toasts.length - 1], name: server.tasks[old.id].name, due: server.tasks[old.id].due_at};
+  await travel('redo');
+  server.tasks[old.id].notes = 'written on the phone';
+  const m = sent.length;
+  await travel('undo');
+  out.taskConflict = {toast: toasts[toasts.length - 1], wrote: sent.length - m, name: server.tasks[old.id].name, localNotes: tasks[old.id].notes};
+  out.sameTask = [sameTask(null, null), sameTask(null, old), sameTask(old, {...old, updated_at: 'later'}), sameTask(old, {...old, pinned: true}), sameTask(old, {...old, pinned: false}), sameTask(old, {...old, notes: ''})];
+  console.log(JSON.stringify(out));
+})();
+"""
+        cls.out = run_node(script)
+
+    def test_a_mark_put_back_is_the_same_mark(self):
+        o = self.out
+        self.assertEqual(o["unmarked"], {})
+        mark = {"marked_at": "2026-10-01T09:00:00.123456+00:00", "name": "HW 1 (old name)", "course": "15-122"}
+        self.assertEqual(o["markBack"], {"canvas:1": mark})
+        self.assertEqual(o["markSent"], ["api/mark", {"id": "canvas:1", "done": True, **mark}])
+        self.assertEqual(o["markRedone"], {})
+
+    def test_a_check_clicked_twice_before_the_server_answers(self):
+        self.assertEqual(self.out["twice"], {"steps": ["marked “Lab 2” done", "unmarked “Lab 2”"], "marked": False,
+                                             "first": ["Undid: unmarked “Lab 2” [Redo]", True], "second": ["Undid: marked “Lab 2” done [Redo]", False]})
+
+    def test_a_mark_changed_elsewhere_is_left_alone(self):
+        self.assertEqual(self.out["markConflict"], {"toast": "Can't redo: unmarked “HW 1”. It was changed somewhere else since.", "wrote": 0, "local": True})
+
+    def test_a_mark_is_not_taken_back_blind(self):
+        self.assertEqual(self.out["markDown"], {"toast": "Couldn't undo that. Check your connection and try again.", "left": 1, "marked": False})
+        self.assertEqual(self.out["markUp"], {"toast": "Undid: unmarked “HW 1” [Redo]", "marked": True})
+
+    def test_a_deleted_task_comes_back_as_it_was(self):
+        b = self.out["taskBack"]
+        self.assertEqual(b["toast"], "Undid: deleted “Buy milk” [Redo]")
+        self.assertEqual((b["sentId"], b["sentPinned"], b["local"]), ("task:abc12345", False, True))
+        # Every field it had; the store's own additions are the stamp of the save and the pin it
+        # already meant (it had no due date).
+        self.assertEqual({k: v for k, v in b["task"].items() if k not in ("updated_at", "pinned")},
+                         {"id": "task:abc12345", "name": "Buy milk", "course_id": "personal", "due_at": None, "all_day": False, "notes": "2%",
+                          "created_at": "2026-09-16T14:20:24+00:00"})
+        self.assertTrue(b["task"]["pinned"])
+        self.assertEqual(self.out["taskRedone"], {"toast": "Redid: deleted “Buy milk” [Undo]", "gone": True})
+
+    def test_a_task_edit_is_taken_back_unless_it_changed_elsewhere(self):
+        o = self.out
+        self.assertEqual(o["editLabel"], "edited “Buy oat milk”")
+        self.assertEqual(o["pinLabel"], ["unpinned “Buy milk”", "pinned “Buy milk”"])
+        self.assertEqual(o["editUndone"], {"toast": "Undid: edited “Buy oat milk” [Redo]", "name": "Buy milk", "due": None})
+        self.assertEqual(o["taskConflict"], {"toast": "Can't undo: edited “Buy oat milk”. It was changed somewhere else since.", "wrote": 0,
+                                             "name": "Buy oat milk", "localNotes": "written on the phone"})
+        # The server's stamp is not compared; a task saved before the pinned choice counts as what it meant.
+        self.assertEqual(o["sameTask"], [True, False, True, True, False, False])
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class UndoPlanTest(unittest.TestCase):
+    """The planner's steps: planner.js's own save(), record() and the way back, with dashboard.js's
+    history, against a stand-in for /api/plan (one value per key, null removes it)."""
+
+    @classmethod
+    def setUpClass(cls):
+        plan_pure = PLANNER[PLANNER.index(PLAN_START):PLANNER.index(PLAN_END)]
+        plan_kept = PLANNER[PLANNER.index(PLAN_KEPT_START):PLANNER.index(PLAN_KEPT_END)]
+        cls.pure = "const backend = {};\nasync function setMark(){ return true; }\n" + UNDO_PAGE + undo_section() + plan_pure
+        script = cls.pure + """
+const store = {}, posts = [];
+let down = false, refuse = false, renders = 0, scrolledFor = 'x', wentTo = null, focusGone = false, refocused = null;
+const copy = v => v == null ? null : JSON.parse(JSON.stringify(v));
+const SH = {same, addStep, offerStep, toast, setPlanner(){}, plannerState: 'on',
+  api: async (path, body) => {
+    if (down || refuse) throw new Error('refused');
+    posts.push(body.key + (body.value === null ? ' removed' : ''));
+    if (body.value === null) delete store[body.key]; else store[body.key] = copy(body.value);
+    return {key: body.key, value: copy(body.value)};
+  }};
+const fetch = async () => {
+  if (down) throw new Error('down');
+  const days = {}, week = {};
+  for (const k of Object.keys(store)) if (k.startsWith('day:')) days[k.slice(4)] = copy(store[k]);
+  for (const wd of WD) week[wd] = copy(store['week:' + wd]);
+  return {ok: true, status: 200, json: async () => ({settings: copy(store.settings), week, days})};
+};
+function render(){ renders++; }
+const focusLost = () => focusGone, refSel = ref => ref, refocus = sel => { refocused = sel; };
+""" + plan_kept + """
+function setDate(d){ wentTo = d; shown = d; }
+const D = '2026-11-11', K = 'day:' + D;                     // a Wednesday
+const idle = async () => { while (pending) await chain; await new Promise(r => setTimeout(r, 0)); };
+const blockOf = (v, id) => (v?.blocks || []).find(b => b.id === id);
+const out = {};
+(async () => {
+  shown = D;
+  store['week:wed'] = cleanWeek({meals: {lunch: {start: '15:00', end: '16:00', place: 'Chipotle'}}, blocks: [{id: 'weekly0001', type: 'deep', title: 'Lab', start: '09:00', end: '10:00'}]});
+  store[K] = {blocks: [{id: 'blockaaaa1', type: 'social', title: 'Pickleball', start: '19:00', end: '20:15', items: []},
+    {id: 'blockbbbb2', type: 'other', title: 'Errands', start: '07:00', end: '08:00', items: [
+      {id: 'itemaaaaa1', kind: 'own', text: 'one', done: true}, {id: 'itembbbbb2', kind: 'work', text: 'HW 9', ref: 'canvas:9', course: '21-127', done: false}, {id: 'itemccccc3', kind: 'own', text: 'three', done: false}]},
+    {id: 'blockcccc3', type: 'deep', title: 'Concepts', start: '20:15', end: '22:00', items: []}]};
+  await load(D);
+  const start = copy(store);
+
+  // 1. A block moved, taken back and made again: the stored value exactly as it was each time.
+  const undoMove = record('moved “Pickleball” to 7:30 PM', D, 'block:blockaaaa1', () => editDay(D, v => { Object.assign(blockOf(v, 'blockaaaa1'), {start: '19:30', end: '20:45'}); }));
+  await idle();
+  const moved = copy(store);
+  await travel('undo');
+  out.move = {offered: typeof undoMove, isStep: undoMove.step, undone: same(store, start), toast: toasts[toasts.length - 1]};
+  await travel('redo');
+  out.move.redone = same(store, moved); out.move.toast2 = toasts[toasts.length - 1];
+  await travel('undo');
+
+  // 2. A deleted block comes back with its id, fields, items and their ticks, in its place.
+  record('deleted “Errands”', D, 'block:blockbbbb2', () => editDay(D, v => { v.blocks = v.blocks.filter(b => b.id !== 'blockbbbb2'); }));
+  await idle();
+  out.deleted = {gone: !blockOf(store[K], 'blockbbbb2')};
+  await travel('undo');
+  out.deleted.back = same(store, start); out.deleted.order = store[K].blocks.map(b => b.id);
+
+  // 3. One action that saves the week and the date is one step, and the week is saved first both ways.
+  posts.length = 0;
+  record('removed “Lab” from every Wednesday', D, 'repeat:weekly0001', () => {
+    editDay(D, v => { (v.repeats ||= {}).weekly0001 = {items: [{id: 'itemddddd4', kind: 'own', text: 'bring goggles', done: false}]}; });
+  });
+  await idle();
+  const withItems = copy(store);
+  const stepsBefore = steps.undo.length;
+  record('removed “Lab” from every Wednesday', D, 'repeat:weekly0001', () => {
+    editWeek('wed', w => { w.blocks = w.blocks.filter(b => b.id !== 'weekly0001'); });
+    editDay(D, () => {});
+  });
+  await idle();
+  out.both = {oneStep: steps.undo.length - stepsBefore, dropped: !store[K].repeats, posts: [...posts]};
+  posts.length = 0;
+  await travel('undo');
+  out.both.back = same(store, withItems); out.both.undoPosts = [...posts];
+  await travel('undo');
+  out.both.allBack = same(store, start);
+
+  // 4. Another device added a block to the same date: only my move is taken back.
+  record('moved “Pickleball” to 7:30 PM', D, 'block:blockaaaa1', () => editDay(D, v => { Object.assign(blockOf(v, 'blockaaaa1'), {start: '19:30', end: '20:45'}); }));
+  await idle();
+  store[K].blocks.push({id: 'phoneblock', type: 'other', title: 'From my phone', start: '05:00', end: '05:45', items: []});
+  await travel('undo');
+  out.other = {toast: toasts[toasts.length - 1], mine: [blockOf(store[K], 'blockaaaa1').start, blockOf(store[K], 'blockaaaa1').end], theirs: !!blockOf(store[K], 'phoneblock'), local: !!blockOf(plan.days[D], 'phoneblock')};
+  // ...and moved the very block I moved: nothing is saved, and the page shows what is stored.
+  await travel('redo');
+  Object.assign(blockOf(store[K], 'blockaaaa1'), {start: '21:00', end: '22:15'});
+  posts.length = 0;
+  await travel('undo');
+  out.clash = {toast: toasts[toasts.length - 1], posts: [...posts], stored: blockOf(store[K], 'blockaaaa1').start, shown: blockOf(plan.days[D], 'blockaaaa1').start, left: steps.undo.length + steps.redo.length};
+
+  // 5. The settings back to the defaults are stored as no key, as before their first change.
+  record('changed the hours shown', null, null, () => { save('settings', {day_start: 7, day_end: 23}); });
+  await idle();
+  out.settings = {saved: copy(store.settings)};
+  scrolledFor = 'x'; posts.length = 0;
+  await travel('undo');
+  out.settings.undone = ['settings' in store, copy(plan.settings), [...posts], scrolledFor];
+  await travel('redo');
+  out.settings.redone = copy(store.settings);
+  await travel('undo');
+
+  // 6. A change whose save fails is put back on the page and is no step.
+  const kept = copy(plan.days[D]), n = steps.undo.length;
+  refuse = true;
+  record('moved “Concepts” to 9:00 PM', D, 'block:blockcccc3', () => editDay(D, v => { Object.assign(blockOf(v, 'blockcccc3'), {start: '21:00', end: '22:45'}); }));
+  out.fail = {shownAtOnce: blockOf(plan.days[D], 'blockcccc3').start};
+  await idle();
+  refuse = false;
+  await idle();
+  out.fail.putBack = same(plan.days[D], kept); out.fail.steps = steps.undo.length - n; out.fail.toast = toasts.includes("Couldn't save the plan");
+
+  // 7. The server cannot be asked: the way back changes nothing and the step stays.
+  record('moved “Concepts” to 9:00 PM', D, 'block:blockcccc3', () => editDay(D, v => { Object.assign(blockOf(v, 'blockcccc3'), {start: '21:00', end: '22:45'}); }));
+  await idle();
+  const there = copy(plan.days[D]);
+  down = true; posts.length = 0;
+  await travel('undo');
+  out.down = {toast: toasts[toasts.length - 1], same: same(plan.days[D], there), posts: posts.length, top: steps.undo[steps.undo.length - 1].label};
+  down = false;
+  // ...and when only the write fails: put back to what the server has, and the step stays.
+  refuse = true;
+  await travel('undo');
+  refuse = false;
+  await idle();
+  out.refused = {toast: toasts[toasts.length - 1], same: same(plan.days[D], there), top: steps.undo[steps.undo.length - 1].label};
+  await travel('undo');
+  out.retried = {toast: toasts[toasts.length - 1], start: blockOf(store[K], 'blockcccc3').start};
+
+  // 8. Another day is shown: the way back shows the day of the change; focus lost on the way is placed.
+  record('moved “Concepts” to 9:00 PM', D, 'block:blockcccc3', () => editDay(D, v => { Object.assign(blockOf(v, 'blockcccc3'), {start: '21:00', end: '22:45'}); }));
+  await idle();
+  shown = '2026-11-12'; wentTo = null; refocused = null;
+  await travel('undo');
+  out.where = {wentTo, refocused};
+  focusGone = true;
+  await steps.redo[steps.redo.length - 1].redo({refocus: true});
+  out.where.refocused = refocused;
+
+  // 9. Nothing changed, nothing to take back; a step inside a step is the outer one's.
+  const m = steps.undo.length;
+  out.none = record('edited “Concepts”', D, 'block:blockcccc3', () => editDay(D, () => {}));
+  await idle();
+  const outer = record('outer', D, null, () => {
+    out.inner = record('inner', D, null, () => editDay(D, v => { blockOf(v, 'blockcccc3').title = 'Concepts 2'; }));
+    editDay(D, v => { blockOf(v, 'blockcccc3').title = 'Concepts 3'; });
+  });
+  await idle();
+  out.nested = {steps: steps.undo.length - m, label: steps.undo[steps.undo.length - 1].label, outer: typeof outer};
+  await travel('undo');
+  out.nested.title = blockOf(store[K], 'blockcccc3').title;
+  out.labels = [
+    changeLabel({kind: 'meal', title: 'Lunch', start: 900, end: 960, place: 'Chipotle', items: []}, {start: 930, end: 990, place: 'Chipotle', items: []}),
+    changeLabel({kind: 'meal', title: 'Lunch', start: 900, end: 960, place: 'Chipotle', items: []}, {start: 900, end: 960, place: 'Thai place', items: []}),
+    changeLabel({kind: 'deep', title: 'Lab', start: 540, end: 600, items: []}, {title: 'Lab', kind: 'deep', start: 540, end: 630, items: []}),
+    changeLabel({kind: 'deep', title: 'Lab', start: 540, end: 600, items: []}, {title: 'Lab 2', kind: 'deep', start: 540, end: 600, items: []}),
+    changeLabel({kind: 'deep', title: 'Lab', start: 540, end: 600, items: []}, {title: 'Lab', kind: 'deep', start: 540, end: 600, items: [{id: 'a', text: 'goggles', done: false}]}),
+    changeLabel({kind: 'deep', title: 'Lab', start: 540, end: 600, items: [{id: 'a', text: 'goggles', done: false}]}, {title: 'Lab', kind: 'deep', start: 540, end: 600, items: [{id: 'a', text: 'goggles', done: true}]}),
+    changeLabel({kind: 'deep', title: 'Lab', start: 540, end: 600, items: [{id: 'a', text: 'goggles', done: false}, {id: 'b', text: 'notes', done: false}]}, {title: 'Lab', kind: 'deep', start: 540, end: 600, items: []}),
+    changeLabel({kind: 'deep', title: 'Lab', start: 540, end: 600, items: []}, {title: 'Lab 2', kind: 'social', start: 600, end: 660, items: []}),
+  ];
+  console.log(JSON.stringify(out));
+})();
+"""
+        cls.out = run_node(script)
+        cls.merge = run_node(cls.pure + """
+const B = (id, start, items) => ({id, type: 'deep', title: id, start, end: '23:00', ...(items ? {items} : {})});
+const I = (id, done = false) => ({id, kind: 'own', text: id, done});
+const show = v => v === CONFLICT ? 'CONFLICT' : v;
+const left = {blocks: [B('a', '09:00'), B('b', '10:00', [I('i1'), I('i2')]), B('c', '11:00')]};
+const moved = {blocks: [B('a', '09:30'), B('b', '10:00', [I('i1'), I('i2')]), B('c', '11:00')]};
+console.log(JSON.stringify({
+  // nothing else changed: the value before, itself
+  exact: rebase(moved, moved, left) === left,
+  untouched: rebase(left, moved, left) === moved,
+  // a block added elsewhere stays; mine goes back
+  added: show(rebase(moved, {blocks: [...moved.blocks, B('z', '05:00')]}, left)).blocks.map(b => b.id + '@' + b.start),
+  // the block I moved was moved again, or is gone
+  movedAgain: show(rebase(moved, {blocks: [B('a', '12:00'), moved.blocks[1], moved.blocks[2]]}, left)),
+  goneElsewhere: show(rebase(moved, {blocks: [moved.blocks[1], moved.blocks[2]]}, left)),
+  // an item ticked elsewhere in another block stays
+  tickElsewhere: show(rebase(moved, {blocks: [moved.blocks[0], B('b', '10:00', [I('i1', true), I('i2')]), moved.blocks[2]]}, left)).blocks.map(b => b.start + (b.items || []).map(i => +i.done).join('')),
+  // a block I deleted goes back in its place, between what is still there, with what was added elsewhere kept
+  restored: show(rebase({blocks: [left.blocks[0], left.blocks[2]]}, {blocks: [left.blocks[0], B('z', '05:00'), left.blocks[2]]}, left)).blocks.map(b => b.id),
+  restoredFirst: show(rebase({blocks: [left.blocks[1]]}, {blocks: [left.blocks[1], B('z', '05:00')]}, {blocks: [left.blocks[0], left.blocks[1]]})).blocks.map(b => b.id),
+  itemBack: show(rebase({blocks: [B('b', '10:00', [I('i1'), I('i3')])]}, {blocks: [B('b', '10:00', [I('i1'), I('i3', true)])]}, {blocks: [B('b', '10:00', [I('i1'), I('i2'), I('i3')])]})).blocks[0].items.map(i => i.id + +i.done),
+  // taking back an add: only the block as I left it
+  addUndone: show(rebase({blocks: [B('a', '09:00'), B('n', '13:00', [])]}, {blocks: [B('a', '09:00'), B('n', '13:00', []), B('z', '05:00')]}, {blocks: [B('a', '09:00')]})).blocks.map(b => b.id),
+  addChanged: show(rebase({blocks: [B('n', '13:00', [])]}, {blocks: [B('n', '13:00', [I('x')])]}, null)),
+  // a date that had nothing, and a meal's change beside another meal's
+  toNothing: show(rebase({blocks: [B('n', '13:00', [])]}, {blocks: [B('n', '13:00', [])], meals: {lunch: {off: true}}}, null)),
+  meals: show(rebase({meals: {lunch: {start: '15:30', end: '16:30'}}}, {meals: {lunch: {start: '15:30', end: '16:30'}, dinner: {off: true}}}, null)),
+  mealClash: show(rebase({meals: {lunch: {start: '15:30', end: '16:30'}}}, {meals: {lunch: {start: '14:00', end: '15:00'}}}, null)),
+  mealItems: show(rebase({meals: {lunch: {start: '15:30', end: '16:30'}}}, {meals: {lunch: {start: '15:30', end: '16:30', items: [I('call')]}}}, null)),
+  // the settings: one hour each
+  hours: [show(rebase({day_start: 7, day_end: 24}, {day_start: 7, day_end: 23}, {day_start: 5, day_end: 24})), show(rebase({day_start: 7, day_end: 24}, {day_start: 8, day_end: 24}, {day_start: 5, day_end: 24}))],
+  same: [same({a: 1, b: [1, {c: 2}]}, {b: [1, {c: 2}], a: 1}), same({a: 1}, {a: 1, b: undefined}), same([1, 2], [2, 1]), same(null, undefined), same({}, null), same('5', 5)],
+}));
+""")
+
+    def test_a_step_goes_back_and_forth_exactly(self):
+        self.assertEqual(self.out["move"], {"offered": "function", "isStep": True, "undone": True, "toast": "Undid: moved “Pickleball” to 7:30 PM [Redo]",
+                                            "redone": True, "toast2": "Redid: moved “Pickleball” to 7:30 PM [Undo]"})
+
+    def test_a_deleted_block_comes_back_in_its_place(self):
+        self.assertEqual(self.out["deleted"], {"gone": True, "back": True, "order": ["blockaaaa1", "blockbbbb2", "blockcccc3"]})
+
+    def test_one_action_is_one_step_whatever_it_saves(self):
+        b = self.out["both"]
+        self.assertEqual(b["oneStep"], 1)
+        self.assertTrue(b["dropped"])
+        # The week lands before the date that depends on it, on the way back too.
+        self.assertEqual(b["posts"][-2:], ["week:wed", "day:2026-11-11"])
+        self.assertEqual(b["undoPosts"], ["week:wed", "day:2026-11-11"])
+        self.assertTrue(b["back"])
+        self.assertTrue(b["allBack"])
+
+    def test_another_devices_change_is_never_overwritten(self):
+        self.assertEqual(self.out["other"], {"toast": "Undid: moved “Pickleball” to 7:30 PM [Redo]", "mine": ["19:00", "20:15"], "theirs": True, "local": True})
+        self.assertEqual(self.out["clash"], {"toast": "Can't undo: moved “Pickleball” to 7:30 PM. It was changed somewhere else since.", "posts": [],
+                                             "stored": "21:00", "shown": "21:00", "left": 0})
+
+    def test_the_defaults_go_back_to_no_key(self):
+        s = self.out["settings"]
+        self.assertEqual(s["saved"], {"day_start": 7, "day_end": 23})
+        self.assertEqual(s["undone"], [False, {"day_start": 5, "day_end": 24}, ["settings removed"], None])
+        self.assertEqual(s["redone"], {"day_start": 7, "day_end": 23})
+
+    def test_a_failed_save_is_put_back_and_is_no_step(self):
+        self.assertEqual(self.out["fail"], {"shownAtOnce": "21:00", "putBack": True, "steps": 0, "toast": True})
+
+    def test_the_way_back_fails_safely(self):
+        fail = "Couldn't undo that. Check your connection and try again."
+        self.assertEqual(self.out["down"], {"toast": fail, "same": True, "posts": 0, "top": "moved “Concepts” to 9:00 PM"})
+        self.assertEqual(self.out["refused"], {"toast": fail, "same": True, "top": "moved “Concepts” to 9:00 PM"})
+        self.assertEqual(self.out["retried"], {"toast": "Undid: moved “Concepts” to 9:00 PM [Redo]", "start": "20:15"})
+
+    def test_the_way_back_shows_where_it_happened(self):
+        self.assertEqual(self.out["where"], {"wentTo": "2026-11-11", "refocused": "block:blockcccc3"})
+
+    def test_no_change_no_step_and_a_step_inside_a_step(self):
+        self.assertIsNone(self.out["none"])
+        self.assertIsNone(self.out["inner"])
+        self.assertEqual(self.out["nested"], {"steps": 1, "label": "outer", "outer": "function", "title": "Concepts"})
+
+    def test_the_editors_save_is_named_for_what_it_changed(self):
+        self.assertEqual(self.out["labels"], [
+            "moved Lunch to 3:30 PM", "set Lunch’s place to “Thai place”", "changed “Lab” to 9:00–10:30 AM", "renamed “Lab” to “Lab 2”",
+            "added “goggles” to “Lab”", "ticked “goggles” in “Lab”", "removed 2 things from “Lab”", "edited “Lab 2”"])
+
+    def test_only_the_steps_own_change_is_taken_back(self):
+        m = self.merge
+        self.assertTrue(m["exact"])
+        self.assertTrue(m["untouched"])
+        self.assertEqual(m["added"], ["a@09:00", "b@10:00", "c@11:00", "z@05:00"])
+        self.assertEqual((m["movedAgain"], m["goneElsewhere"]), ("CONFLICT", "CONFLICT"))
+        self.assertEqual(m["tickElsewhere"], ["09:00", "10:0010", "11:00"])
+        self.assertEqual(m["restored"], ["a", "b", "z", "c"])
+        self.assertEqual(m["restoredFirst"], ["a", "b", "z"])
+        self.assertEqual(m["itemBack"], ["i10", "i20", "i31"])
+        self.assertEqual(m["addUndone"], ["a", "z"])
+        self.assertEqual(m["addChanged"], "CONFLICT")
+        self.assertEqual(m["toNothing"], {"meals": {"lunch": {"off": True}}})
+        self.assertEqual(m["meals"], {"meals": {"dinner": {"off": True}}})
+        self.assertEqual(m["mealClash"], "CONFLICT")
+        self.assertEqual(m["mealItems"], {"meals": {"lunch": {"items": [{"id": "call", "kind": "own", "text": "call", "done": False}]}}})
+        self.assertEqual(m["hours"], [{"day_start": 5, "day_end": 23}, "CONFLICT"])
+        self.assertEqual(m["same"], [True, True, False, True, False, False])

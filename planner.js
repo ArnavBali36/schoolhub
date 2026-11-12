@@ -13,7 +13,7 @@
   if (!SH) return;
   SH.plannerLoaded = true;
   const $ = s => document.querySelector(s);
-  const esc = SH.esc;
+  const esc = SH.esc, same = SH.same;
 
   // The whole day fits the planner (docs/planner.md, "the whole day always in view"): an hour is the
   // timeline's room divided by the hours shown, never under MIN_HOUR_PX (only then does it scroll).
@@ -199,6 +199,59 @@
     return Object.keys(out).length ? out : null;
   }
 
+  // ---- a step taken back when something else changed too (undo) ----
+  // A step of the undo keeps, for each key it saved, the value before and the value it left. Taking
+  // it back when the stored value is still the one it left is simply the value before. When it is
+  // not (the same date changed on another device meanwhile), rebase() takes back only what the step
+  // itself changed and leaves the rest as stored: was is what the step left, now what is stored,
+  // goal what the way back wants. Objects are merged field by field, and lists of blocks or items
+  // by id. Where the step and the other change touched the same thing (a block the step moved was
+  // moved again, or is gone), there is no right answer and it gives CONFLICT: nothing is saved.
+  const CONFLICT = Symbol('conflict');
+  const hasIds = list => list.every(x => isObject(x) && typeof x.id === 'string');
+  function rebase(was, now, goal){
+    if (same(was, goal)) return now;     // the step changed nothing here: as stored
+    if (same(was, now)) return goal;     // nothing else changed here: the way back, exactly
+    if (same(now, goal)) return now;     // already there
+    // Nothing there is an empty list or an empty object: a date with no blocks, a meal with no change.
+    const lists = [was, now, goal].map(v => v == null ? [] : v);
+    if (lists.every(Array.isArray)) return lists.every(hasIds) ? rebaseList(...lists) : CONFLICT;
+    const maps = [was, now, goal].map(v => v == null ? {} : v);
+    if (!maps.every(isObject)) return CONFLICT;
+    const out = {};
+    for (const k of new Set(maps.flatMap(Object.keys))) {
+      const v = rebase(maps[0][k], maps[1][k], maps[2][k]);
+      if (v === CONFLICT) return CONFLICT;
+      if (v != null) out[k] = v;
+    }
+    return out;
+  }
+  function rebaseList(was, now, goal){
+    const W = new Map(was.map(x => [x.id, x])), N = new Map(now.map(x => [x.id, x])), G = new Map(goal.map(x => [x.id, x]));
+    const out = [];
+    for (const n of now) {
+      const w = W.get(n.id), g = G.get(n.id);
+      if (w && g) {
+        const v = rebase(w, n, g);
+        if (v === CONFLICT) return CONFLICT;
+        out.push(v);
+      } else if (w) {
+        if (!same(w, n)) return CONFLICT;   // the way back takes it away, but only as the step left it
+      } else if (g && !same(n, g)) return CONFLICT;
+      else out.push(n);                     // added elsewhere (or already back): it stays
+    }
+    for (let i = 0; i < goal.length; i++) {
+      const g = goal[i], w = W.get(g.id);
+      if (N.has(g.id)) continue;
+      if (w) { if (!same(w, g)) return CONFLICT; continue; }   // gone elsewhere and not the step's: it stays gone
+      // Put back where it was: after the nearest of those before it that are still there.
+      let at = 0;
+      for (let j = i - 1; j >= 0 && !at; j--) at = out.findIndex(x => x.id === goal[j].id) + 1;
+      out.splice(at, 0, g);
+    }
+    return out;
+  }
+
   // ---- the plan, loaded and saved ----
   let plan = null;               // {settings, week: {sun: …}, days: {date: value}}
   let loaded = null;             // the dates plan.days covers: {from, to}
@@ -220,6 +273,8 @@
     if (key.startsWith('week:')) return weekOf(key.slice(5));
     return plan.days[key.slice(4)] || null;
   }
+  // A key's value as the plan keeps it: the settings cleaned, a weekday never empty, a date's or null.
+  const kept = (key, value) => key === 'settings' ? cleanSettings(value) : key.startsWith('week:') ? value || cleanWeek(null) : value || null;
   function setKey(key, value){
     if (key === 'settings') plan.settings = cleanSettings(value);
     else if (key.startsWith('week:')) plan.week[key.slice(5)] = value || cleanWeek(null);
@@ -227,26 +282,42 @@
     else delete plan.days[key.slice(4)];
   }
   // Changes show at once; the saves go one at a time, in order, so a week's change lands before the
-  // date's change that depends on it. A failed save says so and loads the plan again.
+  // date's change that depends on it. A failed save says so, puts back what the server last had for
+  // the keys being saved, and loads the plan again. It answers a promise of whether this save went
+  // through (the undo's step for a change goes when its save did not).
+  const confirmed = new Map();   // key → its value as the server last had it, while saves are on their way
   function save(key, value){
+    if (!confirmed.has(key)) confirmed.set(key, clone(getKey(key)));
+    // Inside record(): what the step changes, key by key (the first value before, the last one left).
+    const w = recording && (recording.writes.find(x => x.key === key) || recording.writes[recording.writes.push({key, before: clone(getKey(key))}) - 1]);
     setKey(key, value);
+    if (w) w.after = clone(getKey(key));
     const n = latest[key] = (latest[key] || 0) + 1;
     pending++;
     saveSerial++;
-    chain = chain
+    const sent = chain
       .then(() => SH.api('api/plan', {key, value}))
-      .then(r => { if (latest[key] === n && r?.key === key) setKey(key, r.value); }, () => { saveFailed = true; })
-      .then(() => {
-        if (--pending) return;
-        if (saveFailed) { saveFailed = false; SH.toast("Couldn't save the plan"); needReload = true; }
-        if (needReload) load(shown); else render();
-      });
+      .then(r => {
+        if (r?.key !== key) return true;
+        if (latest[key] === n) setKey(key, r.value);
+        confirmed.set(key, clone(kept(key, r.value)));
+        if (w) w.after = clone(kept(key, r.value));   // as the server keeps it
+        return true;
+      }, () => { saveFailed = true; return false; });
+    chain = sent.then(() => {
+      if (--pending) return;
+      if (saveFailed) {
+        saveFailed = false;
+        SH.toast("Couldn't save the plan");
+        needReload = true;
+        for (const [k, v] of confirmed) setKey(k, v);
+      }
+      confirmed.clear();
+      if (needReload) load(shown); else render();
+    });
+    recording?.sent.push(sent);
     render();
-  }
-  // The values of some keys now, and a function that puts them back (a toast's Undo).
-  function snapshot(keys){
-    const old = keys.map(k => [k, clone(getKey(k))]);
-    return () => { for (const [k, v] of old) save(k, v); };
+    return sent;
   }
   function editDay(date, fn){
     const v = clone(plan.days[date]) || {};
@@ -267,6 +338,115 @@
     if (type === 'meal') { v.meals ||= {}; return v.meals[id] ||= {}; }
     if (type === 'repeat') { v.repeats ||= {}; return v.repeats[id] ||= {}; }
     return (v.blocks || []).find(b => b.id === id) || null;
+  }
+
+  // ---- undo ----
+  // One action of yours is one step of the page's undo (dashboard.js, "undo and redo"), whatever it
+  // saves: record() notes every key saved inside fn, with its value before and the value left.
+  // label says what was done, as the toast names it ("moved Lunch to 3:00 PM"); date and ref are
+  // where it shows (taking the step back shows that date, and gives a lost focus to that block).
+  // It answers the toast's Undo for the step, or null when nothing changed.
+  let recording = null;
+  function record(label, date, ref, fn){
+    if (recording) { fn(); return null; }   // part of a larger action: that one's step
+    const rec = recording = {writes: [], sent: []};
+    try { fn(); } finally { recording = null; }
+    // (No step with a dashboard.js from before the undo, should a browser hold on to an old one.)
+    const writes = SH.addStep ? rec.writes.filter(w => !same(w.before, w.after)) : [];
+    if (!writes.length) return null;
+    const step = {label, date, ref, writes};
+    step.undo = o => travelPlan(step, 'undo', o);
+    step.redo = o => travelPlan(step, 'redo', o);
+    return SH.offerStep(SH.addStep(step, Promise.all(rec.sent).then(all => all.every(Boolean))));
+  }
+  // What the server has now for a step's keys, taken into the plan: asked once no save is on its
+  // way, and again if one started meanwhile (the answer could be older than that save). False when
+  // the server cannot be asked.
+  async function storedNow(step){
+    const dates = step.writes.filter(w => w.key.startsWith('day:')).map(w => w.key.slice(4)).sort();
+    const from = dates[0] || shown, to = dates[dates.length - 1] || shown;
+    for (let tries = 0; tries < 4; tries++) {
+      while (pending) await chain;
+      const serial = saveSerial;
+      let body = null;
+      try {
+        const r = await fetch(`api/plan?from=${from}&to=${to}`, {cache: 'no-store'});
+        if (r.ok) body = await r.json();
+      } catch {}
+      if (!plan || !isObject(body)) return false;
+      if (pending || serial !== saveSerial) continue;
+      for (const {key} of step.writes)
+        setKey(key, key === 'settings' ? body.settings : key.startsWith('week:') ? cleanWeek(body.week?.[key.slice(5)]) : body.days?.[key.slice(4)]);
+      return true;
+    }
+    return false;
+  }
+  // A step taken back ('undo') or made again ('redo'), through save() like the change itself.
+  // Each key is stored whole, so saving its old value blindly would also undo whatever another
+  // device saved to the same date since. So the stored values are asked for first. A key still as
+  // the step left it gets the value it had, exactly: the block deleted is back with its id, its
+  // fields, its items and their ticks, in its place. A key changed since gets only the step's own
+  // change taken back (rebase), cleaned by the page's rules like any edit; if that cannot be done
+  // without overwriting the other change, nothing is saved and the answer is 'conflict'.
+  async function travelPlan(step, dir, o){
+    const had = !focusLost();
+    if (!plan || !await storedNow(step)) return {ok: false, why: 'failed'};
+    const rank = key => key === 'settings' ? 0 : key.startsWith('week:') ? 1 : 2;
+    const next = new Map();
+    // The settings and the weeks first: a date's value is cleaned against the week it will have,
+    // and a week's change lands before the date's change that depends on it.
+    for (const w of [...step.writes].sort((a, b) => rank(a.key) - rank(b.key))) {
+      const [from, to] = dir === 'undo' ? [w.after, w.before] : [w.before, w.after];
+      const key = w.key, now = getKey(key);
+      let v = to;
+      if (!same(now, from)) {
+        v = rebase(from, now, to);
+        if (v === CONFLICT) { render(); return {ok: false, why: 'conflict'}; }
+        const wd = key.startsWith('day:') && wdOf(key.slice(4));
+        v = key === 'settings' ? cleanSettings(v) : wd ? cleanDay(clone(v), next.get('week:' + wd) || weekOf(wd)) : cleanWeek(clone(v));
+      }
+      next.set(key, clone(v));
+    }
+    if (step.date && step.date !== shown) setDate(step.date);
+    if (next.has('settings')) scrolledFor = null;
+    const sent = [];
+    for (const [key, v] of next) {
+      if (same(getKey(key), v)) continue;
+      // The settings and a weekday as the defaults are stored as no key at all, which is what they
+      // were before their first change.
+      const none = key === 'settings' ? same(v, DEFAULT_SETTINGS) : key.startsWith('week:') && same(v, cleanWeek(null));
+      sent.push(save(key, none ? null : v));
+    }
+    if (!sent.length) render();
+    if (!(await Promise.all(sent)).every(Boolean)) return {ok: false, why: 'failed'};
+    // Focus is not left on <body> when the toast's button, or the block that had it, went.
+    if ((o?.refocus || had) && focusLost()) refocus(refSel(step.ref));
+    return {ok: true};
+  }
+  // How an entry is named in a step's label: a meal by its name, a block by its title in quotes.
+  const named = e => e.kind === 'meal' ? e.title : `“${e.title}”`;
+  // What changed in a block's list of things to get done, in a few words.
+  function itemsLabel(old, next, name){
+    const was = new Map(old.map(i => [i.id, i])), is = new Map(next.map(i => [i.id, i]));
+    const added = next.filter(i => !was.has(i.id)), removed = old.filter(i => !is.has(i.id));
+    const ticked = next.filter(i => was.has(i.id) && was.get(i.id).done !== i.done);
+    const things = n => n === 1 ? '1 thing' : n + ' things';
+    if (added.length && !removed.length && !ticked.length) return added.length === 1 ? `added “${added[0].text}” to ${name}` : `added ${things(added.length)} to ${name}`;
+    if (removed.length && !added.length && !ticked.length) return removed.length === 1 ? `removed “${removed[0].text}” from ${name}` : `removed ${things(removed.length)} from ${name}`;
+    if (ticked.length === 1 && !added.length && !removed.length) return `${ticked[0].done ? 'ticked' : 'unticked'} “${ticked[0].text}” in ${name}`;
+    return `changed the list in ${name}`;
+  }
+  // What the editor's save changed, in a few words: e is the entry as it was, next what it becomes
+  // ({title, kind, start, end, place, items}; start and end in minutes).
+  function changeLabel(e, next){
+    const name = named({...e, title: next.title ?? e.title}), what = [];
+    if (next.title != null && next.title !== e.title) what.push(`renamed “${e.title}” to “${next.title}”`);
+    if (next.kind != null && next.kind !== e.kind) what.push(`changed ${name} to ${KIND_NAME[next.kind]}`);
+    if (next.start !== e.start || next.end !== e.end)
+      what.push(next.end - next.start === e.end - e.start ? `moved ${name} to ${clock(next.start)}` : `changed ${name} to ${range(next.start, next.end)}`);
+    if (next.place != null && next.place !== e.place) what.push(next.place ? `set ${name}’s place to “${next.place}”` : `cleared ${name}’s place`);
+    if (!same(next.items, e.items)) what.push(itemsLabel(e.items, next.items, name));
+    return what.length === 1 ? what[0] : `edited ${name}`;
   }
 
   // The shown date ±7 days, again whenever the date leaves that range, and with the marks and tasks.
@@ -689,16 +869,15 @@
 
   // ---- changes from the timeline ----
   function addWork(date, entry, a){
-    const undo = snapshot(['day:' + date]);
     let outcome = 'added';
-    editDay(date, v => {
+    const undo = record(`added “${a.name}” to ${entryName(entry)}`, date, entry.ref, () => editDay(date, v => {
       const h = holder(v, entry.ref);
       if (!h) { outcome = 'gone'; return false; }
       h.items ||= [];
       if (h.items.some(i => i.kind === 'work' && i.ref === a.id)) { outcome = 'there'; return false; }
       if (h.items.length >= LIMIT.items) { outcome = 'full'; return false; }
       h.items.push(workItem(a));
-    });
+    }));
     if (outcome === 'added') SH.toast(`Added “${a.name}” to ${entryName(entry)}`, undo);
     else if (outcome === 'there') SH.toast(`“${a.name}” is already in ${entryName(entry)}`);
     else if (outcome === 'full') SH.toast(`${entryName(entry)} already holds ${LIMIT.items} things`);
@@ -708,18 +887,21 @@
     const s = settings(), lo = s.day_start * 60, hi = s.day_end * 60;
     const begin = Math.max(Math.min(start, hi - 60, 1380), Math.min(lo, 1380)), end = Math.min(1440, begin + 60);
     if ((plan.days[date]?.blocks || []).length >= LIMIT.blocks) return SH.toast(`This day already has ${LIMIT.blocks} blocks of its own`);
-    const undo = snapshot(['day:' + date]);
-    editDay(date, v => { (v.blocks ||= []).push({id: newId(), type: 'deep', title: KIND_NAME.deep, start: toTime(begin), end: toTime(end), items: [workItem(a)]}); });
+    const id = newId();
+    const undo = record(`added “${a.name}” to a new Deep work block, ${range(begin, end)}`, date, 'block:' + id,
+      () => editDay(date, v => { (v.blocks ||= []).push({id, type: 'deep', title: KIND_NAME.deep, start: toTime(begin), end: toTime(end), items: [workItem(a)]}); }));
     SH.toast(`Added “${a.name}” to a new Deep work block, ${range(begin, end)}`, undo);
   }
-  // A block's new time from a drag. A meal's or a repeating block's changes that date only.
-  function commitTime(date, entry, start, end){
-    const undo = snapshot(['day:' + date]);
-    editDay(date, v => {
+  // A block's new time from a drag (mode: 'move', or the edge that was dragged). A meal's or a
+  // repeating block's changes that date only.
+  function commitTime(date, entry, start, end, mode){
+    const how = mode === 'move' ? `moved ${named(entry)} to ${clock(start)}` : `resized ${named(entry)} to ${range(start, end)}`;
+    const undo = record(how, date, entry.ref, () => editDay(date, v => {
       const h = holder(v, entry.ref);
       if (!h) return false;
       Object.assign(h, {start: toTime(start), end: toTime(end)});
-    });
+    }));
+    if (!undo) return render();
     if (!entry.ref.startsWith('block:')) SH.toast(`${entry.title} changed for ${thisDay(date)} only`, undo);
     else SH.toast(`Moved “${entry.title}” to ${range(start, end)}`, undo);
   }
@@ -881,7 +1063,7 @@
     // the pointer, the browser sends the click to the grid. The keyboard's click still reaches it.
     suppressClick();
     if (!d.moved) return openDetails(d.entry, d.el);
-    if (d.start !== d.entry.start || d.end !== d.entry.end) commitTime(shown, d.entry, d.start, d.end);
+    if (d.start !== d.entry.start || d.end !== d.entry.end) commitTime(shown, d.entry, d.start, d.end, d.mode);
     else render();
   });
   grid.addEventListener('pointercancel', e => { if (drag && e.pointerId === drag.id) endDrag(true); });
@@ -894,15 +1076,20 @@
     e.preventDefault();
     e.stopPropagation();
   }, true);
+  // An item ticked or unticked, on its block or in the block's details.
+  function tickItem(ref, id, done){
+    const e = entryByRef(ref), text = e?.items.find(i => i.id === id)?.text;
+    record(`${done ? 'ticked' : 'unticked'} “${text}” in ${e ? named(e) : 'the block'}`, shown, ref, () => editDay(shown, v => {
+      const it = holder(v, ref)?.items?.find(i => i.id === id);
+      if (!it) return false;
+      it.done = done;
+    }));
+  }
   grid.addEventListener('change', e => {
     const box = e.target.closest('[data-pitem]');
     const ref = box?.closest('.pblock')?.dataset.ref;
     if (!ref || !editable()) return;
-    editDay(shown, v => {
-      const it = holder(v, ref)?.items?.find(i => i.id === box.dataset.pitem);
-      if (!it) return false;
-      it.done = box.checked;
-    });
+    tickItem(ref, box.dataset.pitem, box.checked);
   });
 
   // ---- dragging work in from the list ----
@@ -976,16 +1163,18 @@
     if (due) return SH.openDrawer(due.dataset.planDue, e.detail === 0);
     const back = t.closest('[data-pmeal-on]');
     if (back && editable()) {
-      const m = back.dataset.pmealOn, undo = snapshot(['day:' + shown]);
-      editDay(shown, v => { holder(v, 'meal:' + m).off = false; });
+      const m = back.dataset.pmealOn;
+      const undo = record(`brought ${m} back ${onDay(shown)}`, shown, 'meal:' + m, () => editDay(shown, v => { holder(v, 'meal:' + m).off = false; }));
       SH.toast(`${MEAL_NAME[m]} is back ${onDay(shown)}`, undo);
       return refocus(refSel('meal:' + m));
     }
     // A repeating block skipped this day comes back (its skip goes; cleanDay drops what is left empty).
     const again = t.closest('[data-prepeat-on]');
     if (again && editable()) {
-      const ref = 'repeat:' + again.dataset.prepeatOn, e = entryByRef(ref), undo = snapshot(['day:' + shown]);
-      editDay(shown, v => { delete holder(v, ref).skip; });
+      const ref = 'repeat:' + again.dataset.prepeatOn, e = entryByRef(ref);
+      const undo = record(`brought “${e?.title || 'the block'}” back ${onDay(shown)}`, shown, ref, () => {
+        editDay(shown, v => { delete holder(v, ref).skip; });
+      });
       SH.toast(`“${e?.title || 'The block'}” is back ${onDay(shown)}`, undo);
       return refocus(refSel(ref));
     }
@@ -995,6 +1184,8 @@
     const b = e.target.closest?.('[data-plan-it]');
     if (b) { e.preventDefault(); planIt(b.dataset.planIt); }
   });
+  // Undo and redo wait while a block is being dragged.
+  SH.holdUndo?.(() => !!drag);
   // [ and ] for the day before and after, when not typing and nothing covers the planner. Esc puts
   // a drag back.
   document.addEventListener('keydown', e => {
@@ -1097,11 +1288,15 @@
     if (bad) return showErr(F.bErr, bad, F.bEnd);
     const {date, ref, items} = ed, wd = wdOf(date), wdN = wdName(date), day = plan.days[date] || {};
     const times = {start: toTime(start), end: toTime(end)};
+    // The entry as it was, for the name of the undo's step (changeLabel).
+    const old = ref && entriesOn(date).find(e => e.ref === ref) || ed;
     if (ed.kind === 'meal') {
-      editDay(date, v => { Object.assign(holder(v, ref), times, {place: cut(F.bPlace.value, LIMIT.place), items}); });
+      const place = cut(F.bPlace.value, LIMIT.place);
+      record(changeLabel(old, {start, end, place, items}), date, ref, () => editDay(date, v => { Object.assign(holder(v, ref), times, {place, items}); }));
       return closeEditor(refSel(ref));
     }
     const type = F.bKind.value, title = cut(F.bTitle.value, LIMIT.title) || KIND_NAME[type], repeat = F.bRepeat.checked;
+    const edited = changeLabel(old, {title, kind: type, start, end, items});
     let back = refSel(ref);
     const weekFull = () => weekOf(wd).blocks.length >= LIMIT.blocks && showErr(F.bErr, `${wdN} already has ${LIMIT.blocks} repeating blocks.`) === false;
     const dayFull = () => (day.blocks || []).length >= LIMIT.blocks && showErr(F.bErr, `This day already has ${LIMIT.blocks} blocks of its own.`) === false;
@@ -1110,12 +1305,14 @@
       if (repeat) {
         if (weekFull()) return false;
         // The week first: the date's items for it are kept only once the block is in the week.
-        editWeek(wd, w => { w.blocks.push({id, type, title, ...times}); });
-        if (items.length) editDay(date, v => { (v.repeats ||= {})[id] = {items}; });
+        record(`added “${title}” every ${wdN}, ${range(start, end)}`, date, 'repeat:' + id, () => {
+          editWeek(wd, w => { w.blocks.push({id, type, title, ...times}); });
+          if (items.length) editDay(date, v => { (v.repeats ||= {})[id] = {items}; });
+        });
         back = refSel('repeat:' + id);
       } else {
         if (dayFull()) return false;
-        editDay(date, v => { (v.blocks ||= []).push({id, type, title, ...times, items}); });
+        record(`added “${title}”, ${range(start, end)}`, date, 'block:' + id, () => editDay(date, v => { (v.blocks ||= []).push({id, type, title, ...times, items}); }));
         back = refSel('block:' + id);
       }
     } else if (ref.startsWith('block:')) {
@@ -1123,35 +1320,40 @@
       if (repeat) {
         // Ticking Repeat moves a one-off block into the week, keeping this date's items.
         if (weekFull()) return false;
-        editWeek(wd, w => { w.blocks.push({id, type, title, ...times}); });
-        editDay(date, v => {
-          v.blocks = (v.blocks || []).filter(b => b.id !== id);
-          if (items.length) (v.repeats ||= {})[id] = {items};
+        const undo = record(`made “${title}” repeat every ${wdN}`, date, 'repeat:' + id, () => {
+          editWeek(wd, w => { w.blocks.push({id, type, title, ...times}); });
+          editDay(date, v => {
+            v.blocks = (v.blocks || []).filter(b => b.id !== id);
+            if (items.length) (v.repeats ||= {})[id] = {items};
+          });
         });
-        SH.toast(`“${title}” repeats every ${wdN} now`);
+        SH.toast(`“${title}” repeats every ${wdN} now`, undo);
         back = refSel('repeat:' + id);
       } else {
-        editDay(date, v => { const b = holder(v, ref); if (!b) return false; Object.assign(b, {type, title, ...times, items}); });
+        record(edited, date, ref, () => editDay(date, v => { const b = holder(v, ref); if (!b) return false; Object.assign(b, {type, title, ...times, items}); }));
       }
     } else {
       const id = ref.slice(7);
       if (!repeat) {
-        const undo = snapshot(['week:' + wd, 'day:' + date]);
         back = neighbourSel(ref);
         if (F.blockForm.querySelector('input[name="bUnrep"]:checked')?.value === 'remove') {
-          editWeek(wd, w => { w.blocks = w.blocks.filter(b => b.id !== id); });
-          editDay(date, () => {});  // drops this date's changes to it
+          const undo = record(`removed “${title}” from every ${wdN}`, date, ref, () => {
+            editWeek(wd, w => { w.blocks = w.blocks.filter(b => b.id !== id); });
+            editDay(date, () => {});  // drops this date's changes to it
+          });
           SH.toast(`Removed “${title}” from every ${wdN}`, undo);
         } else {
-          editDay(date, v => { Object.assign(holder(v, ref), {skip: true, items}); });
+          const undo = record(`skipped “${title}” ${onDay(date)}`, date, ref, () => editDay(date, v => { Object.assign(holder(v, ref), {skip: true, items}); }));
           SH.toast(`Skipped “${title}” ${onDay(date)}`, undo);
         }
       } else {
         // The kind and title belong to the week; the time set here and the items, to this date.
         const wb = weekOf(wd).blocks.find(b => b.id === id);
-        if (wb && (wb.type !== type || wb.title !== title))
-          editWeek(wd, w => { Object.assign(w.blocks.find(b => b.id === id), {type, title}); });
-        editDay(date, v => { Object.assign(holder(v, ref), times, {items}); });
+        record(edited, date, ref, () => {
+          if (wb && (wb.type !== type || wb.title !== title))
+            editWeek(wd, w => { Object.assign(w.blocks.find(b => b.id === id), {type, title}); });
+          editDay(date, v => { Object.assign(holder(v, ref), times, {items}); });
+        });
       }
     }
     return closeEditor(back);
@@ -1168,18 +1370,16 @@
   // with the toast's Undo. From the editor or the details.
   const removeLabel = (e, date) => e.kind === 'meal' ? `No ${e.meal} ${thisDay(date)}` : e.repeat ? `Skip ${thisDay(date)}` : 'Delete';
   function removeEntry(date, e){
-    const {ref} = e, putBack = snapshot(['day:' + date]);
-    // Undo puts the block back and focus on it (the toast's button goes with the toast).
-    const undo = () => { putBack(); if (focusLost()) refocus(refSel(ref)); };
-    const name = e.kind === 'meal' ? MEAL_NAME[e.meal] : e.title;
+    // Undo puts the block back and focus on it (the toast's button goes with the toast): travelPlan.
+    const {ref} = e, name = e.kind === 'meal' ? MEAL_NAME[e.meal] : e.title;
     if (ref.startsWith('block:')) {
-      editDay(date, v => { v.blocks = (v.blocks || []).filter(b => 'block:' + b.id !== ref); });
+      const undo = record(`deleted “${name}”`, date, ref, () => editDay(date, v => { v.blocks = (v.blocks || []).filter(b => 'block:' + b.id !== ref); }));
       SH.toast(`Deleted “${name}”`, undo);
     } else if (ref.startsWith('repeat:')) {
-      editDay(date, v => { holder(v, ref).skip = true; });
+      const undo = record(`skipped “${name}” ${onDay(date)}`, date, ref, () => editDay(date, v => { holder(v, ref).skip = true; }));
       SH.toast(`Skipped “${name}” ${onDay(date)}`, undo);
     } else {
-      editDay(date, v => { holder(v, ref).off = true; });
+      const undo = record(`skipped ${e.meal} ${onDay(date)}`, date, ref, () => editDay(date, v => { holder(v, ref).off = true; }));
       SH.toast(`No ${e.meal} ${onDay(date)}`, undo);
     }
   }
@@ -1194,13 +1394,15 @@
     const start = readTime(F.bStart, false), end = readTime(F.bEnd, true);
     const bad = spanError(start, end);
     if (bad) return showErr(F.bErr, bad, F.bEnd);
-    const {date, ref} = ed, wd = wdOf(date), undo = snapshot(['week:' + wd, 'day:' + date]);
-    editWeek(wd, w => {
-      const t = ed.kind === 'meal' ? w.meals[ed.meal] : w.blocks.find(b => 'repeat:' + b.id === ref);
-      if (!t) return false;
-      Object.assign(t, {start: toTime(start), end: toTime(end)});
+    const {date, ref} = ed, wd = wdOf(date);
+    const undo = record(`set ${named(ed.kind === 'meal' ? {kind: 'meal', title: MEAL_NAME[ed.meal]} : ed)} to ${range(start, end)} every ${wdName(date)}`, date, ref, () => {
+      editWeek(wd, w => {
+        const t = ed.kind === 'meal' ? w.meals[ed.meal] : w.blocks.find(b => 'repeat:' + b.id === ref);
+        if (!t) return false;
+        Object.assign(t, {start: toTime(start), end: toTime(end)});
+      });
+      editDay(date, v => { const h = holder(v, ref); delete h.start; delete h.end; });
     });
-    editDay(date, v => { const h = holder(v, ref); delete h.start; delete h.end; });
     // The button goes with the note: focus stays in the dialog, on the start time.
     F.bChanged.hidden = true;
     F.bStart.focus();
@@ -1402,12 +1604,7 @@
     card.addEventListener('change', e => {
       const box = e.target.closest('[data-pd-item]');
       if (!box || !det || !editable()) return;
-      const ref = det.ref;
-      editDay(shown, v => {
-        const it = holder(v, ref)?.items?.find(i => i.id === box.dataset.pdItem);
-        if (!it) return false;
-        it.done = box.checked;
-      });
+      tickItem(det.ref, box.dataset.pdItem, box.checked);
     });
     // A press anywhere outside the card closes it (on the block it came from too, which then stays
     // closed rather than opening again on release).
@@ -1485,9 +1682,10 @@
     const s = settings(), hours = ds !== s.day_start || de !== s.day_end;
     F.weekDialog.close();
     if (!keys.length && !hours) return;
-    const undo = snapshot(hours ? [...keys, 'settings'] : keys);
-    for (const k of keys) save(k, next[k.slice(5)]);
-    if (hours) { save('settings', {day_start: ds, day_end: de}); scrolledFor = null; render(); }
+    const undo = record(keys.length ? 'changed your week' : 'changed the hours shown', null, null, () => {
+      for (const k of keys) save(k, next[k.slice(5)]);
+      if (hours) { save('settings', {day_start: ds, day_end: de}); scrolledFor = null; render(); }
+    });
     SH.toast('Saved your week', undo);
   }
   if (F.weekDialog) {

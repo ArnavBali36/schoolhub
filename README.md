@@ -25,6 +25,9 @@ put them yourself, and writes a static page you open in your browser. Everything
 - **Add your own tasks** with the **+** button (or press **N**): a name, a course or "Personal", an
   optional due date and time, and notes. They get ✓, Undo, overdue warnings and due-soon alerts like
   everything else, and they show up on the phone view.
+- **Undo and redo** for everything you change: **Cmd+Z** (or Ctrl+Z) takes back the last change to a
+  ✓, a task or the day planner, and **Shift+Cmd+Z** (Shift+Ctrl+Z, or Ctrl+Y) makes it again, about a
+  hundred steps back for as long as the page is open. See [Undo and redo](#undo-and-redo).
 - **Tells you what changed**: due dates that moved, newly posted assignments, work due within 36
   hours that isn't done, and anything newly missing.
 - **Fails loudly**: if a course website changes shape, the parser refuses to guess — it reports the
@@ -118,6 +121,37 @@ until that table exists, saving the plan fails with "couldn't reach the cloud da
 and tasks carry on. With Upstash it is the hash `schoolhub:plan`, but the old phone view does not
 show the planner. On first start with a database, a `state/plan.json` you already have is copied up
 once, as marks and tasks are.
+
+## Undo and redo
+
+Every change you make to your own data is a step: a ✓ made or taken away, a task added, edited,
+pinned or deleted, and everything in the day planner (a block made, moved, resized, edited or
+deleted, its items, a meal changed or skipped for a day, an assignment dropped onto the day, **Plan
+it**, the weekly form and the hours shown). **Cmd+Z** or **Ctrl+Z** takes the last step back;
+**Shift+Cmd+Z**, **Shift+Ctrl+Z** or **Ctrl+Y** makes it again. One action is one step even when it
+saves several things, a new change clears what could be redone, and the page keeps about a hundred
+steps until it is closed or reloaded (a finished **Sync now** reloads it). The view and the theme are
+not data, so they are not steps.
+
+- A toast names what happened, "Undid: moved Lunch to 3:00 PM", with **Redo** (or **Undo**) on it.
+  Deleting a task or a block offers **Undo** on its own toast, as before.
+- While you type in a field the keys are the field's own undo. While a form is open (a task, a
+  block, the week) and you are not typing, they do nothing, so nothing changes underneath the form.
+- What you deleted comes back as it was: a task under its own id with its fields, its ✓ and the time
+  it was made; a block with its items, their ticks and its place; a ✓ with the time it was made, so
+  the nightly check's answer for it still applies. The server stamps every save of a task
+  (`updated_at`), so that one field is new.
+- An undo saves through the same requests as the change itself, so it works the same on the Mac and
+  on a hosted copy. It first asks the server what is stored now. If that is no longer what the step
+  left (the same thing was changed on another device since), it takes back only its own change where
+  the two do not touch (your move of one block, beside a block added on the phone), and where they do
+  it changes nothing and says "Can't undo: … It was changed somewhere else since." If the server
+  cannot be reached it changes nothing and the step stays, to try again.
+
+`POST /api/mark` takes an optional `marked_at` for this: a mark put back keeps the time it was made
+(a UTC time that is not in the future; anything else is stamped now, as before). The Mac app's Edit
+menu can ask the page with `SchoolHub.undo()` and `SchoolHub.redo()`: each answers `true` when the
+page took the request and `false` when it belongs to the field being typed in.
 
 ## Light and dark
 

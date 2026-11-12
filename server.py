@@ -207,6 +207,28 @@ def remove(name, key):
     write_state(FILES[name], data)
 
 
+# A mark's time as either server writes it: UTC, to the second or with 3 or 6 decimals, ending in
+# +00:00 (this server, the public site) or Z (the phone view). [0-9] and fullmatch for the reasons
+# plan.py gives.
+MARK_TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{3}|\.[0-9]{6})?(?:Z|\+00:00)")
+
+
+def mark_time(given):
+    """When a mark was made: now, or the time sent with a mark the page puts back as it was (its undo
+    of taking the mark away), so the nightly check's answer for that very mark still applies to it.
+    Only a real time written as MARK_TIME that is not in the future; anything else is now. A server
+    without this rule (the phone view's, or a public copy from before it) stamps the mark now, which
+    the page takes as it comes."""
+    now = datetime.now(timezone.utc)
+    if isinstance(given, str) and MARK_TIME.fullmatch(given):
+        try:
+            if datetime.fromisoformat(given.replace("Z", "+00:00")) <= now:
+                return given
+        except ValueError:
+            pass
+    return now.isoformat()
+
+
 def clean_task(body, existing):
     """Validate a task from the dashboard form. Returns (task, error)."""
     name = str(body.get("name") or "").strip()[:200]
@@ -326,7 +348,7 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 try:
                     if body.get("done"):
-                        put("marks", aid, {"marked_at": datetime.now(timezone.utc).isoformat(),
+                        put("marks", aid, {"marked_at": mark_time(body.get("marked_at")),
                                            "name": body.get("name"), "course": body.get("course")})
                     else:
                         remove("marks", aid)

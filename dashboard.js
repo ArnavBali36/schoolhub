@@ -70,12 +70,18 @@ const cloudApi = body => fetch('/api/state/', {
 }).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
 // Same calls whether saving through your Mac's server or the phone site's cloud database.
 const backend = {
-  async mark(id, done, a){
-    const body = {id, done, name: a.name, course: a.course.short};
+  // as: a mark an undo puts back as it was, with its own time and names (a server that does not take
+  // the time gives it the time of the undo).
+  async mark(id, done, a, as){
+    const body = {id, done, name: as?.name ?? a?.name, course: as?.course ?? a?.course?.short};
+    if (done && as?.marked_at) body.marked_at = as.marked_at;
     return WRITE === 'cloud' ? (await cloudApi({action: 'mark', ...body})).marks : api('api/mark', body);
   },
   saveTask: body => WRITE === 'cloud' ? cloudApi({action: 'task', ...body}) : api('api/task', body),
   deleteTask: id => WRITE === 'cloud' ? cloudApi({action: 'deleteTask', id}) : api('api/task/delete', {id}),
+  // What is stored now: an undo asks before it changes anything (see "undo and redo").
+  marks: async () => WRITE === 'cloud' ? (await cloudApi()).marks : getJson('api/marks'),
+  tasks: async () => WRITE === 'cloud' ? (await cloudApi()).tasks : (await getJson('api/tasks')).tasks,
 };
 
 // ---- files and folders ----
@@ -182,7 +188,10 @@ function rebuild(){
   if (tasks) {
     const personal = {id: 'personal', source: 'personal', name: 'Personal tasks', short: 'Personal', color: courseColor({id: 'personal'}), slot: courseSlot({id: 'personal'}),
                       assignments: [], materials: []};
-    for (const t of Object.values(tasks)) (courses.find(c => c.id === t.course_id) || personal).assignments.push(taskItem(t));
+    // In the order they were made, wherever the store keeps them: a task an undo puts back is stored
+    // last, and still shows where it was.
+    const made = t => Date.parse(t.created_at) || 0;
+    for (const t of Object.values(tasks).sort((x, y) => made(x) - made(y))) (courses.find(c => c.id === t.course_id) || personal).assignments.push(taskItem(t));
     if (personal.assignments.length) courses.push(personal);
   }
   all = courses.flatMap(c => c.assignments.map(a => ({...a, course: c})));
@@ -524,25 +533,30 @@ function closeDrawer(){
 
 // ---- mark as done, with undo ----
 let toastTimer = null;
-function toast(msg, undo){
+// action: what the toast's button does, named by label (Undo, unless said). ms: how long it stays.
+function toast(msg, action, {label = 'Undo', ms = UNDO_MS} = {}){
   clearTimeout(toastTimer);
   $('#toast')?.remove();
   const el = document.createElement('div');
   el.className = 'toast'; el.id = 'toast'; el.setAttribute('role', 'status');
-  el.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button type="button">Undo</button>' : ''}<i class="timer" style="animation-duration:${UNDO_MS}ms"></i>`;
+  // A button for a step of the undo history (offerStep) goes when the next change is made.
+  if (action?.step) el.dataset.step = '1';
+  el.innerHTML = `<span>${esc(msg)}</span>${action ? `<button type="button">${esc(label)}</button>` : ''}<i class="timer" style="animation-duration:${ms}ms"></i>`;
   markEmoji(el);
   document.body.append(el);
-  if (undo) el.querySelector('button').onclick = () => { clearTimeout(toastTimer); el.remove(); undo(); };
-  toastTimer = setTimeout(() => el.remove(), UNDO_MS);
+  if (action) el.querySelector('button').onclick = () => { clearTimeout(toastTimer); el.remove(); action(); };
+  toastTimer = setTimeout(() => el.remove(), ms);
 }
-async function setMark(id, done){
+// as: a mark put back as it was (an undo's or a redo's), in place of one made now. It answers the
+// marks as the server has them after the save, or false when it failed.
+async function setMark(id, done, as){
   const a = byId[id], prev = marks[id];
-  if (done) marks[id] = {marked_at: new Date().toISOString()}; else delete marks[id];
+  if (done) marks[id] = as ? {...as} : {marked_at: new Date().toISOString()}; else delete marks[id];
   refresh();
   try {
-    marks = await backend.mark(id, done, a);
+    const stored = marks = await backend.mark(id, done, a, as);
     refresh();
-    return true;
+    return stored;
   } catch {
     if (prev) marks[id] = prev; else delete marks[id];
     refresh();
@@ -550,13 +564,21 @@ async function setMark(id, done){
     return false;
   }
 }
+const unsavedMark = {};   // id → the step of a ✓ whose save has not answered yet
 function toggleMark(id){
-  const done = !marks[id], a = byId[id];
-  // Show Undo right away; setMark swaps in an error toast if the save fails.
-  // Undo puts focus back on the assignment's ✓ (the toast's button goes with the toast).
-  toast(done ? `Marked “${a.name}” done` : `Unmarked “${a.name}”`,
-    () => setMark(id, !done).then(() => { if (document.activeElement === document.body) document.querySelector(`[data-mark="${CSS.escape(id)}"]`)?.focus(); }));
-  setMark(id, done);
+  const done = !marks[id], a = byId[id], was = marks[id] || null, before = unsavedMark[id];
+  // The step and the toast's Undo are there right away (an undo asked for before the server answers
+  // waits for it); setMark swaps in an error toast if the save fails, and the step goes.
+  const saved = setMark(id, done);
+  const step = unsavedMark[id] = addStep(markStep(done ? `marked “${a.name}” done` : `unmarked “${a.name}”`, id, was), saved.then(async stored => {
+    step.now = stored && stored[id] || null;
+    if (unsavedMark[id] === step) delete unsavedMark[id];
+    // The ✓ clicked again before its first save answered: the mark before this step is the one that
+    // save left on the server (or, if it failed, the one before it), not the page's stand-in for it.
+    if (before) step.was = await before.settled ? before.now : before.was;
+    return !!stored;
+  }));
+  toast(done ? `Marked “${a.name}” done` : `Unmarked “${a.name}”`, offerStep(step));
 }
 function refresh(){ render(); if (drawerId) openDrawer(drawerId); }
 
@@ -605,7 +627,13 @@ function openTaskForm(id){
   taskDialog.showModal();
   $('#tName').focus();
 }
-function refreshTasks(next){ tasks = next; rebuild(); refresh(); }
+function refreshTasks(next){
+  tasks = next;
+  rebuild();
+  // The open drawer's task is gone (an undo took it away, or another device deleted it): it closes.
+  if (drawerId !== null && !byId[drawerId]) closeDrawer();
+  refresh();
+}
 async function saveTask(e){
   e.preventDefault();
   const name = $('#tName').value.trim();
@@ -615,32 +643,179 @@ async function saveTask(e){
     due_at: date ? new Date(`${date}T${time || '23:59'}`).toISOString() : null, all_day: !!date && !time,
     pinned: $('#tPinned').checked};
   if (editingTask) body.id = editingTask;
+  const was = editingTask && tasks?.[editingTask] || null;
   try {
     const r = await backend.saveTask(body);
     taskDialog.close();
     refreshTasks(r.tasks);
-    if (editingTask) toast(`Saved “${name}”`);
-    else toast(`Added “${name}”`, () => backend.deleteTask(r.task.id).then(x => refreshTasks(x.tasks)));
+    // One step for undo, unless Save changed nothing.
+    const step = sameTask(was, r.task) ? null : addStep(taskStep(was ? taskEdit(was, r.task) : `added “${name}”`, r.task.id, was, r.task));
+    toast(editingTask ? `Saved “${name}”` : `Added “${name}”`, offerStep(step));
   } catch {
     toast("Couldn't save the task. Check your connection and try again.");
   }
 }
-async function deleteTask(id){
+function deleteTask(id){
   const removed = tasks?.[id];
   if (!removed) return;
-  try {
-    const r = await backend.deleteTask(id);
+  // The step is there at once, so an undo asked for before the server answers waits for the delete.
+  const saved = backend.deleteTask(id).then(r => {
     if (drawerId === id) closeDrawer();
     refreshTasks(r.tasks);
-    toast(`Deleted “${removed.name}”`, () => backend.saveTask(removed).then(x => refreshTasks(x.tasks)));
-  } catch {
-    toast("Couldn't delete the task.");
-  }
+    toast(`Deleted “${removed.name}”`, offerStep(step));
+    return true;
+  }, () => { toast("Couldn't delete the task."); return false; });
+  const step = addStep(taskStep(`deleted “${removed.name}”`, id, removed, null), saved);
 }
 $('#taskForm').addEventListener('submit', saveTask);
 $('#taskCancel').onclick = () => taskDialog.close();
 taskDialog.addEventListener('click', e => { if (e.target === taskDialog) taskDialog.close(); });
 $('#fab').onclick = () => openTaskForm();
+
+// ---- undo and redo ----
+// Every change you make to your marks, tasks and plan is a step here. Cmd+Z (Ctrl+Z) takes the last
+// one back and Shift+Cmd+Z (Shift+Ctrl+Z, Ctrl+Y) makes it again: about a hundred steps, for as long
+// as the page is open. The view and the theme are not changes to your data, so they are not steps.
+//
+// A step is {label, undo(), redo()}. label says what was done, as the toast names it ("moved Lunch
+// to 3:00 PM"). undo and redo save through the same paths as the change itself (backend here, the
+// plan's queue in planner.js) and answer {ok: true}, or {ok: false, why}:
+//   'failed'    the save did not go through: nothing changed, and the step stays to try again;
+//   'conflict'  what is stored is no longer what the step left (changed on another device, say), and
+//               taking the step back would overwrite that: nothing changes, the step goes, and the
+//               toast says so.
+// Before it changes anything a step asks the server what is stored now, so it never goes by a copy
+// the page has had for a while.
+const UNDO_STEPS = 100;
+const steps = {undo: [], redo: []};
+let stepsMade = 0, travelling = Promise.resolve();
+const holds = [];   // while one of these answers true (a drag on the planner), the keys do nothing
+// Equal as stored: the same values whatever the order of an object's keys. Nothing there is null.
+function same(a, b){
+  if (a == null || b == null) return a == null && b == null;
+  if (typeof a !== 'object' || typeof b !== 'object') return a === b;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) return a.length === b.length && a.every((x, i) => same(x, b[i]));
+  const keys = o => Object.keys(o).filter(k => o[k] !== undefined);
+  const ka = keys(a), kb = keys(b);
+  return ka.length === kb.length && ka.every(k => b[k] !== undefined && same(a[k], b[k]));
+}
+// A change just made, as a step. saved: a promise of whether its save went through; a change whose
+// save failed was never made, so its step goes.
+function addStep(step, saved = true){
+  steps.undo.push(step);
+  if (steps.undo.length > UNDO_STEPS) steps.undo.shift();
+  steps.redo.length = 0;
+  stepsMade++;
+  // A toast still offering an earlier step goes: that one is no longer the next.
+  const old = $('#toast');
+  if (old?.dataset.step) { clearTimeout(toastTimer); old.remove(); }
+  const settle = ok => {
+    if (ok !== false) return true;
+    for (const list of [steps.undo, steps.redo]) { const i = list.indexOf(step); if (i >= 0) list.splice(i, 1); }
+    return false;
+  };
+  step.settled = Promise.resolve(saved).then(settle, () => settle(false));
+  return step;
+}
+// A toast's button for a step: Undo (or Redo), for as long as that step is the next one. The button
+// goes with its toast, so the step is asked to give focus a place (refocus).
+function offerStep(step, dir = 'undo'){
+  return step ? Object.assign(() => { if (steps[dir][steps[dir].length - 1] === step) travel(dir, {refocus: true}); }, {step: true}) : null;
+}
+const DID = {undo: 'Undid', redo: 'Redid'}, BACK = {undo: 'redo', redo: 'undo'};
+// One step back (or forward again). They run one at a time, in the order asked. o: {refocus} from a
+// toast's button.
+function travel(dir, o){
+  return travelling = travelling.then(async () => {
+    const from = steps[dir], to = steps[BACK[dir]], step = from.pop(), at = from.length, toAt = to.length, made = stepsMade;
+    if (!step) return toast(`Nothing to ${dir}`, null, {ms: 2000});
+    let r;
+    try { r = await step.settled ? await step[dir](o) : {ok: false, why: 'gone'}; }
+    catch (err) { console.error(err); r = {ok: false, why: 'failed'}; }
+    // A change made while this ran is the newest step: it cleared what could be redone.
+    const newest = made === stepsMade;
+    if (r.ok) {
+      if (dir === 'redo') to.splice(Math.min(toAt, to.length), 0, step);
+      else if (newest) to.push(step);
+      toast(`${DID[dir]}: ${step.label}`, newest ? offerStep(step, BACK[dir]) : null, {label: dir === 'undo' ? 'Redo' : 'Undo'});
+    } else if (r.why === 'failed') {
+      if (dir === 'undo' || newest) from.splice(Math.min(at, from.length), 0, step);
+      toast(`Couldn't ${dir} that. Check your connection and try again.`);
+    } else if (r.why === 'conflict') {
+      toast(`Can't ${dir}: ${step.label}. It was changed somewhere else since.`);
+    }
+  });
+}
+// Where the keys are the field's own undo while typing: text, not a checkbox or a button.
+const NOT_TEXT = new Set(['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file', 'image']);
+const editingText = el => !!el && (!!el.isContentEditable || el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !NOT_TEXT.has(el.type)));
+// Undo or redo, asked by the keys or by the Mac app's Edit menu (SchoolHub.undo, SchoolHub.redo).
+// true: the page took it: it did it, or left it out on purpose (a form is open over the page, and
+// nothing changes underneath an open form). false: typing in a field, where it is the field's own.
+function requestStep(dir){
+  if (editingText(document.activeElement)) return false;
+  if (!document.querySelector('dialog[open] form') && !holds.some(fn => fn())) travel(dir);
+  return true;
+}
+document.addEventListener('keydown', e => {
+  if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+  const k = String(e.key).toLowerCase();
+  const dir = k === 'z' ? (e.shiftKey ? 'redo' : 'undo') : k === 'y' && e.ctrlKey && !e.metaKey && !e.shiftKey ? 'redo' : '';
+  if (dir && requestStep(dir)) e.preventDefault();
+});
+
+// A ✓ made or taken away. was: the mark before (null for none); now: the one the step left, known
+// once its save has answered. A mark is stored on its own under the assignment's id, so the way
+// back touches only that one: it takes away the mark the step made, or puts back the one it took
+// away, with the time it had (where the server takes it), so the nightly check's answer for that
+// mark still applies. Only while the stored mark is still the one the step left.
+function markStep(label, id, was){
+  const step = {label, id, was, now: null};
+  const go = async (to, from, side, o) => {
+    let stored;
+    try { stored = await backend.marks(); } catch { return {ok: false, why: 'failed'}; }
+    marks = stored;
+    if ((stored[id]?.marked_at || null) !== (from?.marked_at || null)) { refresh(); return {ok: false, why: 'conflict'}; }
+    const left = await setMark(id, !!to, to);
+    if (!left) return {ok: false, why: 'failed'};
+    step[side] = left[id] || null;   // as the server keeps it now, for the way back
+    // A toast's button went with the toast: focus goes to the assignment's ✓.
+    if (o?.refocus && document.activeElement === document.body) document.querySelector(`[data-mark="${CSS.escape(id)}"]`)?.focus();
+    return {ok: true};
+  };
+  step.undo = o => go(step.was, step.now, 'was', o);
+  step.redo = o => go(step.now, step.was, 'now', o);
+  return step;
+}
+// A task added, edited or deleted. was and now: the task before and after (null for none). A task
+// is stored on its own under its id, so the way back touches only that one: it saves the task as
+// it was under the same id (after a delete too: the server keeps the id and the time it was made,
+// and the ✓ of a deleted task was never taken away), or deletes the one the step added. Only while
+// the stored task is still as the step left it. The server stamps each save (updated_at), which is
+// not something you set, so it is not compared.
+const TASK_FIELDS = ['name', 'course_id', 'due_at', 'all_day', 'notes', 'created_at'];
+const sameTask = (a, b) => !a || !b ? !a && !b : pinnedTask(a) === pinnedTask(b) && TASK_FIELDS.every(k => same(a[k], b[k]));
+const taskEdit = (was, now) => sameTask({...was, pinned: pinnedTask(now)}, now)
+  ? `${pinnedTask(now) ? 'pinned' : 'unpinned'} “${now.name}”` : `edited “${now.name}”`;
+function taskStep(label, id, was, now){
+  const step = {label, id, was, now};
+  const go = async (to, from, side) => {
+    let stored;
+    try { stored = await backend.tasks(); } catch { return {ok: false, why: 'failed'}; }
+    if (!sameTask(stored?.[id], from)) { refreshTasks(stored || {}); return {ok: false, why: 'conflict'}; }
+    try {
+      const r = to ? await backend.saveTask(to) : await backend.deleteTask(id);
+      refreshTasks(r.tasks);
+      step[side] = to ? r.task : null;   // as the server keeps it now, for the way back
+      return {ok: true};
+    } catch { return {ok: false, why: 'failed'}; }
+  };
+  step.undo = () => go(step.was, step.now, 'was');
+  step.redo = () => go(step.now, step.was, 'now');
+  return step;
+}
+// ---- end of undo and redo ----
 
 // ---- sync now ----
 // Never on a public copy: syncs run on the Mac, which has your Canvas login.
@@ -714,6 +889,13 @@ window.SchoolHub = {
   },
   isDone, needsAttention, fmtDue, esc, dot, typingIn, toast, openDrawer, api, markEmoji,
   drawerOpen: () => drawerId !== null,
+  // Undo and redo ("undo and redo", above). planner.js adds the plan's changes as steps (addStep,
+  // offerStep for a toast's button, same to compare values) and holds the keys during a drag
+  // (holdUndo). undo() and redo() are also for the Mac app's Edit menu: each answers true when the
+  // page took the request and false when it is the focused field's own (typing).
+  same, addStep, offerStep, holdUndo: fn => { holds.push(fn); },
+  undo: () => requestStep('undo'),
+  redo: () => requestStep('redo'),
   on(name, fn){ hooks[name].push(fn); if (name === 'ready' && readied) fn(); },
 };
 // planner.js not there at all (a server that does not serve it): no planner, rather than a Day view
