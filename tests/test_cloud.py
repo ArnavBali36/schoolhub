@@ -385,8 +385,8 @@ class TursoTest(unittest.TestCase):
 class ServerRun:
     """server.py itself, run from a throwaway SchoolHub folder whose state/cloud.env names the fake."""
 
-    PAGE_FILES = ("server.py", "cloud.py", "plan.py", "dashboard.html", "dashboard.js", "theme-init.js", "bar.js",
-                  "favicon.svg")
+    PAGE_FILES = ("server.py", "cloud.py", "plan.py", "autosync.py", "dashboard.html", "dashboard.js", "theme-init.js",
+                  "bar.js", "favicon.svg")
     WITHOUT = ()               # tables of turso-schema.sql the fake database lacks
     SEEDED = ("marks", "tasks", "plan")  # what the server must have copied up before the tests start
     LOCAL_PLAN = {"week:sun": {"meals": {"lunch": {"start": "16:00", "end": "17:00", "place": "Chipotle", "off": False}},

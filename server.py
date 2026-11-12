@@ -2,8 +2,9 @@
 """SchoolHub local server: http://localhost:8722
 
 Serves the dashboard and your class files, saves "mark as done" clicks to state/marks.json
-(which the nightly sync double-checks), stores your own tasks in state/tasks.json and the day planner in
-state/plan.json. Listens on 127.0.0.1 only.
+(which the next sync double-checks), stores your own tasks in state/tasks.json and the day planner in
+state/plan.json. Syncs by itself whenever the last good sync is more than 12 hours old and the Mac is
+awake (autosync.py). Listens on 127.0.0.1 only.
 """
 import json
 import mimetypes
@@ -19,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
+import autosync
 import cloud
 import plan
 
@@ -47,25 +49,31 @@ FILE_CSP = ("sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsaf
 PDF_CSP = ("default-src 'self'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
            "connect-src 'none'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 SCRIPT_TYPE = re.compile(r"(java|ecma|j|live)script", re.I)  # text/javascript and the like, not postscript
-STALE_HOURS = 20
 LOCK = threading.Lock()
-SYNC_LOCK = threading.Lock()
+SYNC_LOCK = threading.Lock()  # guards sync_state and AUTO; never held while a sync or the network is waited on
 sync_state = {"running": False, "started_at": None, "finished_at": None, "ok": None, "output": ""}
+AUTO = autosync.AutoSync(time.time())  # when the server syncs by itself (autosync.py)
 
 
 def sync_log():
-    """Where each sync the server runs (Sync now, the catch-up) adds its output: state/sync.log,
-    where the nightly sync's cron line can add its own (README)."""
+    """Where each sync the server runs (Sync now, or by itself) adds its output: state/sync.log,
+    where a cron line can add its own (README)."""
     return HUB / "state" / "sync.log"
 
 
-def run_sync():
-    started = datetime.now(timezone.utc).isoformat()
+def sync_py():
+    """Runs sync.py to its end: (whether it got there, what it printed)."""
     try:
         p = subprocess.run([sys.executable, str(HUB / "sync.py")], capture_output=True, text=True, timeout=1800)
-        ok, out = p.returncode == 0, (p.stdout + p.stderr).strip()
+        return p.returncode == 0, (p.stdout + p.stderr).strip()
     except Exception as e:
-        ok, out = False, str(e)
+        return False, str(e)
+
+
+def run_sync(clock=time.time):
+    began = clock()
+    started = datetime.fromtimestamp(began, timezone.utc).isoformat()
+    ok, out = sync_py()
     # Kept where the page's "Sync failed" points, since the output is otherwise only in memory.
     try:
         with sync_log().open("a") as f:
@@ -75,7 +83,77 @@ def run_sync():
     except OSError:
         pass
     with SYNC_LOCK:
+        good = AUTO.finished(ok, began, clock(), synced())
+        if not good:
+            log(f"sync {'left something unread' if ok else 'failed'} ({AUTO.failures} in a row): the next try "
+                f"by itself is in {autosync.retry_delay(AUTO.failures) // 60} min at the earliest")
         sync_state.update(running=False, finished_at=datetime.now(timezone.utc).isoformat(), ok=ok, output=out[-4000:])
+
+
+def synced():
+    """The sync that wrote the data.js now on disk: when it began and whether it read every source.
+    Read from the file at each look, so a sync run from Terminal counts, and a restart forgets nothing."""
+    return autosync.last_sync(HUB / "data.js")
+
+
+def in_background(fn):
+    threading.Thread(target=fn, daemon=True).start()
+
+
+def start_sync(manual=False):
+    """Starts a sync unless one is running: never two at once. The caller holds SYNC_LOCK."""
+    if sync_state["running"]:
+        return False
+    if manual:
+        AUTO.manual()
+    sync_state.update(running=True, started_at=datetime.now(timezone.utc).isoformat(), ok=None, output="")
+    in_background(run_sync)
+    return True
+
+
+def auto_on():
+    """Whether the server syncs by itself: not before config.json exists (nothing to sync with), and
+    not with SCHOOLHUB_AUTOSYNC=0 (a test copy beside the real one would sync into the same class folders)."""
+    return os.environ.get("SCHOOLHUB_AUTOSYNC", "1").strip().lower() not in ("0", "off", "no", "false") \
+        and (HUB / "config.json").is_file()
+
+
+def canvas_url():
+    try:
+        return json.loads((HUB / "config.json").read_text()).get("canvas_base_url")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def sync_status(now=None):
+    """What GET /api/sync answers: the sync the server last ran, as ever, plus data_at (the time in
+    the data.js now on disk, so an open page can tell that a newer one is there) and auto (when the
+    next sync will start by itself: AutoSync.status)."""
+    now = time.time() if now is None else now
+    with SYNC_LOCK:
+        on_disk = synced()
+        return {**sync_state, "data_at": on_disk[2],
+                "auto": AUTO.status(now, on_disk, sync_state["running"], auto_on())}
+
+
+def auto_tick(now):
+    """One look: starts a sync if the last good one is over 12 hours old, the Mac has been awake a
+    moment, no retry is being waited for and Canvas can be reached. Returns whether it started one."""
+    with SYNC_LOCK:
+        if sync_state["running"] or not auto_on() or not AUTO.due(now, synced()):
+            return False
+    # Asked outside the lock (it waits on the network). Offline is not a failed try: the next look asks
+    # again, so the sync starts within a minute or so of the network coming back.
+    url = canvas_url()
+    online = not url or autosync.reachable(url)
+    with SYNC_LOCK:
+        AUTO.offline = not online
+        if not online or not start_sync():
+            return False
+        began, complete, _ = synced()
+    log("syncing by itself: " + (f"the last good sync was {(now - began) / 3600:.1f} hours ago" if complete
+                                 else "the last sync left something unread, or there is none yet"))
+    return True
 
 
 def school_root():
@@ -184,7 +262,7 @@ def load(name):
         try:
             data = CLOUD.get_all(name)
             keep_copy(name, data)
-            write_state(FILES[name], data)  # local copy for offline reads and the nightly sync
+            write_state(FILES[name], data)  # local copy for offline reads and the next sync
             return data
         except (OSError, RuntimeError):
             pass
@@ -274,8 +352,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         if url.path == "/api/sync":
-            with SYNC_LOCK:
-                return self._json(sync_state)
+            return self._json(sync_status())
         if url.path == "/api/tasks":
             with LOCK:
                 return self._json({"tasks": load("tasks")})
@@ -383,10 +460,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/sync":
             with SYNC_LOCK:
-                if not sync_state["running"]:
-                    sync_state.update(running=True, started_at=datetime.now(timezone.utc).isoformat(), ok=None, output="")
-                    threading.Thread(target=run_sync, daemon=True).start()
-                return self._json(sync_state)
+                start_sync(manual=True)
+            return self._json(sync_status())
 
         if path in ("/api/open", "/api/reveal"):
             p = allowed_path(body.get("path") or "")
@@ -399,20 +474,20 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, b"not found")
 
 
-def catch_up_loop():
-    """If the nightly sync didn't land (asleep, network hiccup), sync once we notice."""
+def auto_sync_loop(clock=time.time, sleep=time.sleep, awake=time.monotonic):
+    """Looks once a minute whether a sync is due (auto_tick). `awake` is a clock that stops while
+    the Mac sleeps: a wait that took longer by the wall clock than by that one was partly slept
+    through, and the Mac is then given a moment (autosync.SETTLE) before a sync starts."""
     while True:
-        time.sleep(900)
+        before, up = clock(), awake()
+        sleep(autosync.TICK)
+        now = clock()
         try:
-            age_hours = (time.time() - (HUB / "data.js").stat().st_mtime) / 3600
-        except OSError:
-            age_hours = 1e6
-        with SYNC_LOCK:
-            due = age_hours > STALE_HOURS and 6 <= datetime.now().hour < 23 and not sync_state["running"]
-            if due:
-                sync_state.update(running=True, started_at=datetime.now(timezone.utc).isoformat(), ok=None, output="")
-        if due:
-            threading.Thread(target=run_sync, daemon=True).start()
+            with SYNC_LOCK:
+                AUTO.waited(now, now - before, awake() - up)
+            auto_tick(now)
+        except Exception as e:  # the loop outlives anything a look runs into
+            log(f"looking whether a sync is due failed: {e}")
 
 
 def seed_loop():
@@ -430,5 +505,5 @@ def seed_loop():
 if __name__ == "__main__":
     if CLOUD:
         threading.Thread(target=seed_loop, daemon=True).start()
-    threading.Thread(target=catch_up_loop, daemon=True).start()
+    threading.Thread(target=auto_sync_loop, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

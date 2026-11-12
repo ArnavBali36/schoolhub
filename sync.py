@@ -3,11 +3,12 @@
 and writes data.js for dashboard.html.
 
 Never deletes anything, and never overwrites a downloaded file you've edited.
-Stdout only lists things that need attention, so a nightly cron job stays quiet when
+Stdout only lists things that need attention, so a cron job stays quiet when
 everything is fine. A run summary goes to stderr.
 
 Usage: python3 sync.py [--open]
 """
+import contextlib
 import html
 import json
 import os
@@ -671,17 +672,41 @@ def attention(courses, flagged, changes, store, errors, now):
     return lines
 
 
+@contextlib.contextmanager
+def one_at_a_time():
+    """Holds state/sync.lock while a sync runs, so two never run at once (the server's, one from
+    Terminal, a cron line): both would download the same files and write the same data.js. The
+    second one stops at once. The lock goes when the process does, so a sync that was killed leaves
+    nothing to clear."""
+    try:
+        import fcntl
+    except ImportError:  # not a Unix: no lock
+        yield
+        return
+    with open(STATE / "sync.lock", "w") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            sys.exit("Another sync is already running; this one stops here.")
+        yield
+
+
 def main():
     cfg = load_json(HUB / "config.json", None)
     if not cfg:
         sys.exit(f"Missing or invalid {HUB / 'config.json'}")
     STATE.mkdir(exist_ok=True)
+    with one_at_a_time():
+        run(cfg)
+
+
+def run(cfg):
     started = time.time()
     now = datetime.now(timezone.utc)
 
     cv = Canvas(cfg["canvas_base_url"], cfg["canvas_token"])
     store = FileStore(cv.download)
-    errors = store.errors
+    errors = []  # sources and courses that could not be read; the files that could not be saved join them below
     previous = load_previous()
     watchdog(int(os.environ.get("SCHOOLHUB_TIMEOUT", "900")))
     courses = []
@@ -699,11 +724,17 @@ def main():
     finally:
         signal.alarm(0)
     store.save()
+    # Whether every source and course was read. server.py goes by this: an incomplete sync is tried
+    # again soon, not in 12 hours. A file that could not be saved (too big, say) does not count: it
+    # would fail the same way every time.
+    complete = not errors
+    errors += store.errors
     add_tasks(courses, now)
     flagged = apply_marks(courses)
     changes = detect_changes(courses, previous)
 
-    data = {"generated_at": now.isoformat(), "errors": errors, "new_files": store.new, "courses": courses}
+    data = {"generated_at": now.isoformat(), "complete": complete, "errors": errors, "new_files": store.new,
+            "courses": courses}
     data_js = "window.SCHOOL_DATA = " + json.dumps(data) + ";\n"
     tmp = HUB / "data.js.tmp"
     tmp.write_text(data_js)
