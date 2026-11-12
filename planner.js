@@ -25,7 +25,8 @@
   const FLAG_LANE_PX = 92;       // the lane on the right kept for flags of things due at a time
   const TIME_PAD = 15;           // the timeline's margins above and below (.ptime) and the grid's border
   const SNAP = 15;              // minutes a drag on the timeline snaps to
-  const MIN_LEN = 15;            // the shortest block the server keeps
+  const MIN_LEN = 15;            // the shortest block a drag makes or leaves
+  const LEAST = 5;               // the shortest block there is: one step of the clock (plan.py MIN_MINUTES)
   const CLICK_PX = 4;            // a pointer that moves less than this clicked
   const LONG_PRESS_MS = 450;     // a touch held this long without moving starts a drag
   const TOUCH_SLOP = 8;          // a touch that moves this far before then is a scroll
@@ -83,7 +84,7 @@
   function spanError(s, e){
     if (s == null || e == null) return 'Give a start and an end time.';
     if (e <= s) return 'The end must be after the start.';
-    if (e - s < MIN_LEN) return 'A block lasts at least 15 minutes.';
+    if (e - s < LEAST) return `A block lasts at least ${LEAST} minutes.`;
     return '';
   }
 
@@ -110,13 +111,13 @@
   const flag = v => v === true || (typeof v === 'number' && v !== 0) || (typeof v === 'string' && v !== '');
   // A value's blocks: only objects, at most the server's 40.
   const blocksOf = v => (Array.isArray(v?.blocks) ? v.blocks : []).filter(isObject).slice(0, LIMIT.blocks);
-  // A start and end the server keeps: HH:MM in 5-minute steps within the day, the end at least 15
+  // A start and end the server keeps: HH:MM in 5-minute steps within the day, the end at least 5
   // minutes after the start. The page's own checks come first; this only keeps a slip from a 400.
   function cleanSpan(start, end){
     let s = toMin(start), e = toMin(end);
-    s = isNaN(s) ? 540 : Math.max(0, Math.min(1440 - MIN_LEN, Math.round(s / 5) * 5));
+    s = isNaN(s) ? 540 : Math.max(0, Math.min(1440 - LEAST, Math.round(s / 5) * 5));
     e = isNaN(e) ? s + 60 : Math.min(1440, Math.round(e / 5) * 5);
-    if (e < s + MIN_LEN) e = Math.min(1440, s + MIN_LEN);
+    if (e < s + LEAST) e = Math.min(1440, s + LEAST);
     return [toTime(s), toTime(e)];
   }
   function cleanItems(items, seen){

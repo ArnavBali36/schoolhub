@@ -295,6 +295,23 @@ class PlannerPageTest(unittest.TestCase):
         # Assignment flags still open the drawer.
         self.assertIn("if (due) return SH.openDrawer(due.dataset.planDue, e.detail === 0);", PLANNER)
 
+    def test_a_typed_block_may_be_as_short_as_one_step_of_the_clock(self):
+        # 2026-11-11: a ten-minute block typed into the editor was refused ("at least 15 minutes").
+        # The shortest block is now one 5-minute step, here and in plan.py; a drag still makes 15.
+        self.assertIn("const LEAST = 5;", PLANNER)
+        self.assertIn("const MIN_LEN = 15;", PLANNER)
+        self.assertIn("if (e - s < LEAST) return `A block lasts at least ${LEAST} minutes.`;", PLANNER)
+        self.assertIn("if (e < s + LEAST) e = Math.min(1440, s + LEAST);", PLANNER)
+        self.assertNotIn("at least 15 minutes", PLANNER)
+        import sys
+        sys.path.insert(0, str(REPO))
+        import plan
+        self.assertEqual(plan.MIN_MINUTES, 5)
+        day = {"blocks": [{"id": "r8c1d2e3f4", "type": "deep", "title": "Shower", "start": "22:30", "end": "22:40"}]}
+        cleaned, error = plan.clean_plan("day:2026-11-12", day)
+        self.assertIsNone(error)
+        self.assertEqual([(b["start"], b["end"]) for b in cleaned["blocks"]], [("22:30", "22:40")])
+
     def test_review_fixes_of_2026_11_08(self):
         # Resize and move go by the pointer's change since the press, and only the change is kept
         # within the hours: a handle drawn away from its time never jumps, a cut block never snaps in.
