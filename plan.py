@@ -19,7 +19,7 @@ WEEKDAYS = ("sun", "mon", "tue", "wed", "thu", "fri", "sat")
 TYPES = {"deep": "Deep work", "social": "Socialize", "other": "Block"}
 MEALS = {"breakfast": ("11:00", "12:00"), "lunch": ("16:00", "17:00"), "dinner": ("18:00", "19:00")}
 MAX_BLOCKS, MAX_ITEMS, MAX_REPEATS = 40, 50, 100
-MIN_MINUTES = 15
+MIN_MINUTES = 5   # one step of the clock: the page's drags make 15 or more, a typed time may be shorter
 MAX_RANGE_DAYS = 62
 AROUND_TODAY = 7
 
@@ -92,7 +92,7 @@ def _times(src, out, required):
         if length <= 0:
             raise Refused("a block must end after it starts")
         if length < MIN_MINUTES:
-            raise Refused("a block lasts at least 15 minutes")
+            raise Refused(f"a block lasts at least {MIN_MINUTES} minutes")
 
 
 def _text(src, field, limit):

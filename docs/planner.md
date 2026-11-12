@@ -71,7 +71,7 @@ rule is refused with 400 and a short reason; nothing is silently changed except 
   day must be a real calendar date.
 - **Times:**
   - written `HH:MM`, from `00:00` to `24:00`, minutes a multiple of 5;
-  - `start < end`, and each block lasts at least 15 minutes;
+  - `start < end`, so the shortest block is 5 minutes (a drag on the timeline still snaps to 15);
   - a time is not limited to the shown range.
 - **settings:** `day_start` is an integer from 0 to 23, and `day_end` an integer from 1 to 24 that is
   at least 4 hours after `day_start`.
