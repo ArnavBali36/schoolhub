@@ -571,11 +571,13 @@
   function placeNow(){
     const line = grid.querySelector('.pnow'), s = settings(), m = minutesNow();
     const on = isToday(shown) && m >= s.day_start * 60 && m <= s.day_end * 60;
-    // ---- style-b (markup only): where today's hatching of the hours gone by ends (--now), and the
-    // blocks that are on now (.now shows a "Now" chip).
+    // ---- style-b (markup only): where today's hatching of the hours gone by ends (--now), the
+    // blocks that are on now (.now shows a "Now" chip), and the hour label the now line's pill
+    // would half cover (.near-now hides it).
     if (on) grid.style.setProperty('--now', nowTop() + 'px'); else grid.style.removeProperty('--now');
     const live = new Set(on ? entriesOn(shown).filter(e => !e.off && !e.skip && e.start <= m && m < e.end).map(e => e.ref) : []);
     for (const b of grid.querySelectorAll('.pblock[data-ref]')) b.classList.toggle('now', live.has(b.dataset.ref));
+    for (const h of els.hours.children) h.classList.toggle('near-now', on && Math.abs(parseFloat(h.style.top) - nowTop()) < 15);
     // ---- end style-b ----
     if (!on) return line?.remove();
     const el = line || grid.appendChild(Object.assign(document.createElement('div'), {className: 'pnow'}));

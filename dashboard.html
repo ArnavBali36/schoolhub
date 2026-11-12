@@ -101,7 +101,7 @@
   --tray:#0e1014;--cell:#1a1d24;--cell-line:rgb(255 255 255 / .13);--hatch:rgb(255 255 255 / .075);--hatch-fill:rgb(0 0 0 / .32);
   --neu:-3px -3px 8px rgb(255 255 255 / .022),5px 8px 20px -6px rgb(0 0 0 / .6),0 1px 2px rgb(0 0 0 / .4);
   --neu-sm:-2px -2px 5px rgb(255 255 255 / .018),2px 4px 10px -3px rgb(0 0 0 / .5),0 1px 1.5px rgb(0 0 0 / .35);
-  --k-meal-a:#f7bb62;--k-meal-b:#f0905a;--k-social-a:#56d39e;--k-social-b:#28b47a;--k-other-a:#c9dbff;--k-other-b:#9dbbfb;
+  --k-meal-a:#f7bb62;--k-meal-b:#f0905a;--k-social-a:#56d39e;--k-social-b:#28b47a;--k-other-a:#bdd0fb;--k-other-b:#93b2f6;
   --pb-rim:rgb(255 255 255 / .3);--pb-shade:rgb(0 0 0 / .4);--pb-lift:rgb(0 0 0 / .7);
   --ink-pill:#e8eaee;--on-ink-pill:#0b0d11;
   color-scheme:dark;
@@ -180,7 +180,7 @@
 :root.reduce-transparency,:root.reduce-transparency[data-theme]{--glass:var(--surface);--glass-thick:var(--surface);--glass-blur:none;--glass-blur-thick:none}
 *{box-sizing:border-box}
 /* Room for the bar above and the + button below a link or field the page scrolls to or focuses. */
-html{scroll-padding-top:calc(var(--bar-height) + 16px);scroll-padding-bottom:calc(96px + env(safe-area-inset-bottom))}
+html{scroll-padding-top:calc(var(--bar-height) + 16px);scroll-padding-bottom:calc(96px + env(safe-area-inset-bottom));color:var(--text)}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--font-text);-webkit-font-smoothing:antialiased}
 /* A faint tint of the accent at the top of the page, on a fixed layer that never repaints on scroll. */
 body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
@@ -495,8 +495,8 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 .ph-date{flex:1 1 auto;margin:0;font:350 20px/1.2 var(--font-rounded);letter-spacing:-.015em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .ph-date .short{display:none}
 @container planner (max-width:520px){.ph-date .long{display:none}.ph-date .short{display:inline}}
-/* A phone: Today is its icon alone, and Week… its word alone. */
-@container planner (max-width:400px){#planWeek svg{display:none}#planToday{width:30px;padding:0;gap:0;font-size:0}}
+/* A phone: Today and Week… are their words alone, so the three still fit on the date's line. */
+@container planner (max-width:400px){#planWeek svg,#planToday svg{display:none}}
 .ph-actions{display:flex;align-items:center;gap:6px;flex:none;margin-left:auto}
 /* The week of the day on show: a chip a day (the weekday over the date), with the day before and
    after on the round buttons at its ends. The day on show is solid: in the accent when it is today
@@ -536,6 +536,8 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 .ptime{position:relative;margin:7px 0}
 .phours{position:absolute;left:0;top:0;bottom:0;width:58px}
 .phour{position:absolute;right:10px;transform:translateY(-50%);font-size:11px;line-height:1;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+/* The label the now line's pill would half cover gives way to it. */
+.phour.near-now{visibility:hidden}
 /* A soft cell for each hour, as tall as the hour less 2 px (a block of an hour covers it): --cell-shape
    draws a rounded rectangle on every --hour from gradients alone (two bands and four corners), so it
    takes the theme's --cell and also masks the hatching below. Vertical drags on empty time scroll on
@@ -610,9 +612,11 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 .pblock.now .pb-head :is(.pb-kind,.pb-n,.pb-st){display:none}
 /* A block's kind as its initial, before the title: only where the block is too narrow for the bubble. */
 .pb-ki{display:none;flex:none;align-self:center;min-width:15px;padding:0 3px;border-radius:4px;background:var(--pb-chip);color:var(--pb-chip-ink);font-size:9.5px;font-weight:700;line-height:14px;text-align:center}
-/* Short blocks: one line, "Lunch · Chipotle · 4–5 PM", cut with an ellipsis, in the middle of the bar. */
-.pblock:is(.sm,.xs){display:flex;align-items:center}
-.pblock:is(.sm,.xs) .pb-body{flex:1}
+/* Short blocks: one line, "Lunch · Chipotle · 4–5 PM", cut with an ellipsis, in the middle of the
+   bar; so is the one line of a taller block that shows no items. */
+.pblock:is(.sm,.xs),.pblock.md:not(:has(.pb-items,.pb-more)){display:flex;align-items:center}
+.pblock:is(.sm,.xs,.md) .pb-body{flex:1}
+.pblock.md:not(:has(.pb-items,.pb-more))::before,.pblock.md:not(:has(.pb-items,.pb-more))::after{top:50%;margin-top:-10px}
 .pblock.sm{padding-top:2px;padding-bottom:2px;font-size:12px}
 .pblock.xs{padding:1px 6px 1px 6px;border-radius:9px;font-size:11px;line-height:16px}
 .pblock:is(.xs,.sm) .pb-head{align-items:center}
@@ -644,7 +648,7 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
   .pblock:is(.md,.sm)::before{display:none}
   .pblock:is(.md,.sm)::after{left:6px;width:12px;height:12px;border-radius:0}
   .pblock.md::after{top:6px}
-  .pblock.sm::after{margin-top:-6px}
+  .pblock.sm::after,.pblock.md:not(:has(.pb-items,.pb-more))::after{top:50%;margin-top:-6px}
   .pblock:is(.md,.sm) :is(.pb-body,.pb-more){margin-left:17px}
   .pblock.md .pb-items{margin-left:11px}
 }
@@ -659,10 +663,10 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 .pb-rs.top{top:0}.pb-rs.bottom{bottom:0}
 .pb-rs::after{content:"";position:absolute;left:50%;width:22px;height:3px;margin-left:-11px;border-radius:2px;background:var(--pb-ink);opacity:0;transition:opacity 120ms ease}
 .pb-rs.top::after{top:2px}.pb-rs.bottom::after{bottom:2px}
-.pblock:hover .pb-rs::after{opacity:.55}
+.pblock:hover .pb-rs::after{opacity:.4}
 .pblock:is(.xs,.nar) .pb-rs{height:4px}.pblock:is(.xs,.nar) .pb-rs::after{display:none}
 /* Picked up, the bar lifts off the cells, turns a little see-through with a bright rim, and tilts. */
-.pblock.dragging,.pblock.armed{z-index:4;cursor:grabbing;opacity:.93;transform:rotate(-1.1deg) scale(1.012);
+.pblock.dragging,.pblock.armed{z-index:4;cursor:grabbing;opacity:.93;transform:rotate(-1.1deg) scale(1.012);will-change:transform;
   box-shadow:inset 0 0 0 1.5px var(--pb-bubble-rim),inset 0 1px 0 var(--pb-rim),0 3px 6px var(--pb-shade),0 20px 32px -12px var(--pb-lift)}
 .pblock.ghost{z-index:4;opacity:.9;pointer-events:none;outline:1.5px dashed var(--pb-edge);outline-offset:-1.5px}
 .pblock.shown{z-index:3;outline:2px solid var(--accent);outline-offset:1px}

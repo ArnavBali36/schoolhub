@@ -358,6 +358,9 @@ class PlannerPageTest(unittest.TestCase):
         # The block that is on now says so, each minute.
         self.assertIn("for (const b of grid.querySelectorAll('.pblock[data-ref]')) b.classList.toggle('now', live.has(b.dataset.ref));", PLANNER)
         self.assertIn('.pblock.now .pb-head::after{content:"\\2022\\00a0Now";margin-left:auto}', HTML)
+        # The hour label under the now line's pill gives way to it.
+        self.assertIn("h.classList.toggle('near-now', on && Math.abs(parseFloat(h.style.top) - nowTop()) < 15);", PLANNER)
+        self.assertIn(".phour.near-now{visibility:hidden}", HTML)
 
     def test_the_week_strip_shows_and_picks_a_day(self):
         self.assertIn('<div class="ph-week" id="planDays" role="group" aria-label="The week of this day"></div>', PLANNER)
