@@ -223,6 +223,41 @@ size, and clicking an event must show more about it.
 - **Assignment markers** open the assignment's drawer, as before. The editor is reached from the
   details' Edit, and opens straight away for a block just created.
 
+### Added 2026-11-11: soft cells, vivid bars
+
+The learner asked for the page to look more like three references they sent, the calendar cards most
+of all, with the layout and every behaviour kept. This is the look; nothing above changes in what
+the planner does.
+
+- **Header:** the date is a large light heading with **Today**, **Week…** and **+ Block** as pills
+  beside it, each with a small icon. Under it is the week of the day on show, Sunday to Saturday, a
+  chip a day (the weekday over the date), between the ‹ and › buttons, which still step a day. A
+  chip shows its day. The day on show is solid: in the accent when it is today (which also carries a
+  dot), in ink when it is another day.
+- **Timeline:** each hour is a soft rounded cell on a tray, drawn from gradients alone (`--cell-shape`),
+  with a dotted line at the half hour. Today's hours gone by are hatched, down to the now line.
+- **Now:** a dashed line in `--accent` across the cells, from a small solid pill in the hour rail
+  that says the time. It runs under the blocks, and the block that is on says "Now".
+- **Blocks** are bars in a gradient per kind, each with its own ink (4.5:1 on both ends of the
+  gradient, checked in the tests in light, dark and red):
+
+  | Kind | Bar | Ink |
+  |---|---|---|
+  | Meal | amber to coral (`--k-meal-a`, `--k-meal-b`) | dark brown |
+  | Deep work | deep violet | white |
+  | Socialize | green | dark green |
+  | Block | pale blue | navy |
+
+  A bar has its kind's icon in a round bubble at the left, then the title and the time, and one
+  white chip at the right: "Now", else "2 of 3 done" where it has items, else the kind's name where
+  the title does not say it, else "+N". A tall block's items sit on a nested panel. As a block gets
+  shorter or narrower the decorations go: one line with a smaller bubble, then the icon alone, then
+  (under 150 px wide) the kind's initial as before.
+- **Dragging:** the bar lifts with a bright rim, turns a little see-through and tilts about a degree.
+  Nothing on a block is blurred.
+- **Night:** the bars are dark reds to ambers with bright ink of their own, and the chip is bright
+  with dark ink. No colour has blue.
+
 ### Changing a repeating block or a meal
 
 Moving or resizing a repeating block or a meal on the timeline changes that date only. The editor
