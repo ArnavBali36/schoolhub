@@ -77,7 +77,8 @@ open dashboard.html
 - **Sync now**, next to the time of the last sync (in the header, or above the lists on a phone);
   each sync the server runs adds its output to `state/sync.log`, which is where "Sync failed" points
 - files opening in their real apps, and folders in Finder
-- a **catch-up sync** if the data is more than 20 hours old
+- an **automatic sync** whenever the last good one is more than 12 hours old and the Mac is awake
+  (see [Automatic sync](#automatic-sync))
 
 It binds to `127.0.0.1` only, refuses cross-site requests (custom-header + Host checks), and never
 serves its own folder (however its name is spelled: macOS ignores case) or any hidden file or folder,
@@ -97,10 +98,12 @@ refuses to start a launch agent whose log file is inside a folder it protects, s
 service then fails with `EX_CONFIG`).
 
 To run a second copy beside it (say, a test folder), give it another port:
-`SCHOOLHUB_PORT=8733 .venv/bin/python server.py`.
+`SCHOOLHUB_PORT=8733 .venv/bin/python server.py`. If that folder has a `config.json`, add
+`SCHOOLHUB_AUTOSYNC=0` so the copy never syncs by itself: it would download into the same class
+folders as the real one.
 
 **After updating SchoolHub** (`git pull`), restart the server: it reads its list of page files (and
-its own code, such as `plan.py`) when it starts, so an old one serves the new page without its scripts and the dashboard stays blank. If
+its own code, such as `plan.py` and `autosync.py`) when it starts, so an old one serves the new page without its scripts and the dashboard stays blank. If
 it runs at login: `launchctl kickstart -k gui/$(id -u)/com.schoolhub.server`.
 
 ## The day planner
@@ -250,16 +253,66 @@ The checks of the dashboard's file and folder links run its own code under Node 
 installed, and are skipped otherwise. The Turso checks run against a stand-in for its HTTP API
 (`tests/fake_turso.py`) over a throwaway SQLite file, never a real database.
 
-## Nightly sync
+## Automatic sync
 
-`sync.py` prints nothing unless something needs your attention, which makes it a good cron job:
+While `server.py` runs, it syncs by itself whenever the last good sync is more than 12 hours old and
+the Mac is awake, at any hour of the day. It looks once a minute, so there is no set time to miss:
+open the lid after a night and a sync starts two to three minutes later; leave the Mac on and it
+syncs twice a day. The rule is `next_sync` in `autosync.py`; the loop is in `server.py`.
+
+- **The last good sync is read from `data.js` itself**: the time the sync began (`generated_at`) and
+  whether it read every source (`complete`). So a sync you run from Terminal counts, and restarting
+  the server forgets nothing. The file's date is not used: it changes when the file is copied or
+  restored, and a sync that could not reach Canvas changes it too (that sync still writes `data.js`,
+  without what it could not read, and marks it incomplete).
+- **Just awake, it waits two minutes.** After the server starts or the Mac wakes, a sync starts only
+  once the Mac has been awake for two minutes in one stretch. That gives Wi-Fi time to come back,
+  and it leaves out the short wakes a sleeping Mac makes to keep its network alive (seconds long,
+  seldom over a minute), which would freeze a sync halfway.
+- **Offline, it waits for the network.** Before it starts, it checks that a connection to your
+  Canvas server can be opened. If not, nothing is run and nothing counts as failed; it checks again
+  a minute later, so the sync starts soon after the network is back.
+- **After a failure it tries again** 5 minutes later, then after 10, 20 and 40 minutes, and from
+  then on once an hour until a sync is good again. A failure is a sync that did not run to its end,
+  or one that left a source or a course unread. A file that could not be saved (too big, say) is
+  listed with the sync's issues but does not count: it would fail the same way every time. A good
+  sync or pressing Sync now starts the count again.
+- **Never two at once.** The server runs one sync at a time, and `sync.py` holds `state/sync.lock`
+  while it runs: a second one, started from Terminal or cron meanwhile, stops at once.
+- **Off** until `config.json` exists, and with `SCHOOLHUB_AUTOSYNC=0`.
+
+`GET /api/sync` tells a page what to say. Beside `running`, `started_at`, `finished_at`, `ok` and
+`output` (the sync the server last ran) it gives `data_at`, the time in the `data.js` now on disk,
+and `auto`:
+
+```json
+{"on": true, "every_hours": 12, "state": "waiting", "next_at": "2026-11-12T08:34:04+00:00",
+ "last_good_at": "2026-11-11T20:34:04+00:00", "failures": 0}
+```
+
+`state` is `waiting` (the next sync is 12 hours after the last good one), `retrying` (after a
+failure), `settling` (just awake), `due` (at the next look), `offline` (due, waiting for the
+network), `running` or `off`. `next_at` is when the next sync may start, or null when no time can be
+given (`running`, `offline`, `off`). `last_good_at` is null when there has been no good sync, or the
+latest one left something unread.
+
+**While the lid is closed** the Mac is asleep and runs nothing, this server included: the sync
+happens once the Mac is next awake. Making it happen during sleep means changing macOS's own power
+settings (a scheduled wake, `pmset repeat wakeorpoweron …`, as an administrator) and holding the Mac
+awake for the minute or two a sync takes. SchoolHub does neither.
+
+### From cron
+
+`sync.py` prints nothing unless something needs your attention, which makes it a good cron job, for
+a set time of day or for running without the server:
 
 ```
 0 5 * * *  /path/to/schoolhub/.venv/bin/python /path/to/schoolhub/sync.py
 ```
 
 To keep its summary line in `state/sync.log` too, beside the syncs the server runs, end the line with
-`2>> /path/to/schoolhub/state/sync.log` (what needs your attention still comes by cron's mail).
+`2>> /path/to/schoolhub/state/sync.log` (what needs your attention still comes by cron's mail). cron
+skips a job whose time passes while the Mac is asleep; the server's own rule above does not.
 
 It stops itself after 15 minutes (`SCHOOLHUB_TIMEOUT` seconds) rather than hanging, keeps the last
 good copy of anything it couldn't reach, and reports the timeout.
@@ -284,7 +337,7 @@ and drop the secret path.
 The hosted copy has no file links (files live on your Mac), and it's read-only unless you connect
 the free database below.
 Set `site.auto_deploy` to `true` in `config.json` and every sync republishes it, so the phone view
-keeps up with the nightly run.
+keeps up with each sync.
 
 New Vercel projects enable "Vercel Authentication" (Settings → Deployment Protection), which puts a
 Vercel login in front of the site. Turn it off if you want the link to just work.
