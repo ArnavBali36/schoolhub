@@ -669,10 +669,10 @@ class FinalLookTest(unittest.TestCase):
         # The bar, its glass and the Mac app's title strip are the same in both apps: the look adds
         # tokens of its own and changes none of these.
         shared = {
-            "light": {"bg": "#f2f3f7", "titlebar": "#fcfcfd", "accent": "#2f5bd3", "glass": "rgb(255 255 255 / .74)", "glass-thick": "rgb(255 255 255 / .9)",
-                      "glass-edge": "rgb(15 23 42 / .08)", "glass-blur": "saturate(180%) blur(20px)", "wash-1": "rgb(47 91 211 / .07)", "wash-2": "rgb(122 92 214 / .045)"},
-            "dark": {"bg": "#0b0c10", "titlebar": "#17181e", "accent": "#7c9cff", "glass": "rgb(26 28 34 / .78)", "glass-thick": "rgb(26 28 34 / .9)",
-                     "glass-edge": "rgb(255 255 255 / .09)", "wash-1": "rgb(124 156 255 / .09)", "wash-2": "rgb(160 120 255 / .05)"},
+            "light": {"bg": "#f2f3f7", "titlebar": "#fcfcfd", "accent": "#6548d3", "glass": "rgb(255 255 255 / .74)", "glass-thick": "rgb(255 255 255 / .9)",
+                      "glass-edge": "rgb(15 23 42 / .08)", "glass-blur": "saturate(180%) blur(20px)", "wash-1": "rgb(101 72 211 / .07)", "wash-2": "rgb(122 92 214 / .045)"},
+            "dark": {"bg": "#0b0c10", "titlebar": "#17181e", "accent": "#a592ff", "glass": "rgb(26 28 34 / .78)", "glass-thick": "rgb(26 28 34 / .9)",
+                     "glass-edge": "rgb(255 255 255 / .09)", "wash-1": "rgb(165 146 255 / .09)", "wash-2": "rgb(160 120 255 / .05)"},
             "red": {"bg": "#0b0000", "titlebar": "#150100", "accent": "#ff3a00", "glass": "rgb(22 1 0 / .9)", "glass-thick": "rgb(22 1 0 / .94)",
                     "glass-edge": "rgb(255 40 0 / .18)", "glass-blur": "blur(18px)", "wash-1": "rgb(255 40 0 / .06)", "wash-2": "rgb(255 72 0 / .03)"},
         }
