@@ -757,11 +757,68 @@ $('#scrim').onclick = closeDrawer;
 // A modal dialog open (a task's, or the planner's) has Escape and the keys to itself. The planner's
 // details card beside a block is not modal: it leaves them to the page.
 const dialogOpen = () => [...document.querySelectorAll('dialog[open]')].some(d => d.matches(':modal'));
+// The page's keys (README "Keys"): N for a new task, U, C and D for the views, ? for the list of
+// every key. Never while typing, with a modifier, held down, or under a dialog; the planner has
+// its own (planner.js), and the app switch's O is bar.js's.
+const VIEW_KEYS = {u: 'upcoming', c: 'courses', d: 'day'};
 document.addEventListener('keydown', e => {
   const typing = typingIn(document.activeElement);
   if (e.key === 'Escape' && !dialogOpen()) closeDrawer();
-  if (e.key === 'n' && WRITE && !typing && !dialogOpen() && !e.metaKey && !e.ctrlKey) { e.preventDefault(); openTaskForm(); }
+  if (typing || dialogOpen() || e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.defaultPrevented) return;
+  const k = String(e.key).toLowerCase();
+  if (k === 'n' && WRITE) { e.preventDefault(); return openTaskForm(); }
+  if (k === '?') { e.preventDefault(); return showKeys(); }
+  // A view by its letter, where its button is offered: Day is one only where the planner has no
+  // column of its own, and none while the drawer covers the list.
+  const b = VIEW_KEYS[k] && drawerId === null ? $(`#views [data-view="${VIEW_KEYS[k]}"]`) : null;
+  if (b && !b.hidden && b.getClientRects().length) { e.preventDefault(); b.click(); }
 });
+
+// ---- the list of keys ----
+// What the ? key shows, and the Mac app's Help menu (it sends the page "qp:shortcuts"): the keys of
+// the Mac app when the page is shown there, the keys every app of the platform has, and School's
+// own. Prep and the Dashboard show the same list for themselves (QuantPrep web/src/lib/shortcutList.ts).
+const MAC_APP_KEYS = {quant: '⌘1', school: '⌘2', dash: '⌘3'};
+const inMacApp = () => document.documentElement.classList.contains('in-mac-app');
+function keyGroups(){
+  // The platform's apps, as the bar drew them in its switch (bar.js); none when School is on its own.
+  const apps = [...document.querySelectorAll('#brand .app-seg a[data-app]')].map(a => ({id: a.dataset.app, name: a.textContent}));
+  const at = apps.findIndex(a => a.id === 'school');
+  const next = at >= 0 && apps.length > 1 ? apps[(at + 1) % apps.length] : null;
+  const mac = inMacApp(), planner = plannerState !== 'off';
+  const groups = [];
+  if (mac) groups.push(['In the Mac app', [
+    ...apps.filter(a => MAC_APP_KEYS[a.id]).map(a => [[MAC_APP_KEYS[a.id]], a.name]),
+    [['⌘['], 'Back'], [['⌘]'], 'Forward'], [['⌘R'], 'Reload this page'],
+    [['⌘Z'], 'Undo your last change'], [['⇧⌘Z'], 'Redo'], [['⌘/'], 'This list']]]);
+  groups.push(['In every app', [
+    ...(next ? [[['O'], `Next app: ${next.name}`]] : []),
+    [['?'], 'This list'], [['Esc'], 'Close what is open']]]);
+  groups.push(['School', [
+    [['U'], 'Upcoming'], [['C'], 'By course'],
+    ...(planner ? [[['D'], 'Day, in a narrow window']] : []),
+    ...(WRITE ? [[['N'], 'New task']] : []),
+    ...(planner ? [[['B'], 'New block'], [['['], 'Day before'], [[']'], 'Day after'], [['T'], 'Today'], [['W'], 'The week: meals and repeats']] : []),
+    ...(WRITE && !mac ? [[['⌘Z'], 'Undo (Ctrl+Z)'], [['⇧⌘Z'], 'Redo (Ctrl+Y)']] : [])]]);
+  return groups;
+}
+const keysHtml = groups => groups.map(([title, rows]) => `<section><h4>${esc(title)}</h4><dl>${rows.map(([keys, what]) =>
+  `<div><dt>${keys.map(k => `<kbd>${esc(k)}</kbd>`).join('')}</dt><dd>${esc(what)}</dd></div>`).join('')}</dl></section>`).join('');
+function showKeys(){
+  let d = $('#keysDialog');
+  if (!d) {
+    d = document.createElement('dialog');
+    d.id = 'keysDialog';
+    d.className = 'task keys';
+    d.setAttribute('aria-labelledby', 'keysHeading');
+    d.addEventListener('click', e => { if (e.target === d) d.close(); });   // a click outside closes it
+    document.body.append(d);
+  }
+  d.innerHTML = `<form method="dialog"><h3 id="keysHeading">Keyboard shortcuts</h3><div class="keys-cols">${keysHtml(keyGroups())}</div>
+    <div class="buttons"><button class="btn primary" value="close">Done</button></div></form>`;
+  if (!d.open) d.showModal();
+}
+window.addEventListener('qp:shortcuts', showKeys);
 WIDE.addEventListener('change', () => render());
 // ---- your own tasks ----
 const taskDialog = $('#taskDialog');

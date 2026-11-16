@@ -148,6 +148,7 @@
   const SELF_APP = 'school';
   const SWITCH_KEY = 'o';                           // the platform's key for the next app, the same in every app
   const PLATFORM_KEY = 'qp.platform';
+  const MAC_APP_KEYS = {quant: '⌘1', school: '⌘2', dash: '⌘3'};   // the Mac app's View menu (PrepSchool.swift)
   // A platform description, or null. Links must be paths on this address: never another site.
   function validApps(apps){
     const ok = Array.isArray(apps) && apps.length > 1 && apps.length <= 8 && apps.every(a => a
@@ -173,11 +174,14 @@
       if (!title) slot.innerHTML = '<h1 class="brand">SchoolHub</h1>';
       return true;
     }
-    // The O key leads to the next app in the switch's order, and that app's tooltip says so.
-    const next = nextApp(apps);
+    // The O key leads to the next app in the switch's order, and that app's tooltip says so. In
+    // the Mac app every app has a key of its own (⌘1, ⌘2, ⌘3), and each tooltip names that one.
+    const next = nextApp(apps), mac = document.documentElement.classList.contains('in-mac-app');
+    const key = a => mac && MAC_APP_KEYS[a.id] ? ` (${MAC_APP_KEYS[a.id]})` : !mac && a === next ? ` (${SWITCH_KEY.toUpperCase()})` : '';
+    // (Each link carries its app's id, which the page's list of keys reads: dashboard.js keyGroups.)
     const links = apps.map(a => a.id === SELF_APP
-      ? `<a href="${esc(a.href)}" aria-current="true" title="${esc(a.name)}: your assignments">${esc(a.name)}</a>`
-      : `<a href="${esc(a.href)}" title="Switch to ${esc(a.name)}${a === next ? ` (${SWITCH_KEY.toUpperCase()})` : ''}">${esc(a.name)}</a>`).join('');
+      ? `<a href="${esc(a.href)}" data-app="${esc(a.id)}" aria-current="true" title="${esc(a.name)}: your assignments">${esc(a.name)}</a>`
+      : `<a href="${esc(a.href)}" data-app="${esc(a.id)}" title="Switch to ${esc(a.name)}${key(a)}">${esc(a.name)}</a>`).join('');
     const t = document.createElement('template');
     t.innerHTML = `<nav class="app-switch" aria-label="Switch app"><svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7"/><path d="M8 21l5-6 4 3 7-9" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="app-seg">${links}</span></nav><h1 class="sr-only">SchoolHub</h1>`;
     // The title is replaced as an element, never by rewriting the slot: if the browser is still

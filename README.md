@@ -175,6 +175,30 @@ it ran by itself). The view and the theme are not data, so they are not steps.
 menu can ask the page with `SchoolHub.undo()` and `SchoolHub.redo()`: each answers `true` when the
 page took the request and `false` when it belongs to the field being typed in.
 
+## Keys
+
+Everything on the page can be reached from the keyboard. Press **?** for the list on the page
+itself; it shows only the keys that work where the page is.
+
+| Key | Does |
+|---|---|
+| `U`, `C`, `D` | Upcoming, By course, and Day (in a window too narrow for the planner's own column) |
+| `N` | a new task |
+| `B` | a new block in the planner |
+| `[`, `]` | the day before, the day after |
+| `T` | back to today |
+| `W` | the week: meals and repeating blocks |
+| `Cmd`/`Ctrl`+`Z`, `Shift`+`Cmd`+`Z` or `Ctrl`+`Y` | undo and redo |
+| `O` | the next app, when the page is part of a platform |
+| `?` | the list of keys |
+| `Esc` | closes what is open |
+
+A letter does nothing while you type in a field, while a form is open, with a modifier held, or
+held down. A key that stands for a button presses that button, so one that is off stays off. In a
+Mac app that shows the page, the app may have keys of its own for its apps (`⌘1`, `⌘2`, `⌘3`): the
+switch's tooltips name those there, and the app can open the list by sending the page the event
+`qp:shortcuts`.
+
 ## Opening at once
 
 Coming back to the page is a page load, and a load used to wait for its answers one after another:

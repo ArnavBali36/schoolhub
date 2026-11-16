@@ -65,7 +65,10 @@ class SourceTest(unittest.TestCase):
         self.assertIn("  " + line, BAR)
         self.assertIn("    const other = nextApp(platformApps);", BAR)
         self.assertIn("    if (other && other.id !== SELF_APP) { e.preventDefault(); location.assign(other.href); }", BAR)
-        self.assertIn("title=\"Switch to ${esc(a.name)}${a === next ? ` (${SWITCH_KEY.toUpperCase()})` : ''}\"", BAR)
+        # In the Mac app each app has a key of its own, and every tooltip names that one instead.
+        self.assertIn("const MAC_APP_KEYS = {quant: '⌘1', school: '⌘2', dash: '⌘3'};", BAR)
+        self.assertIn("const key = a => mac && MAC_APP_KEYS[a.id] ? ` (${MAC_APP_KEYS[a.id]})` : !mac && a === next ? ` (${SWITCH_KEY.toUpperCase()})` : '';", BAR)
+        self.assertIn('title="Switch to ${esc(a.name)}${key(a)}"', BAR)
         self.assertNotIn("platformApps.find(a => a.id !== SELF_APP)", BAR)
         out = run_node("const SELF_APP = 'school';\n" + line + """
 const app = id => ({id, href: '/' + id + '/'});
@@ -182,7 +185,7 @@ class PlannerPageTest(unittest.TestCase):
         self.assertIn("grid-template-columns:minmax(0,3fr) minmax(0,2fr)", HTML)
         self.assertRegex(HTML, r"\.planner\{position:sticky;top:calc\(var\(--bar-height\) \+ 32px\);height:calc\(100vh")
         # Day is offered only below 1100 px, and starts hidden until the planner is known to be there.
-        self.assertIn('<button type="button" data-view="day" hidden>Day</button>', HTML)
+        self.assertIn('<button type="button" data-view="day" title="Day (D)" hidden>Day</button>', HTML)
         self.assertIn('@media (min-width:1100px){', HTML)
         self.assertIn('.views [data-view="day"]{display:none}', HTML)
         self.assertIn("const WIDE = matchMedia('(min-width: 1100px)');", JS)
@@ -4754,3 +4757,108 @@ out.down = {...state(), pressed, waited: await waited, kept: !!keptPlan.text};
         self.assertIn('data-pd-del="1"${can ? \'\' : \' disabled\'}', PLANNER)
         # Plan it waits for the plan itself.
         self.assertRegex(PLANNER, r"while \(pending\) await chain;\n    await loadedPlan\(\);\n    if \(!plan\) return SH\.toast\(\"Couldn't load the plan\"\);")
+
+
+# The page's keys (README "Keys") with the page stood in for: the views' buttons, the planner's
+# buttons, and what the list of keys says.
+KEYS_START, KEYS_END = "const VIEW_KEYS = ", "// ---- the list of keys ----"
+KEYS_PAGE = """
+const pressed = [], listeners = {};
+const state = {typing: false, dialog: false, write: true, drawer: null};
+const button = (name, o = {}) => ({hidden: false, shown: true, ...o, getClientRects(){ return this.shown ? [1] : []; }, click(){ pressed.push(name); }});
+const views = {upcoming: button('upcoming'), courses: button('courses'), day: button('day', {shown: false})};
+const $ = sel => { const m = /data-view="(\\w+)"/.exec(sel); return m ? views[m[1]] : null; };
+const document = {activeElement: null, addEventListener: (type, fn) => { listeners[type] = fn; }};
+const typingIn = () => state.typing, dialogOpen = () => state.dialog, closeDrawer = () => pressed.push('close drawer');
+const openTaskForm = () => pressed.push('new task'), showKeys = () => pressed.push('keys');
+let WRITE = true, drawerId = null;
+const key = (k, o = {}) => { const e = {key: k, prevented: false, preventDefault(){ this.prevented = true; }, ...o}; listeners.keydown(e); return e.prevented; };
+"""
+
+
+class KeysTest(unittest.TestCase):
+    def test_letters_show_the_views_and_open_what_they_stand_for(self):
+        out = run_node(KEYS_PAGE + JS[JS.index(KEYS_START):JS.index(KEYS_END)] + """
+const out = {};
+out.views = [key('u'), key('C'), key('d')];            // Day's button is not on show: its key does nothing
+out.afterViews = pressed.splice(0);
+views.day.shown = true; key('d'); views.day.hidden = true; key('d');
+out.day = pressed.splice(0);
+key('n'); key('?');
+out.opens = pressed.splice(0);
+// Never while typing, under a dialog, with a modifier or held down.
+state.typing = true; key('u'); key('n'); key('?'); state.typing = false;
+state.dialog = true; key('c'); key('?'); state.dialog = false;
+key('u', {metaKey: true}); key('u', {ctrlKey: true}); key('u', {altKey: true}); key('u', {repeat: true}); key('u', {defaultPrevented: true});
+out.quiet = pressed.splice(0);
+// The drawer covers the list: no view changes under it, but Esc closes it and N still adds a task.
+drawerId = 'a1'; key('u'); key('Escape'); key('n');
+out.drawer = pressed.splice(0);
+drawerId = null; WRITE = false; key('n');
+out.readOnly = pressed.splice(0);
+console.log(JSON.stringify(out));
+""")
+        self.assertEqual(out["views"], [True, True, False])
+        self.assertEqual(out["afterViews"], ["upcoming", "courses"])
+        self.assertEqual(out["day"], ["day"])
+        self.assertEqual(out["opens"], ["new task", "keys"])
+        self.assertEqual(out["quiet"], [])
+        self.assertEqual(out["drawer"], ["close drawer", "new task"])
+        self.assertEqual(out["readOnly"], [])
+
+    def test_the_list_says_every_key_for_where_the_page_is(self):
+        section = JS[JS.index(KEYS_END):JS.index("function showKeys(){")]
+        page = """
+const esc = s => String(s);
+let mac = false, WRITE = true, plannerState = 'on', switchApps = [];
+const document = {documentElement: {classList: {contains: c => c === 'in-mac-app' && mac}},
+  querySelectorAll: () => switchApps.map(([id, name]) => ({dataset: {app: id}, textContent: name}))};
+"""
+        out = run_node(page + section + """
+const flat = () => keyGroups().map(([title, rows]) => [title, rows.map(([keys, what]) => keys.join('') + ' ' + what)]);
+const out = {};
+out.alone = flat();
+switchApps = [['quant', 'Prep'], ['school', 'School'], ['dash', 'Dashboard']];
+out.platform = flat();
+mac = true; out.mac = flat();
+WRITE = false; plannerState = 'off'; mac = false; out.readOnly = flat();
+out.html = keysHtml([['A <b>', [[['⌘1'], 'x & y'], [['[', ']'], 'two']]]]);
+console.log(JSON.stringify(out));
+""")
+        school = ["U Upcoming", "C By course", "D Day, in a narrow window", "N New task", "B New block", "[ Day before",
+                  "] Day after", "T Today", "W The week: meals and repeats"]
+        undo = ["⌘Z Undo (Ctrl+Z)", "⇧⌘Z Redo (Ctrl+Y)"]
+        # On its own server: no app to switch to.
+        self.assertEqual(out["alone"], [["In every app", ["? This list", "Esc Close what is open"]], ["School", school + undo]])
+        # In the platform O leads to the app after School.
+        self.assertEqual(out["platform"][0], ["In every app", ["O Next app: Dashboard", "? This list", "Esc Close what is open"]])
+        # In the Mac app: its own keys first, and undo is its menu's.
+        self.assertEqual([g[0] for g in out["mac"]], ["In the Mac app", "In every app", "School"])
+        self.assertEqual(out["mac"][0][1], ["⌘1 Prep", "⌘2 School", "⌘3 Dashboard", "⌘[ Back", "⌘] Forward", "⌘R Reload this page",
+                                            "⌘Z Undo your last change", "⇧⌘Z Redo", "⌘/ This list"])
+        self.assertEqual(out["mac"][2][1], school)
+        # A copy that cannot be changed, without the planner: only what works there.
+        self.assertEqual(out["readOnly"][-1], ["School", ["U Upcoming", "C By course"]])
+        self.assertEqual(out["html"], "<section><h4>A <b></h4><dl><div><dt><kbd>⌘1</kbd></dt><dd>x & y</dd></div>"
+                                      "<div><dt><kbd>[</kbd><kbd>]</kbd></dt><dd>two</dd></div></dl></section>")
+        # The real esc() is used on every name and key; the Mac app's menu opens the same list.
+        self.assertIn("<h4>${esc(title)}</h4>", JS)
+        self.assertIn("window.addEventListener('qp:shortcuts', showKeys);", JS)
+        self.assertIn('data-app="${esc(a.id)}"', BAR)
+
+    def test_the_planner_has_keys_for_its_buttons(self):
+        self.assertIn("const PLAN_KEYS = ['[', ']', 't', 'b', 'w'];", PLANNER)
+        self.assertIn("if (!PLAN_KEYS.includes(k) || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;", PLANNER)
+        self.assertIn("if (k === 't') { scrolledFor = null; return setDate(todayIso()); }", PLANNER)
+        self.assertIn("if (k === 'b') return els.add.click();", PLANNER)
+        self.assertIn("if (k === 'w') return els.week.click();", PLANNER)
+        # Each button says its key, and so do the views.
+        for hint in ('title="Back to today (T)"', 'title="Meals and repeating blocks for every week (W)"', 'title="Add a block (B)"',
+                     'title="Previous day ([)"', 'title="Next day (])"'):
+            self.assertIn(hint, PLANNER)
+        for hint in ('title="Upcoming (U)"', 'title="By course (C)"', 'title="Day (D)"', 'title="Add a task (N)"'):
+            self.assertIn(hint, HTML)
+        # The list's styles use the page's tokens only.
+        keys_css = HTML[HTML.index("dialog.task.keys{"):HTML.index("/* A field the keyboard moves to")]
+        self.assertNotRegex(keys_css, r"#[0-9a-fA-F]{3,8}\b|rgb\(")
+

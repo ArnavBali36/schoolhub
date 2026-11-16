@@ -709,9 +709,9 @@
   root.innerHTML = `<div class="ph">
       <h2 class="ph-date" id="planDate" aria-live="polite"></h2>
       <div class="ph-actions">
-        <button type="button" class="btn small" id="planToday" title="Back to today" hidden>${ICON.today}Today</button>
-        <button type="button" class="btn small" id="planWeek" title="Meals and repeating blocks for every week" disabled>${ICON.week}Week…</button>
-        <button type="button" class="btn small primary" id="planAdd" aria-label="Add a block" disabled>${ICON.plus}Block</button>
+        <button type="button" class="btn small" id="planToday" title="Back to today (T)" hidden>${ICON.today}Today</button>
+        <button type="button" class="btn small" id="planWeek" title="Meals and repeating blocks for every week (W)" disabled>${ICON.week}Week…</button>
+        <button type="button" class="btn small primary" id="planAdd" aria-label="Add a block" title="Add a block (B)" disabled>${ICON.plus}Block</button>
       </div>
       <div class="ph-nav">
         <button type="button" class="ph-step" data-pstep="-1" aria-label="Previous day" title="Previous day ([)">${ICON.prev}</button>
@@ -1391,16 +1391,22 @@
   });
   // Undo and redo wait while a block is being dragged.
   SH.holdUndo?.(() => !!drag);
-  // [ and ] for the day before and after, when not typing and nothing covers the planner. Esc puts
-  // a drag back.
+  // The planner's keys, when not typing and nothing covers the planner: [ and ] for the day before
+  // and after, T for today, B for a new block, W for the week's meals and repeats (each letter
+  // presses its button, so a button that is off stays off). Esc puts a drag back.
+  const PLAN_KEYS = ['[', ']', 't', 'b', 'w'];
   document.addEventListener('keydown', e => {
     if (drag && e.key === 'Escape') { e.preventDefault(); return endDrag(true); }
     if (det && e.key === 'Escape' && !card.matches(':modal') && !SH.drawerOpen()) { e.preventDefault(); return closeDetails(); }
-    if ((e.key !== '[' && e.key !== ']') || e.metaKey || e.ctrlKey || e.altKey) return;
+    const k = String(e.key).toLowerCase();
+    if (!PLAN_KEYS.includes(k) || e.metaKey || e.ctrlKey || e.altKey || e.repeat) return;
     if (SH.typingIn(document.activeElement) || document.querySelector('dialog[open]') || SH.drawerOpen()) return;
     if (SH.plannerState !== 'on' || !root.getClientRects().length) return;
     e.preventDefault();
-    setDate(addDays(shown, e.key === '[' ? -1 : 1));
+    if (k === 't') { scrolledFor = null; return setDate(todayIso()); }
+    if (k === 'b') return els.add.click();
+    if (k === 'w') return els.week.click();
+    setDate(addDays(shown, k === '[' ? -1 : 1));
   });
 
   // ---- the block editor ----
