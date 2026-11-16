@@ -146,7 +146,7 @@
   // last answer is kept (in qp.platform, which QuantPrep keeps too), so the switch is drawn from the
   // first paint, not a moment later.
   const SELF_APP = 'school';
-  const SWITCH_KEY = 'o';                           // QuantPrep's key for the other app, the same in both
+  const SWITCH_KEY = 'o';                           // the platform's key for the next app, the same in every app
   const PLATFORM_KEY = 'qp.platform';
   // A platform description, or null. Links must be paths on this address: never another site.
   function validApps(apps){
@@ -159,6 +159,8 @@
   const readPlatform = () => { try { return validApps(JSON.parse(localStorage.getItem(PLATFORM_KEY))?.apps); } catch { return null; } };
   const keepPlatform = apps => { try { apps ? localStorage.setItem(PLATFORM_KEY, JSON.stringify({apps})) : localStorage.removeItem(PLATFORM_KEY); } catch {} };
   let platformApps = LOCAL_FILES || PHONE ? null : readPlatform();
+  // The app after this one in the switch's order, the first after the last (QuantPrep's otherApp).
+  const nextApp = apps => apps[(apps.findIndex(a => a.id === SELF_APP) + 1) % apps.length];
   let drawn;  // the apps the brand slot was last drawn from (null: the plain title)
   function drawSwitch(){
     const slot = $('#brand');
@@ -171,9 +173,11 @@
       if (!title) slot.innerHTML = '<h1 class="brand">SchoolHub</h1>';
       return true;
     }
+    // The O key leads to the next app in the switch's order, and that app's tooltip says so.
+    const next = nextApp(apps);
     const links = apps.map(a => a.id === SELF_APP
       ? `<a href="${esc(a.href)}" aria-current="true" title="${esc(a.name)}: your assignments">${esc(a.name)}</a>`
-      : `<a href="${esc(a.href)}" title="Switch to ${esc(a.name)} (${SWITCH_KEY.toUpperCase()})">${esc(a.name)}</a>`).join('');
+      : `<a href="${esc(a.href)}" title="Switch to ${esc(a.name)}${a === next ? ` (${SWITCH_KEY.toUpperCase()})` : ''}">${esc(a.name)}</a>`).join('');
     const t = document.createElement('template');
     t.innerHTML = `<nav class="app-switch" aria-label="Switch app"><svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7"/><path d="M8 21l5-6 4 3 7-9" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="app-seg">${links}</span></nav><h1 class="sr-only">SchoolHub</h1>`;
     // The title is replaced as an element, never by rewriting the slot: if the browser is still
@@ -194,12 +198,12 @@
       drawSwitch();
     }).catch(() => {});
   }
-  // O opens the other app, as in QuantPrep; never while typing, nor with the drawer or a dialog open.
+  // O opens the next app, as in QuantPrep; never while typing, nor with the drawer or a dialog open.
   document.addEventListener('keydown', e => {
     if (String(e.key).toLowerCase() !== SWITCH_KEY || !platformApps || e.defaultPrevented || e.repeat) return;
     if (e.metaKey || e.ctrlKey || e.altKey || typingIn(document.activeElement)) return;
     if (document.querySelector('dialog[open], [aria-modal="true"]:not([hidden])')) return;
-    const other = platformApps.find(a => a.id !== SELF_APP);
-    if (other) { e.preventDefault(); location.assign(other.href); }
+    const other = nextApp(platformApps);
+    if (other && other.id !== SELF_APP) { e.preventDefault(); location.assign(other.href); }
   });
 })();

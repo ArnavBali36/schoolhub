@@ -57,6 +57,24 @@ def run_node(script):
 
 
 class SourceTest(unittest.TestCase):
+    def test_the_o_key_goes_to_the_next_app_round_the_switch(self):
+        # The platform may have more than two apps (Prep, School, Dashboard). O leads to the app
+        # after this one in the switch's order, the first after the last, as QuantPrep's otherApp
+        # does, and only that app's tooltip names the key.
+        line = "const nextApp = apps => apps[(apps.findIndex(a => a.id === SELF_APP) + 1) % apps.length];"
+        self.assertIn("  " + line, BAR)
+        self.assertIn("    const other = nextApp(platformApps);", BAR)
+        self.assertIn("    if (other && other.id !== SELF_APP) { e.preventDefault(); location.assign(other.href); }", BAR)
+        self.assertIn("title=\"Switch to ${esc(a.name)}${a === next ? ` (${SWITCH_KEY.toUpperCase()})` : ''}\"", BAR)
+        self.assertNotIn("platformApps.find(a => a.id !== SELF_APP)", BAR)
+        out = run_node("const SELF_APP = 'school';\n" + line + """
+const app = id => ({id, href: '/' + id + '/'});
+const three = ['quant', 'school', 'dash'].map(app);
+console.log(JSON.stringify([nextApp(three).id, nextApp(['quant', 'school'].map(app)).id,
+  nextApp(['school', 'dash'].map(app)).id, nextApp(['dash', 'quant', 'school'].map(app)).id]));
+""")
+        self.assertEqual(out, ["dash", "quant", "dash", "dash"])
+
     def test_only_the_files_section_makes_open_on_mac_links(self):
         # Every link that asks the Mac to open something (data-open, sent to api/open) is made in one
         # place, which knows whether the page is on another device.
