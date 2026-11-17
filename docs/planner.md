@@ -18,6 +18,7 @@ Everything lives under a new store name, `plan`, beside `marks` and `tasks`, one
 |---|---|
 | `settings` | `{day_start, day_end}` (hours, integers, defaults 5 and 24) |
 | `week:sun` … `week:sat` | that weekday's template: `{meals, blocks}` |
+| `series` | the blocks that repeat by a rule: `{blocks}`, each with its `rules` (added 2026-11-17) |
 | `day:YYYY-MM-DD` | that date's own changes and blocks: `{meals, blocks, repeats}` |
 
 ```jsonc
@@ -45,6 +46,23 @@ Everything lives under a new store name, `plan`, beside `marks` and `tasks`, one
     "r8c1d2e3f4": {"start": "09:30", "end": "11:30", "skip": false, "items": [ITEM, …]}
   }
 }
+// series: blocks that repeat by a rule, as a calendar's events do
+{
+  "blocks": [
+    {"id": "s8c1d2e3f4", "type": "other", "title": "Gym", "start": "07:00", "end": "08:00",
+     "rules": [RULE, …]}           // in turn: each in force from its `from` to its `until`
+  ]
+}
+// RULE
+{"from": "2026-11-17",            // the day it starts, which "every 2 weeks" counts from
+ "until": "2027-01-04",           // the last day, when it ends; left out, it never does
+ "count": 6,                      // only what was asked for ("after 6 times"): the page gives until
+ "freq": "week", "every": 2,      // day, week, month or year; every N of them
+ "days": ["mon", "wed"],          // week: on these weekdays
+ "dates": [1, 15],                // month and year: each of these days of the month, or
+ "nth": {"which": -1, "day": "weekday"},   // "on the" first to fifth (1 to 5) or last (-1)
+                                  // sun … sat, day, weekday or weekend
+ "months": [3, 11]}               // year: in these months
 // ITEM: work to get done in a block
 {"id": "i0a1b2c3d4", "kind": "work", "ref": "<assignment or task id>", "text": "<name when added>",
  "course": "<course name when added>", "done": false}
@@ -57,8 +75,9 @@ empty, nothing off. The day runs 5 to 24.
 **What shows on a date:**
 
 - **Meals:** the date's override over the weekday's template over the defaults, field by field.
-- **Repeating blocks:** the weekday's blocks, each with the date's `repeats[id]` over it. A block
-  with `skip` is hidden, and a `repeats` entry whose id is no longer in the week is ignored.
+- **Repeating blocks:** the weekday's blocks, and the blocks of `series` whose rule falls on the
+  date (see "Repeating by a rule"), each with the date's `repeats[id]` over it. A block with `skip`
+  is hidden, and a `repeats` entry whose id is in neither the week nor the series is ignored.
 - **One-off blocks:** the date's own.
 
 Items always belong to the date, never to the week.
@@ -67,7 +86,7 @@ Items always belong to the date, never to the week.
 schoolPublic.ts. Test vectors in `tests/plan_vectors.json` are used by both. A value that breaks a
 rule is refused with 400 and a short reason; nothing is silently changed except where noted.
 
-- **Key:** must match `^(settings|week:(sun|mon|tue|wed|thu|fri|sat)|day:\d{4}-\d{2}-\d{2})$`, and a
+- **Key:** must match `^(settings|series|week:(sun|mon|tue|wed|thu|fri|sat)|day:\d{4}-\d{2}-\d{2})$`, and a
   day must be a real calendar date.
 - **Times:**
   - written `HH:MM`, from `00:00` to `24:00`, minutes a multiple of 5;
@@ -87,7 +106,16 @@ rule is refused with 400 and a short reason; nothing is silently changed except 
 - **Counts:** at most 40 blocks in a day or week value, 50 items in a block or meal, and 100
   `repeats` entries.
 - **Booleans:** `off`, `done` and `skip` are made true or false. Unknown fields are dropped, and so
-  are `items` on a week's blocks.
+  are `items` on a week's blocks and on the series'.
+- **series:** at most 100 blocks, each a block as a week has it plus `rules`: 1 to 12 of them, each
+  ending (`until`) before the next one's `from`. In a rule:
+  - `from` is a real date; `until`, when given, a real date on or after it; `count` a whole number
+    from 1 to 999;
+  - `freq` is `day`, `week`, `month` or `year`, and `every` a whole number from 1 to 999 (1 when
+    left out);
+  - a week needs `days`, a year `months`, and a month or a year either `nth` (which wins when both
+    are given) or `dates`; each list has at least one entry and none twice, kept in the order given;
+  - what its `freq` does not use is dropped.
 - **Saving:** a whole value is replaced at once. Saving `null` deletes the key, which brings back the
   defaults.
 
@@ -98,8 +126,10 @@ schoolPublic.ts under `/school/` on the public site. A POST needs `X-SchoolHub: 
 do.
 
 - `GET /api/plan?from=YYYY-MM-DD&to=YYYY-MM-DD`
-  - answers `{"settings": {...}, "week": {"sun": {...}, …}, "days": {"YYYY-MM-DD": {...}}}`;
-  - `settings` and all seven weekdays are always present, as stored or as defaults, cleaned;
+  - answers `{"settings": {...}, "week": {"sun": {...}, …}, "series": {"blocks": […]},
+    "days": {"YYYY-MM-DD": {...}}}`;
+  - `settings`, all seven weekdays and `series` are always present, as stored or as defaults,
+    cleaned (the series whole, whatever the range: its blocks are not dates);
   - `days` holds only stored dates in the range;
   - the range is inclusive and at most 62 days; without one it is today ±7 days on the server's
     clock;
@@ -349,11 +379,45 @@ own tokens come after those in each theme's block, and every one has a value in 
   and every other new pair, in all three themes; no blue in any Night colour; a value in dark and
   red for every one of School's tokens.
 
+### Repeating by a rule
+
+Asked for on 2026-11-17: "allow for an event on different repeat levels … just copy what the Apple
+calendar app does, which allows pretty much any permutation of repeat". Until then a block could
+only repeat every week on its own weekday (a block of `week:<wd>`).
+
+- **What a rule can say:** every N days; every N weeks on chosen weekdays; every N months on chosen
+  dates, or "on the" first to fifth or last weekday, day, weekday (Monday to Friday) or weekend
+  day; every N years in chosen months, on the block's date or "on the" same kinds of day; and an
+  end: never, on a date, or after a number of times.
+- **Which dates it falls on** is worked out by the page alone (`ruleOn` in planner.js); the servers
+  only check a rule's shape. Weeks run Sunday to Saturday, as the week strip does. "Every 2 weeks"
+  (months, years) counts from the week (month, year) of the rule's `from`. A date a month does not
+  have (the 31st, February 29, a fifth Monday) is passed over.
+- **"After N times"** is stored as the `until` of the Nth day, worked out when it is saved, with
+  `count` kept beside it so the editor can show it again.
+- **A change holds from the day it is made on.** A block keeps its rules in turn: changing the
+  repeat on a date ends the rule in force the day before and adds the new one from that date, so
+  the days before keep what they showed (and what was ticked on them). A rule that starts on that
+  very date is replaced. Ending a repeat ("stop it from today on") is the same without a new rule.
+- **A date's own changes** to such a block (its time for the day, skipped, its items) are the
+  date's `repeats[id]`, exactly as for a week's block, and a block keeps its id through every
+  change of rule, so they never move.
+- **The week's blocks stay as they are** ("every Tuesday", shown on every such weekday, past and
+  future). One moves to the series, with its id, only when its repeat is changed or ended: its
+  first rule is then every week on its weekday from 2000-01-01 ("since always") until the day
+  before.
+- **A repeat that does not fall on the date it is set on** starts on its first day after it; the
+  toast says which. Things to get done need the block to be on the date, so the editor asks for
+  one or the other.
+- **An older page** (one loaded before this, or the public site until it is deployed again) does
+  not show the series, and a date it saves loses that date's `repeats` for series blocks.
+
 ### Changing a repeating block or a meal
 
 Moving or resizing a repeating block or a meal on the timeline changes that date only. The editor
-then shows "Changed for today only" with **Use this time every Sunday**, which saves the time into
-the week and clears the date's override.
+then shows "Changed for today only" with **Use this time every Sunday** (for a block of the series,
+**Use this time every time it repeats**), which saves the time where the repeat keeps it and clears
+the date's override.
 
 ### The block editor
 
@@ -362,9 +426,17 @@ A dialog, built like the task dialog, with these fields:
 - **Kind:** Deep work, Socialize or Block. A meal has its kind fixed, so this is shown as text.
 - **Title.**
 - **Start and end:** time inputs, 5-minute steps.
-- **Repeat every <weekday>:** a checkbox on blocks; ticking it moves a one-off block into the week.
-  Unticking it on a repeating block asks whether to remove it from every <weekday> or only skip it
-  today.
+- **Repeat:** a menu on blocks, as a calendar has it: Never, Every day, Every week (on this
+  weekday), Every 2 weeks, Every month (on this date), Every year, and Custom…, which opens the
+  rest: "Every N" days, weeks, months or years; for weeks the weekdays as seven pills; for months
+  "Each of these days" (the days of the month as pills) or "On the…" with two menus (first to
+  last; a weekday, day, weekday or weekend day); for years the months as pills, and "On the…".
+  - **End repeat:** Never, On date, or After N times.
+  - A line under it says a custom or ending rule in words, when it first falls if not on this
+    date, and, when a repeat is being changed, that the change holds from this day on.
+  - Setting a repeat on a one-off block moves it into the series, with this date's items.
+  - Setting Never on a repeating block asks: only skip it this day, stop it from this day on (the
+    days before keep it), or remove it altogether.
 - **Where to eat (meals):** set for this date only, with a link to change it for every <weekday> in
   the weekly form.
 - **Things to get done:**
@@ -383,10 +455,11 @@ Items can also be ticked straight on the timeline.
 Opened with **Week…**. It is a dialog with a table, one row per weekday, Sunday first:
 
 - for each of breakfast, lunch and dinner: a place input, start and end times, and an "off" toggle;
-- below the table: the repeating blocks by weekday, each with remove;
+- below the table: the repeating blocks, each with remove: the weekdays' own by weekday, then
+  those of the series with their rule in words (removed there, one goes from every day);
 - day start and day end, as hour selects.
 
-Save writes the changed `week:*` keys and `settings`. Its note says: "Places and times here repeat
+Save writes the changed `week:*` keys, `series` and `settings`. Its note says: "Places and times here repeat
 every week. Changes on one day in the calendar stay on that day."
 
 ### Saving

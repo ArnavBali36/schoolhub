@@ -930,6 +930,27 @@ dialog.task .buttons .grow{flex:1}
 .linkish:hover{text-decoration:underline;text-underline-offset:2px}
 .btn.danger{color:var(--bad)}
 .b-section{display:grid;gap:8px}
+/* The editor's repeat (planner.js, "the editor's repeat"): the menu of usual choices, then Custom's
+   fields in an inset. A pill is a tick box drawn as a small button: the weekdays in a row, the days
+   of the month seven to a row, the months four to a row. The box itself lies over its pill, unseen,
+   so a click, a tap and the space bar all reach it. */
+.b-rep,.b-rep-part{display:grid;gap:10px}
+.b-rep-custom{display:grid;gap:12px;padding:12px;border-radius:var(--radius-sm);background:var(--surface-2)}
+.b-rep-line{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+dialog.task .b-rep-line label{display:inline;flex:none}
+dialog.task .b-rep-line :is(select,input){width:auto;min-width:0;flex:0 1 auto}
+dialog.task .b-rep-line input[type=number]{width:74px}
+.b-rep-count{display:inline-flex;align-items:center;gap:8px}
+.b-rep-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px}
+.b-rep-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.b-rep-grid.months{grid-template-columns:repeat(4,minmax(0,1fr))}
+.b-rep-grid.off{opacity:.45}
+dialog.task label.b-pill{position:relative;display:block}
+dialog.task label.b-pill input{position:absolute;inset:0;width:100%;height:100%;margin:0;border:0;opacity:0;cursor:pointer}
+.b-pill span{display:grid;place-items:center;min-height:30px;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface);font-size:12.5px;font-weight:560;color:var(--text);font-variant-numeric:tabular-nums}
+.b-pill:hover span{border-color:var(--border-input)}
+.b-pill input:checked + span{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.b-pill input:focus-visible + span{outline:2px solid var(--accent);outline-offset:2px}
 .b-section-h{font-size:13px;font-weight:520;color:var(--muted)}
 .b-items{display:grid;gap:4px;margin:0;padding:0;list-style:none}
 .b-item{display:flex;align-items:center;gap:8px;min-height:34px;padding:2px 4px 2px 10px;border-radius:var(--radius-sm);background:var(--surface-2)}
@@ -1066,10 +1087,29 @@ dialog.task .wk-hours label{flex:1 1 160px}
       <label>End<input id="bEnd" type="time" step="300" required></label>
     </div>
     <p class="b-changed" id="bChanged" hidden><span id="bChangedText">Changed for today only.</span><button type="button" class="linkish" id="bUseWeek">Use this time every Sunday</button></p>
-    <label class="pin-check" id="bRepeatField"><input id="bRepeat" type="checkbox"> <span id="bRepeatText">Repeat every Sunday</span></label>
+    <div class="b-rep" id="bRepeatField">
+      <label>Repeat<select id="bRepeat"><option value="none">Never</option><option value="day">Every day</option><option value="week">Every week</option><option value="2weeks">Every 2 weeks</option><option value="month">Every month</option><option value="year">Every year</option><option value="custom">Custom…</option></select></label>
+      <div class="b-rep-custom" id="bCustom" hidden>
+        <div class="b-rep-line"><label for="bEvery">Every</label><input id="bEvery" type="number" min="1" max="999" step="1" inputmode="numeric" value="1"><select id="bFreq" aria-label="Days, weeks, months or years"><option value="day">days</option><option value="week">weeks</option><option value="month">months</option><option value="year">years</option></select></div>
+        <div class="b-rep-days" id="bDays" role="group" aria-label="On these weekdays" hidden></div>
+        <div class="b-rep-part" id="bMonthly" hidden>
+          <label class="pin-check"><input type="radio" name="bMonthBy" value="each" checked> <span>Each of these days</span></label>
+          <div class="b-rep-grid" id="bDates" role="group" aria-label="Days of the month"></div>
+          <label class="pin-check"><input type="radio" name="bMonthBy" value="nth"> <span>On the…</span></label>
+        </div>
+        <div class="b-rep-part" id="bYearly" hidden>
+          <div class="b-rep-grid months" id="bMonths" role="group" aria-label="In these months"></div>
+          <label class="pin-check"><input type="checkbox" id="bYearNth"> <span>On the…</span></label>
+        </div>
+        <div class="b-rep-line" id="bNthRow" hidden><select id="bNthWhich" aria-label="Which one in the month"></select><select id="bNthDay" aria-label="Which kind of day"></select></div>
+      </div>
+      <div class="b-rep-line" id="bEndRow" hidden><label for="bRepEnd">End repeat</label><select id="bRepEnd"><option value="never">Never</option><option value="date">On date</option><option value="count">After</option></select><input id="bRepUntil" type="date" aria-label="The last day it repeats" hidden><span class="b-rep-count" id="bRepCountBox" hidden><input id="bRepCount" type="number" min="1" max="999" step="1" inputmode="numeric" value="10" aria-label="How many times"> times</span></div>
+      <p class="hint" id="bRepSummary" aria-live="polite" hidden></p>
+    </div>
     <fieldset id="bUnrepeat" hidden>
       <legend id="bUnrepeatText">It repeats every Sunday. Instead:</legend>
       <label class="pin-check"><input type="radio" name="bUnrep" value="skip" checked> <span id="bSkipText">Only skip it today</span></label>
+      <label class="pin-check"><input type="radio" name="bUnrep" value="end"> <span id="bEndText">Stop it from today on, and keep the days before</span></label>
       <label class="pin-check"><input type="radio" name="bUnrep" value="remove"> <span id="bRemoveText">Remove it from every Sunday</span></label>
     </fieldset>
     <div class="b-section" id="bPlaceField">

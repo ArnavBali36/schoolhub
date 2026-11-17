@@ -122,7 +122,8 @@ class AssembleTest(unittest.TestCase):
     def test_defaults_when_nothing_is_stored(self):
         got = plan.assemble({}, date(2026, 11, 1), date(2026, 11, 15))
         self.assertEqual(got, {"settings": {"day_start": 5, "day_end": 24},
-                               "week": {wd: plan.default_week() for wd in plan.WEEKDAYS}, "days": {}})
+                               "week": {wd: plan.default_week() for wd in plan.WEEKDAYS},
+                               "series": {"blocks": []}, "days": {}})
         self.assertEqual(plan.default_week()["meals"]["lunch"], {"start": "16:00", "end": "17:00", "place": "", "off": False})
 
     def test_stored_values_cleaned_and_days_in_range_only(self):
@@ -146,6 +147,55 @@ class AssembleTest(unittest.TestCase):
         self.assertEqual(set(got["week"]), set(plan.WEEKDAYS))
         self.assertEqual(list(got["days"]), ["2026-11-01", "2026-11-15"])
         self.assertEqual(got["days"]["2026-11-01"]["blocks"][0]["title"], "Deep work")
+
+
+class SeriesTest(unittest.TestCase):
+    """The blocks that repeat by a rule (docs/planner.md, "Repeating by a rule"): one key, series,
+    whose blocks each carry their rules in turn."""
+
+    BLOCK = {"id": "s1aaaaaaaa", "type": "deep", "title": "Gym", "start": "09:00", "end": "10:00"}
+
+    def series(self, *rules):
+        return {"blocks": [{**self.BLOCK, "rules": list(rules)}]}
+
+    def test_the_series_comes_with_every_answer_cleaned(self):
+        stored = {"series": self.series({"from": "2026-11-17", "freq": "week", "days": ["tue", "thu"], "old": 1})}
+        got = plan.assemble(stored, date(2026, 11, 1), date(2026, 11, 15))
+        self.assertEqual(got["series"], self.series({"from": "2026-11-17", "freq": "week", "every": 1, "days": ["tue", "thu"]}))
+        # It is not a date: a range that holds none of its days still answers it whole.
+        self.assertEqual(got["days"], {})
+
+    def test_a_stored_series_that_no_longer_passes_is_shown_as_none(self):
+        stored = {"series": self.series({"from": "2026-11-17", "freq": "week"})}
+        self.assertEqual(plan.assemble(stored, date(2026, 11, 1), date(2026, 11, 15))["series"], {"blocks": []})
+
+    def test_what_a_frequency_does_not_use_is_dropped(self):
+        every = {"days": ["mon"], "dates": [5], "months": [3], "nth": {"which": 2, "day": "weekend"}}
+        kept = {"day": set(), "week": {"days"}, "month": {"nth"}, "year": {"months", "nth"}}
+        for freq, fields in kept.items():
+            value, error = plan.clean_plan("series", self.series({"from": "2026-11-17", "freq": freq, **every}))
+            self.assertIsNone(error)
+            rule = value["blocks"][0]["rules"][0]
+            self.assertEqual(set(rule) - {"from", "freq", "every"}, fields, freq)
+
+    def test_every_which_and_every_kind_of_day_for_on_the(self):
+        for which in plan.NTH_WHICH:
+            for day in plan.NTH_DAYS:
+                value, error = plan.clean_plan("series", self.series({"from": "2026-11-17", "freq": "month", "nth": {"which": which, "day": day}}))
+                self.assertIsNone(error)
+                self.assertEqual(value["blocks"][0]["rules"][0]["nth"], {"which": which, "day": day})
+        self.assertEqual(plan.NTH_DAYS[7:], ("day", "weekday", "weekend"))
+
+    def test_twelve_rules_in_turn_and_no_more(self):
+        turn = [{"from": f"20{10 + i}-01-01", "until": f"20{10 + i}-12-31", "freq": "day"} for i in range(12)]
+        self.assertIsNone(plan.clean_plan("series", self.series(*turn))[1])
+        self.assertIn("at most 12 rules", plan.clean_plan("series", self.series(*turn, {"from": "2030-01-01", "freq": "day"}))[1])
+
+    def test_a_dates_change_to_one_of_its_blocks_is_kept_whatever_the_series_holds(self):
+        # The server does not look the block up (as for a week's): the page drops what is orphaned.
+        value, error = plan.clean_plan("day:2026-11-17", {"repeats": {"s1aaaaaaaa": {"start": "10:00", "end": "11:00"}}})
+        self.assertIsNone(error)
+        self.assertEqual(value, {"repeats": {"s1aaaaaaaa": {"start": "10:00", "end": "11:00"}}})
 
 
 class PlanServerTest(unittest.TestCase):
@@ -248,7 +298,7 @@ class PlanServerTest(unittest.TestCase):
         status, got = self.get()
         self.assertEqual(status, 200)
         self.assertEqual(sorted(got["days"]), sorted(str(today + timedelta(days=d)) for d in (-7, 0, 7)))
-        self.assertEqual(set(got), {"settings", "week", "days"})
+        self.assertEqual(set(got), {"settings", "week", "series", "days"})
         self.assertEqual(set(got["week"]), set(plan.WEEKDAYS))
         start, end = today - timedelta(days=8), today - timedelta(days=8) + timedelta(days=61)
         self.assertEqual(sorted(self.get(f"?from={start}&to={end}")[1]["days"]),

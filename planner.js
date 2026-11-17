@@ -168,9 +168,11 @@
     return {meals, blocks: blocksOf(v).map(b => cleanBlock(b, seen, false))};
   }
   // A date's value with only what differs from its weekday kept, or null when nothing is left, which
-  // deletes the key. A change to a block no longer in the week is dropped (the server ignores it).
-  function cleanDay(v, week){
-    const ids = new Set(week.blocks.map(b => b.id));
+  // deletes the key. A change to a block no longer in the week or among the blocks that repeat by a
+  // rule (series: their list) is dropped (the server ignores it).
+  function cleanDay(v, week, series){
+    const repeating = [...week.blocks, ...(Array.isArray(series) ? series : [])];
+    const ids = new Set(repeating.map(b => b.id));
     // A repeat's key is a week block's id, never one of the value's own; kept apart all the same.
     const seen = new Set(ids), out = {}, meals = {}, repeats = {};
     const times = (src, base, o) => {
@@ -195,7 +197,7 @@
     for (const [id, src] of Object.entries(isObject(v?.repeats) ? v.repeats : {})) {
       if (!ids.has(id) || !isObject(src)) continue;
       const o = {};
-      times(src, week.blocks.find(b => b.id === id), o);
+      times(src, repeating.find(b => b.id === id), o);
       if (flag(src.skip)) o.skip = true;
       const items = cleanItems(src.items, seen);
       if (items.length) o.items = items;
@@ -204,6 +206,185 @@
     if (Object.keys(repeats).length) out.repeats = repeats;
     return Object.keys(out).length ? out : null;
   }
+
+  // ---- repeating by a rule (docs/planner.md, "Repeating by a rule") ----
+  // A block of the series key repeats by a rule, as a calendar's events do: every N days, weeks (on
+  // chosen weekdays), months (each of chosen dates, or "on the" first Monday, last weekday and so
+  // on) or years (in chosen months), for good or until a date. A block may have had several rules
+  // in turn: each is in force from its own start to its end, so a repeat changed today leaves the
+  // days before it as they were. The server only checks a rule's shape (plan.py); which dates it
+  // falls on is worked out here.
+  const FREQS = ['day', 'week', 'month', 'year'];
+  const NTH_WHICH = [1, 2, 3, 4, 5, -1];
+  const NTH_DAYS = [...WD, 'day', 'weekday', 'weekend'];
+  const SERIES = {blocks: 100, rules: 12, every: 999, count: 999};
+  const DATES = Array.from({length: 31}, (_, i) => i + 1), MONTHS = Array.from({length: 12}, (_, i) => i + 1);
+  const MONTH_NAME = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  // The start of the rule a week's block is given when it moves to the series (its repeat changed,
+  // or it was ended): "since always", which a rule for every week on one weekday can say with any
+  // early day.
+  const LONG_AGO = '2000-01-01';
+  const WALK_STEPS = 400000;     // the most dates one search asks a rule about
+  const isDate = s => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && +s.slice(0, 4) >= 1000 && isoDate(fromIso(s)) === s;
+  const dayNo = s => { const [y, m, d] = s.split('-').map(Number); return Math.round(Date.UTC(y, m - 1, d) / 864e5); };
+  const whole = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
+  // A list as the server takes it (each entry one of allowed, none twice), in allowed's order.
+  const eachOnce = (v, allowed) => Array.isArray(v) ? allowed.filter(x => v.includes(x)) : [];
+  // One rule in the server's own order of fields, or null for one the server would refuse.
+  function cleanRule(r){
+    if (!isObject(r) || !isDate(r.from) || !FREQS.includes(r.freq)) return null;
+    const out = {from: r.from};
+    if (r.until != null) {
+      if (!isDate(r.until) || r.until < r.from) return null;
+      out.until = r.until;
+    }
+    if (whole(r.count, 1, SERIES.count)) out.count = r.count;
+    out.freq = r.freq;
+    out.every = whole(r.every, 1, SERIES.every) ? r.every : 1;
+    // "On the" nth day wins over the dates, as on the server.
+    const onThe = () => {
+      if (isObject(r.nth) && NTH_WHICH.includes(r.nth.which) && NTH_DAYS.includes(r.nth.day)) { out.nth = {which: r.nth.which, day: r.nth.day}; return true; }
+      const dates = eachOnce(r.dates, DATES);
+      if (dates.length) out.dates = dates;
+      return dates.length > 0;
+    };
+    if (r.freq === 'week') {
+      const days = eachOnce(r.days, WD);
+      if (!days.length) return null;
+      out.days = days;
+    } else if (r.freq === 'year') {
+      const months = eachOnce(r.months, MONTHS);
+      if (!months.length) return null;
+      out.months = months;
+    }
+    return r.freq === 'day' || r.freq === 'week' || onThe() ? out : null;
+  }
+  // A block's rules in turn: by their start, each ending before the next starts (a rule that
+  // starts the same day as the next is replaced by it), and only the latest SERIES.rules of them.
+  function cleanRules(list){
+    const rules = (Array.isArray(list) ? list : []).map(cleanRule).filter(Boolean).sort((a, b) => a.from < b.from ? -1 : a.from > b.from ? 1 : 0);
+    const out = [];
+    rules.forEach((r, i) => {
+      const next = rules[i + 1];
+      if (next) {
+        if (next.from === r.from) return;
+        const last = addDays(next.from, -1);
+        // Cut short, it no longer runs its count of times.
+        if (!r.until || r.until > last) { r.until = last; delete r.count; }
+      }
+      out.push(cleanRule(r));
+    });
+    return out.slice(-SERIES.rules);
+  }
+  // The series as the server keeps it: blocks without items (those belong to a date), each with
+  // its rules; a block left with no rule is dropped.
+  function cleanSeries(v){
+    const seen = new Set(), blocks = [];
+    for (const b of (Array.isArray(v?.blocks) ? v.blocks : []).filter(isObject)) {
+      if (blocks.length >= SERIES.blocks) break;
+      const rules = cleanRules(b.rules);
+      if (rules.length) blocks.push({...cleanBlock(b, seen, false), rules});
+    }
+    return {blocks};
+  }
+  // The rule a week's block has always had: every week on its weekday.
+  const weekRule = wd => ({from: LONG_AGO, freq: 'week', every: 1, days: [wd]});
+  // The day of the month "on the" nth kind of day falls on, or 0 in a month that has none (a fifth
+  // Monday).
+  function nthDay(y, m, nth){
+    const n = new Date(y, m, 0).getDate(), hits = [];
+    for (let d = 1; d <= n; d++) {
+      const w = new Date(y, m - 1, d).getDay();
+      if (nth.day === 'day' || (nth.day === 'weekday' ? w >= 1 && w <= 5 : nth.day === 'weekend' ? w === 0 || w === 6 : WD[w] === nth.day)) hits.push(d);
+    }
+    return (nth.which === -1 ? hits[hits.length - 1] : hits[nth.which - 1]) || 0;
+  }
+  // Whether a rule puts its block on a date. Weeks run Sunday to Saturday, as the week strip does;
+  // "every 2 weeks" (months, years) counts from the week (month, year) the rule starts in. A date
+  // a month does not have (the 31st, February 29) is passed over, as calendars do.
+  function ruleOn(r, date){
+    if (date < r.from || (r.until && date > r.until)) return false;
+    if (r.freq === 'day') return (dayNo(date) - dayNo(r.from)) % r.every === 0;
+    if (r.freq === 'week') {
+      const w = fromIso(date).getDay();
+      return r.days.includes(WD[w]) && ((dayNo(date) - w) - (dayNo(r.from) - fromIso(r.from).getDay())) / 7 % r.every === 0;
+    }
+    const [y, m, d] = date.split('-').map(Number), [fy, fm] = r.from.split('-').map(Number);
+    if (!(r.nth ? nthDay(y, m, r.nth) === d : r.dates.includes(d))) return false;
+    return r.freq === 'month' ? ((y - fy) * 12 + (m - fm)) % r.every === 0 : r.months.includes(m) && (y - fy) % r.every === 0;
+  }
+  // The rule that puts a block on a date, or null when it is not on that date.
+  const ruleFor = (b, date) => b.rules.find(r => ruleOn(r, date)) || null;
+  // The next date worth asking a rule about after d: the day after, or, where the rule skips whole
+  // weeks, months or years, the first day of the next one it is in force in.
+  function stepOn(r, d){
+    const next = addDays(d, 1);
+    if (r.freq === 'day') return addDays(d, r.every - (dayNo(d) - dayNo(r.from)) % r.every);
+    const [y, m] = next.split('-').map(Number), [fy, fm] = r.from.split('-').map(Number);
+    if (r.freq === 'week') {
+      const w = fromIso(next).getDay(), k = ((dayNo(next) - w) - (dayNo(r.from) - fromIso(r.from).getDay())) / 7 % r.every;
+      return k ? addDays(next, (r.every - k) * 7 - w) : next;
+    }
+    if (r.freq === 'month') {
+      const k = ((y - fy) * 12 + (m - fm)) % r.every, t = y * 12 + m - 1 + r.every - k;
+      return k ? `${Math.floor(t / 12)}-${pad(t % 12 + 1)}-01` : next;
+    }
+    const k = (y - fy) % r.every;
+    return k ? `${y + r.every - k}-01-01` : next;
+  }
+  // The dates a rule falls on from `from` on, in order: at most `most` of them.
+  function ruleDates(r, from, most){
+    const out = [];
+    let d = r.from > from ? r.from : from;
+    for (let steps = 0; steps < WALK_STEPS && out.length < most && d < '9999' && (!r.until || d <= r.until); steps++) {
+      if (ruleOn(r, d)) out.push(d);
+      d = stepOn(r, d);
+    }
+    return out;
+  }
+  // The first date on or after `from` that one of a block's rules falls on, or null for none.
+  function firstOn(rules, from){
+    for (const r of rules) { const [d] = ruleDates(r, from, 1); if (d) return d; }
+    return null;
+  }
+  // The date of a rule's nth time, counting from its start ("after 10 times" ends there), or null.
+  function nthTime(r, n){
+    const open = {...r};
+    delete open.until;
+    const dates = ruleDates(open, r.from, n);
+    return dates.length === n ? dates[n - 1] : null;
+  }
+  // Two rules that say the same, whatever day each starts.
+  const sameRule = (a, b) => JSON.stringify({...cleanRule({...a, from: LONG_AGO, until: null}), until: a.until, count: a.count}) === JSON.stringify({...cleanRule({...b, from: LONG_AGO, until: null}), until: b.until, count: b.count});
+  // A rule in words: "Every day", "Every Monday and Wednesday", "Every 2 weeks on Tuesday", "Every
+  // month on the 1st and 15th", "Every 3 months on the last weekday", "Every year on November 17",
+  // "Every year on the first Monday of November"; then ", until Dec 19, 2026" or ", 10 times".
+  const ORDINAL = ['first', 'second', 'third', 'fourth', 'fifth'];
+  const NTH_NAME = {day: 'day', weekday: 'weekday', weekend: 'weekend day'};
+  const nth = n => n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
+  const listOf = a => a.length < 3 ? a.join(' and ') : `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`;
+  const nthText = n => `the ${n.which === -1 ? 'last' : ORDINAL[n.which - 1]} ${NTH_NAME[n.day] || WD_NAME[WD.indexOf(n.day)]}`;
+  const untilText = s => fromIso(s).toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
+  function ruleText(r, withEnd = true){
+    const n = r.every, each = unit => n === 1 ? `Every ${unit}` : `Every ${n} ${unit}s`;
+    let s;
+    if (r.freq === 'day') s = each('day');
+    else if (r.freq === 'week') {
+      const days = WD.filter(d => r.days.includes(d)), names = listOf(days.map(d => WD_NAME[WD.indexOf(d)]));
+      const all = days.length === 7, school = days.join() === 'mon,tue,wed,thu,fri';
+      s = n === 1 ? (all ? 'Every day' : school ? 'Every weekday' : `Every ${names}`) : `${each('week')} on ${all ? 'every day' : school ? 'weekdays' : names}`;
+    } else if (r.freq === 'month') s = `${each('month')} on ${r.nth ? nthText(r.nth) : 'the ' + listOf(r.dates.map(nth))}`;
+    else {
+      const months = listOf(MONTHS.filter(m => r.months.includes(m)).map(m => MONTH_NAME[m - 1]));
+      s = r.nth ? `${each('year')} on ${nthText(r.nth)} of ${months}`
+        : r.months.length === 1 && r.dates.length === 1 ? `${each('year')} on ${months} ${r.dates[0]}`
+        : `${each('year')} in ${months} on the ${listOf(r.dates.map(nth))}`;
+    }
+    if (withEnd && r.until) s += r.count ? `, ${r.count} ${r.count === 1 ? 'time' : 'times'}` : `, until ${untilText(r.until)}`;
+    return s;
+  }
+  // "repeats every Monday" inside a sentence.
+  const repeatsText = r => 'repeats ' + ruleText(r).replace(/^E/, 'e');
 
   // ---- a step taken back when something else changed too (undo) ----
   // A step of the undo keeps, for each key it saved, the value before and the value it left. Taking
@@ -263,7 +444,7 @@
   }
 
   // ---- the plan, loaded and saved ----
-  let plan = null;               // {settings, week: {sun: …}, days: {date: value}}
+  let plan = null;               // {settings, week: {sun: …}, series: {blocks}, days: {date: value}}
   let loaded = null;             // the dates plan.days covers: {from, to}
   let loadFailed = false;        // the first load failed: the planner offers to try again
   let loadSeq = 0, needReload = false;
@@ -277,6 +458,8 @@
 
   const settings = () => plan?.settings || DEFAULT_SETTINGS;
   const weekOf = wd => plan?.week?.[wd] || cleanWeek(null);
+  // The blocks that repeat by a rule.
+  const seriesBlocks = () => plan?.series?.blocks || [];
   const inRange = d => !!loaded && d >= loaded.from && d <= loaded.to;
   // The shown date's own value is known, so a change to it cannot lose what is stored. Never while
   // the plan is a copy: a change made to one would save over whatever the server has since.
@@ -284,13 +467,16 @@
 
   function getKey(key){
     if (key === 'settings') return plan.settings;
+    if (key === 'series') return plan.series || cleanSeries(null);
     if (key.startsWith('week:')) return weekOf(key.slice(5));
     return plan.days[key.slice(4)] || null;
   }
-  // A key's value as the plan keeps it: the settings cleaned, a weekday never empty, a date's or null.
-  const kept = (key, value) => key === 'settings' ? cleanSettings(value) : key.startsWith('week:') ? value || cleanWeek(null) : value || null;
+  // A key's value as the plan keeps it: the settings and the series cleaned, a weekday never empty,
+  // a date's or null.
+  const kept = (key, value) => key === 'settings' ? cleanSettings(value) : key === 'series' ? cleanSeries(value) : key.startsWith('week:') ? value || cleanWeek(null) : value || null;
   function setKey(key, value){
     if (key === 'settings') plan.settings = cleanSettings(value);
+    else if (key === 'series') plan.series = cleanSeries(value);
     else if (key.startsWith('week:')) plan.week[key.slice(5)] = value || cleanWeek(null);
     else if (value) plan.days[key.slice(4)] = value;
     else delete plan.days[key.slice(4)];
@@ -336,7 +522,15 @@
   function editDay(date, fn){
     const v = clone(plan.days[date]) || {};
     if (fn(v) === false) return false;
-    save('day:' + date, cleanDay(v, weekOf(wdOf(date))));
+    save('day:' + date, cleanDay(v, weekOf(wdOf(date)), seriesBlocks()));
+    return true;
+  }
+  // The blocks that repeat by a rule; none left is no key at all, as before the first one.
+  function editSeries(fn){
+    const v = clone(getKey('series'));
+    if (fn(v) === false) return false;
+    const next = cleanSeries(v);
+    save('series', next.blocks.length ? next : null);
     return true;
   }
   function editWeek(wd, fn){
@@ -389,12 +583,14 @@
       } catch {}
       if (!plan || !isObject(body)) return false;
       if (pending || serial !== saveSerial) continue;
-      // The settings and all seven weekdays come with every answer, and are taken too: a date's
-      // value is cleaned against its weekday (cleanDay), and against a week this page has had for
-      // a while that would drop what another device has since added to it (a repeating block's
-      // to-dos for the day, a meal's time kept for the day when the weekly time moved).
+      // The settings, all seven weekdays and the series come with every answer, and are taken too:
+      // a date's value is cleaned against its weekday and the series (cleanDay), and against ones
+      // this page has had for a while that would drop what another device has since added (a
+      // repeating block's to-dos for the day, a meal's time kept for the day when the weekly time
+      // moved).
       plan.settings = cleanSettings(body.settings);
       for (const wd of WD) plan.week[wd] = cleanWeek(body.week?.[wd]);
+      plan.series = cleanSeries(body.series);
       for (const {key} of step.writes) if (key.startsWith('day:')) setKey(key, body.days?.[key.slice(4)]);
       return true;
     }
@@ -410,10 +606,10 @@
   async function travelPlan(step, dir, o){
     const had = !focusLost();
     if (!plan || !await storedNow(step)) return {ok: false, why: 'failed'};
-    const rank = key => key === 'settings' ? 0 : key.startsWith('week:') ? 1 : 2;
+    const rank = key => key === 'settings' ? 0 : key.startsWith('day:') ? 2 : 1;
     const next = new Map();
-    // The settings and the weeks first: a date's value is cleaned against the week it will have,
-    // and a week's change lands before the date's change that depends on it.
+    // The settings, the weeks and the series first: a date's value is cleaned against the week and
+    // the series it will have, and their change lands before the date's change that depends on it.
     for (const w of [...step.writes].sort((a, b) => rank(a.key) - rank(b.key))) {
       const [from, to] = dir === 'undo' ? [w.after, w.before] : [w.before, w.after];
       const key = w.key, now = getKey(key);
@@ -422,7 +618,8 @@
         v = rebase(from, now, to);
         if (v === CONFLICT) { render(); return {ok: false, why: 'conflict'}; }
         const wd = key.startsWith('day:') && wdOf(key.slice(4));
-        v = key === 'settings' ? cleanSettings(v) : wd ? cleanDay(clone(v), next.get('week:' + wd) || weekOf(wd)) : cleanWeek(clone(v));
+        v = key === 'settings' ? cleanSettings(v) : key === 'series' ? cleanSeries(clone(v))
+          : wd ? cleanDay(clone(v), next.get('week:' + wd) || weekOf(wd), next.has('series') ? next.get('series')?.blocks : seriesBlocks()) : cleanWeek(clone(v));
       }
       next.set(key, clone(v));
     }
@@ -431,9 +628,9 @@
     const sent = [];
     for (const [key, v] of next) {
       if (same(getKey(key), v)) continue;
-      // The settings and a weekday as the defaults are stored as no key at all, which is what they
-      // were before their first change.
-      const none = key === 'settings' ? same(v, DEFAULT_SETTINGS) : key.startsWith('week:') && same(v, cleanWeek(null));
+      // The settings and a weekday as the defaults, and a series with no block, are stored as no
+      // key at all, which is what they were before their first change.
+      const none = key === 'settings' ? same(v, DEFAULT_SETTINGS) : key === 'series' ? !v?.blocks?.length : key.startsWith('week:') && same(v, cleanWeek(null));
       sent.push(save(key, none ? null : v));
     }
     if (!sent.length) render();
@@ -506,7 +703,7 @@
   }
   // The plan as the page holds it, from the server's answer or the copy kept of one.
   function planOf(body){
-    const p = {settings: cleanSettings(body.settings), week: {}, days: {}};
+    const p = {settings: cleanSettings(body.settings), week: {}, series: cleanSeries(body.series), days: {}};
     for (const wd of WD) p.week[wd] = cleanWeek(body.week?.[wd]);
     for (const [d, v] of Object.entries(isObject(body.days) ? body.days : {})) if (v && typeof v === 'object') p.days[d] = v;
     return p;
@@ -570,8 +767,10 @@
   const loadedPlan = () => copied ? new Promise(done => { const before = whenLoaded; whenLoaded = () => { before?.(); done(); }; }) : Promise.resolve();
 
   // ---- what shows on a date ----
-  // Meals (the date's change over the weekday's over the defaults), the weekday's repeating blocks
-  // with the date's changes, and the date's own blocks. Each entry's ref says where it is kept.
+  // Meals (the date's change over the weekday's over the defaults), the repeating blocks that fall
+  // on the date (the weekday's own, and those of the series whose rule puts them there) with the
+  // date's changes, and the date's own blocks. Each entry's ref says where it is kept; a repeating
+  // one carries its rule, and series for one kept in the series.
   function entriesOn(date){
     const week = weekOf(wdOf(date)), day = plan?.days[date] || {}, out = [];
     for (const m of MEALS) {
@@ -580,10 +779,16 @@
         place: o.place ?? b.place, off: o.off ?? b.off, dayOff: o.off === true, items: o.items || [], changed: o.start != null || o.end != null,
         placeChanged: o.place != null && o.place !== b.place});
     }
-    for (const b of week.blocks) {
+    const repeating = (b, rule, series) => {
       const r = day.repeats?.[b.id] || {};
-      out.push({ref: 'repeat:' + b.id, kind: b.type, id: b.id, repeat: true, title: b.title, start: toMin(r.start ?? b.start),
+      out.push({ref: 'repeat:' + b.id, kind: b.type, id: b.id, repeat: true, series, rule, title: b.title, start: toMin(r.start ?? b.start),
         end: toMin(r.end ?? b.end), skip: !!r.skip, items: r.items || [], changed: r.start != null || r.end != null});
+    };
+    for (const b of week.blocks) repeating(b, weekRule(wdOf(date)), false);
+    for (const b of plan?.series?.blocks || []) {
+      const rule = ruleFor(b, date);
+      // (An id the week has too is the week's: never the same block twice.)
+      if (rule && !week.blocks.some(w => w.id === b.id)) repeating(b, rule, true);
     }
     for (const b of day.blocks || [])
       out.push({ref: 'block:' + b.id, kind: b.type, id: b.id, title: b.title, start: toMin(b.start), end: toMin(b.end), items: b.items || []});
@@ -692,7 +897,7 @@
     if (e.kind === 'meal') parts.push(e.place ? 'at ' + e.place : 'no place set');
     const open = e.items.filter(i => !i.done).length;
     if (e.items.length) parts.push(open ? `${open} ${open === 1 ? 'thing' : 'things'} to get done` : 'all done');
-    if (e.repeat) parts.push('repeats every ' + wdName(shown));
+    if (e.repeat) parts.push(repeatsText(e.rule));
     if (e.changed) parts.push('changed for ' + thisDay(shown));
     return parts.join(', ');
   }
@@ -1411,10 +1616,14 @@
 
   // ---- the block editor ----
   const F = Object.fromEntries(['blockDialog', 'blockForm', 'bHeading', 'bKindField', 'bKind', 'bKindFixed', 'bTitleField', 'bTitle', 'bStart', 'bEnd',
-    'bChanged', 'bChangedText', 'bUseWeek', 'bRepeatField', 'bRepeat', 'bRepeatText', 'bUnrepeat', 'bUnrepeatText', 'bSkipText', 'bRemoveText',
+    'bChanged', 'bChangedText', 'bUseWeek', 'bRepeatField', 'bRepeat', 'bCustom', 'bEvery', 'bFreq', 'bDays', 'bMonthly', 'bDates', 'bYearly', 'bMonths', 'bYearNth',
+    'bNthRow', 'bNthWhich', 'bNthDay', 'bEndRow', 'bRepEnd', 'bRepUntil', 'bRepCountBox', 'bRepCount', 'bRepSummary',
+    'bUnrepeat', 'bUnrepeatText', 'bSkipText', 'bEndText', 'bRemoveText',
     'bPlaceField', 'bPlace', 'bPlaceHint', 'bPlaceWeek', 'bItems', 'bNewItem', 'bPick', 'bPicker', 'bErr', 'bDelete', 'bCancel',
     'weekDialog', 'weekForm', 'wDays', 'wBlocks', 'wStart', 'wEnd', 'wErr', 'wCancel'].map(id => [id, document.getElementById(id)]));
-  let ed = null;   // the block being edited: {date, ref (null for a new one), kind, meal, repeat, items, back}
+  // The block being edited: {date, ref (null for a new one), kind, meal, repeat, series (it is kept
+  // in the series), rule (its rule on this date), touched (its repeat was changed here), items, back}.
+  let ed = null;
 
   function showErr(el, msg, focus){
     el.textContent = msg;
@@ -1428,7 +1637,8 @@
     const e = entry || {ref: null, kind: 'deep', title: KIND_NAME.deep, start: init.start, end: init.end, items: init.items || []};
     const meal = e.kind === 'meal', wdN = wdName(date);
     // back: where focus goes when the editor closes (the block, once it is drawn anew).
-    ed = {date, ref: e.ref, kind: e.kind, meal: e.meal, repeat: !!e.repeat, title: e.title, items: clone(e.items) || [], back: e.ref ? refSel(e.ref) : focusKey()};
+    ed = {date, ref: e.ref, kind: e.kind, meal: e.meal, repeat: !!e.repeat, series: !!e.series, rule: e.repeat ? e.rule : null, touched: false,
+      title: e.title, items: clone(e.items) || [], back: e.ref ? refSel(e.ref) : focusKey()};
     F.bHeading.textContent = !e.ref ? 'New block' : meal ? MEAL_NAME[e.meal] : 'Edit block';
     F.bKindField.hidden = meal;
     F.bKindFixed.hidden = !meal;
@@ -1441,14 +1651,13 @@
     F.bEnd.value = timeValue(e.end);
     F.bChanged.hidden = !e.changed;
     F.bChangedText.textContent = `Changed for ${thisDay(date)} only.`;
-    F.bUseWeek.textContent = `Use this time every ${wdN}`;
+    F.bUseWeek.textContent = ed.series ? 'Use this time every time it repeats' : `Use this time every ${wdN}`;
     F.bRepeatField.hidden = meal;
-    F.bRepeat.checked = ed.repeat;
-    F.bRepeatText.textContent = `Repeat every ${wdN}`;
-    F.bUnrepeat.hidden = true;
-    F.bUnrepeatText.textContent = `It repeats every ${wdN}. Instead:`;
+    showRepeat(ed.rule, date);
+    F.bUnrepeatText.textContent = ed.repeat ? `It ${repeatsText(ed.rule)}. Instead:` : '';
     F.bSkipText.textContent = `Only skip it ${thisDay(date)}`;
-    F.bRemoveText.textContent = `Remove it from every ${wdN}`;
+    F.bEndText.textContent = `Stop it from ${thisDay(date)} on, and keep the days before`;
+    F.bRemoveText.textContent = ed.series ? 'Remove it from every day, the days before too' : `Remove it from every ${wdN}`;
     F.blockForm.querySelector('input[name="bUnrep"][value="skip"]').checked = true;
     F.bPlaceField.hidden = !meal;
     F.bPlace.value = meal ? e.place : '';
@@ -1492,6 +1701,141 @@
     return true;
   }
 
+  // ---- the editor's repeat ----
+  // Repeat is a menu of the usual choices for this date (every day, every week on its weekday,
+  // every 2 weeks, every month on its date, every year) and Custom, which opens the rest: every N
+  // days, weeks on chosen weekdays, months on chosen dates or "on the" nth day, years in chosen
+  // months; and, for any of them, when it ends. The pills and the menus' options are made once.
+  const pill = (name, value, text, label) => `<label class="b-pill" title="${label}"><input type="checkbox" name="${name}" value="${value}" aria-label="${label}"><span aria-hidden="true">${text}</span></label>`;
+  if (F.bDays) {
+    F.bDays.innerHTML = WD.map((d, i) => pill('bDay', d, WD_NAME[i][0], WD_NAME[i])).join('');
+    F.bDates.innerHTML = DATES.map(d => pill('bDate', d, d, 'The ' + nth(d))).join('');
+    F.bMonths.innerHTML = MONTHS.map(m => pill('bMonth', m, MONTH_NAME[m - 1].slice(0, 3), MONTH_NAME[m - 1])).join('');
+    F.bNthWhich.innerHTML = NTH_WHICH.map(w => `<option value="${w}">${w === -1 ? 'last' : ORDINAL[w - 1]}</option>`).join('');
+    F.bNthDay.innerHTML = NTH_DAYS.map(d => `<option value="${d}">${NTH_NAME[d] || WD_NAME[WD.indexOf(d)]}</option>`).join('');
+  }
+  const ticked = box => [...box.querySelectorAll('input:checked')].map(i => i.value);
+  const tick = (box, values) => { for (const i of box.querySelectorAll('input')) i.checked = values.map(String).includes(i.value); };
+  const monthBy = () => F.blockForm.querySelector('input[name="bMonthBy"]:checked')?.value || 'each';
+  // The menu's usual choices for a date, as rules starting on it.
+  function usualRule(choice, date){
+    const [, m, d] = date.split('-').map(Number), base = {from: date, every: choice === '2weeks' ? 2 : 1};
+    if (choice === 'day') return {...base, freq: 'day'};
+    if (choice === 'week' || choice === '2weeks') return {...base, freq: 'week', days: [wdOf(date)]};
+    if (choice === 'month') return {...base, freq: 'month', dates: [d]};
+    return {...base, freq: 'year', months: [m], dates: [d]};
+  }
+  // Which of the menu's choices a rule is on a date, when it is one of the usual ones.
+  function usualChoice(rule, date){
+    const open = {...rule, until: null, count: null};
+    return ['day', 'week', '2weeks', 'month', 'year'].find(c => sameRule(open, usualRule(c, date))) || 'custom';
+  }
+  // The form shows a rule (null: Never) for a block on a date. Custom's fields start from the rule,
+  // or from the date's own weekday, day of the month and month.
+  function showRepeat(rule, date){
+    const [, m, d] = date.split('-').map(Number);
+    F.bRepeat.value = rule ? usualChoice(rule, date) : 'none';
+    F.bEvery.value = rule?.every || 1;
+    F.bFreq.value = rule?.freq || 'week';
+    tick(F.bDays, rule?.days || [wdOf(date)]);
+    tick(F.bDates, rule?.freq === 'month' && rule.dates || [d]);
+    tick(F.bMonths, rule?.months || [m]);
+    for (const i of F.blockForm.querySelectorAll('input[name="bMonthBy"]')) i.checked = i.value === (rule?.freq === 'month' && rule.nth ? 'nth' : 'each');
+    F.bYearNth.checked = rule?.freq === 'year' && !!rule.nth;
+    // "On the" starts as this date says it: the third Tuesday.
+    F.bNthWhich.value = rule?.nth?.which ?? Math.min(5, Math.ceil(d / 7));
+    F.bNthDay.value = rule?.nth?.day || wdOf(date);
+    F.bRepEnd.value = !rule?.until ? 'never' : rule.count ? 'count' : 'date';
+    F.bRepUntil.value = rule?.until || '';
+    F.bRepUntil.min = date;
+    F.bRepCount.value = rule?.count || 10;
+    repeatShown();
+  }
+  // What of the repeat's fields shows for what is chosen, and the rule said in words.
+  function repeatShown(){
+    const choice = F.bRepeat.value, on = choice !== 'none', custom = choice === 'custom', freq = F.bFreq.value;
+    F.bCustom.hidden = !custom;
+    F.bDays.hidden = freq !== 'week';
+    F.bMonthly.hidden = freq !== 'month';
+    F.bYearly.hidden = freq !== 'year';
+    const byNth = freq === 'month' ? monthBy() === 'nth' : freq === 'year' && F.bYearNth.checked;
+    F.bNthRow.hidden = !byNth;
+    F.bDates.classList.toggle('off', freq === 'month' && byNth);
+    F.bEndRow.hidden = !on;
+    F.bRepUntil.hidden = F.bRepEnd.value !== 'date';
+    F.bRepCountBox.hidden = F.bRepEnd.value !== 'count';
+    F.bUnrepeat.hidden = !(ed?.repeat && !on);
+    // The rule in words under a custom repeat or one that ends; and what a change to a repeat means.
+    const rule = on ? readRepeat(ed.date) : null, ok = rule && !rule.error;
+    const changing = ok && ed.repeat && ed.touched && !sameRule(rule, ed.rule);
+    const first = ok && firstOn([rule], ed.date);
+    const words = !ok ? '' : [custom || rule.until || changing ? ruleText(rule) + '.' : '',
+      first && first !== ed.date ? `First on ${shortDate(first)}.` : '',
+      changing ? `From ${thisDay(ed.date)} on; the days before keep what they had.` : ''].filter(Boolean).join(' ');
+    F.bRepSummary.textContent = words;
+    F.bRepSummary.hidden = !words;
+  }
+  // The form's repeat as a rule starting on a date; null for Never; {error, focus} for one that
+  // cannot be (no weekday chosen, an end before the start).
+  function readRepeat(date){
+    const choice = F.bRepeat.value;
+    if (choice === 'none') return null;
+    const [, , d] = date.split('-').map(Number);
+    let r = choice === 'custom' ? {from: date, freq: F.bFreq.value, every: Number(F.bEvery.value)} : usualRule(choice, date);
+    if (choice === 'custom') {
+      if (!whole(r.every, 1, SERIES.every)) return {error: `“Every” takes a whole number from 1 to ${SERIES.every}.`, focus: F.bEvery};
+      const byNth = r.freq === 'month' ? monthBy() === 'nth' : r.freq === 'year' && F.bYearNth.checked;
+      if (r.freq === 'week') {
+        r.days = ticked(F.bDays);
+        if (!r.days.length) return {error: 'Pick at least one weekday.', focus: F.bDays.querySelector('input')};
+      }
+      if (r.freq === 'year') {
+        r.months = ticked(F.bMonths).map(Number);
+        if (!r.months.length) return {error: 'Pick at least one month.', focus: F.bMonths.querySelector('input')};
+      }
+      if (byNth) r.nth = {which: Number(F.bNthWhich.value), day: F.bNthDay.value};
+      else if (r.freq === 'month') {
+        r.dates = ticked(F.bDates).map(Number);
+        if (!r.dates.length) return {error: 'Pick at least one day of the month.', focus: F.bDates.querySelector('input')};
+      } else if (r.freq === 'year') r.dates = [d];   // a year's day of the month is this date's
+    }
+    if (F.bRepEnd.value === 'date') {
+      if (!isDate(F.bRepUntil.value)) return {error: 'Give the last day it repeats.', focus: F.bRepUntil};
+      if (F.bRepUntil.value < date) return {error: `It cannot end before ${shortDate(date)}.`, focus: F.bRepUntil};
+      r.until = F.bRepUntil.value;
+    } else if (F.bRepEnd.value === 'count') {
+      const n = Number(F.bRepCount.value);
+      if (!whole(n, 1, SERIES.count)) return {error: `“After” takes a whole number of times from 1 to ${SERIES.count}.`, focus: F.bRepCount};
+      const last = nthTime(cleanRule(r), n);
+      if (!last) return {error: 'That many times runs further ahead than the planner goes.', focus: F.bRepCount};
+      Object.assign(r, {until: last, count: n});
+    }
+    r = cleanRule(r);
+    return r || {error: 'That repeat cannot be saved. Check its days.', focus: F.bRepeat};
+  }
+  // "From this day on" for a repeating block: its rules are cut to end the day before `date` (one
+  // that starts on it or later goes), then `rule` is added when one is given, and `patch` (its
+  // kind and title) taken. A week's block moves to the series for it, with its id (so each date's
+  // own changes to it stay where they are) and the rule it has had so far.
+  function ruleFrom(series, id, date, rule, patch = {}){
+    const last = addDays(date, -1);
+    // (A rule left with no day at all, one that had not come up yet, goes too.)
+    const cutBefore = rules => rules.filter(r => r.from < date).map(r => {
+      if (r.until && r.until <= last) return r;
+      const {count, ...rest} = r;   // cut short, it no longer runs its count of times
+      return {...rest, until: last};
+    }).filter(r => ruleDates(r, r.from, 1).length);
+    if (series) return editSeries(v => {
+      const b = v.blocks.find(x => x.id === id);
+      if (!b) return false;
+      Object.assign(b, patch, {rules: [...cutBefore(b.rules), ...(rule ? [rule] : [])]});
+    });
+    const wd = wdOf(date), wb = weekOf(wd).blocks.find(b => b.id === id);
+    if (!wb) return false;
+    editWeek(wd, w => { w.blocks = w.blocks.filter(b => b.id !== id); });
+    return editSeries(v => { v.blocks.push({...wb, ...patch, rules: [...cutBefore([weekRule(wd)]), ...(rule ? [rule] : [])]}); });
+  }
+
   // Saves the editor; false when something must be fixed first.
   function saveEditor(){
     const start = readTime(F.bStart, false), end = readTime(F.bEnd, true);
@@ -1506,20 +1850,38 @@
       record(changeLabel(old, {start, end, place, items}), date, ref, () => editDay(date, v => { Object.assign(holder(v, ref), times, {place, items}); }));
       return closeEditor(refSel(ref));
     }
-    const type = F.bKind.value, title = cut(F.bTitle.value, LIMIT.title) || KIND_NAME[type], repeat = F.bRepeat.checked;
+    const type = F.bKind.value, title = cut(F.bTitle.value, LIMIT.title) || KIND_NAME[type];
+    const asked = readRepeat(date);
+    if (asked?.error) return showErr(F.bErr, asked.error, asked.focus);
+    // A repeat stays as it was unless its fields were changed here and now say something else.
+    const was = ed.repeat ? ed.rule : null;
+    const rule = asked && was && (!ed.touched || sameRule(asked, was)) ? was : asked;
+    const repeat = !!rule, changed = repeat && rule !== was;
     const edited = changeLabel(old, {title, kind: type, start, end, items});
     let back = refSel(ref);
-    const weekFull = () => weekOf(wd).blocks.length >= LIMIT.blocks && showErr(F.bErr, `${wdN} already has ${LIMIT.blocks} repeating blocks.`) === false;
+    const seriesFull = () => seriesBlocks().length >= SERIES.blocks && showErr(F.bErr, `There are already ${SERIES.blocks} repeating blocks. Remove one under Week… first.`) === false;
     const dayFull = () => (day.blocks || []).length >= LIMIT.blocks && showErr(F.bErr, `This day already has ${LIMIT.blocks} blocks of its own.`) === false;
+    // A repeat set or changed here starts on this date: the first day it falls on, and whether
+    // that is this one. What is to get done here needs the block to be here.
+    let first = date;
+    if (changed) {
+      first = firstOn([rule], date);
+      if (!first) return showErr(F.bErr, 'That repeat never comes up. Check its days and when it ends.', F.bRepeat);
+      if (first !== date && items.length)
+        return showErr(F.bErr, `${shortDate(date)} is not one of the days it would repeat on, so the things to get done here would have no block. Include this day, or remove them.`, F.bRepeat);
+    }
+    const here = first === date;
+    const said = () => ruleText(rule).replace(/^E/, 'e') + (here ? '' : `, starting ${shortDate(first)}`);
     if (!ref) {
       const id = newId();
       if (repeat) {
-        if (weekFull()) return false;
-        // The week first: the date's items for it are kept only once the block is in the week.
-        record(`added “${title}” every ${wdN}, ${range(start, end)}`, date, 'repeat:' + id, () => {
-          editWeek(wd, w => { w.blocks.push({id, type, title, ...times}); });
+        if (seriesFull()) return false;
+        // The series first: the date's items for it are kept only once the block is in it.
+        const undo = record(`added “${title}” ${said()}, ${range(start, end)}`, date, 'repeat:' + id, () => {
+          editSeries(v => { v.blocks.push({id, type, title, ...times, rules: [rule]}); });
           if (items.length) editDay(date, v => { (v.repeats ||= {})[id] = {items}; });
         });
+        if (!here) SH.toast(`“${title}” repeats ${said()}`, undo);
         back = refSel('repeat:' + id);
       } else {
         if (dayFull()) return false;
@@ -1529,40 +1891,65 @@
     } else if (ref.startsWith('block:')) {
       const id = ref.slice(6);
       if (repeat) {
-        // Ticking Repeat moves a one-off block into the week, keeping this date's items.
-        if (weekFull()) return false;
-        const undo = record(`made “${title}” repeat every ${wdN}`, date, 'repeat:' + id, () => {
-          editWeek(wd, w => { w.blocks.push({id, type, title, ...times}); });
+        // Setting a repeat moves a one-off block into the series, keeping this date's items.
+        if (seriesFull()) return false;
+        const undo = record(`made “${title}” repeat ${said()}`, date, 'repeat:' + id, () => {
+          editSeries(v => { v.blocks.push({id, type, title, ...times, rules: [rule]}); });
           editDay(date, v => {
             v.blocks = (v.blocks || []).filter(b => b.id !== id);
             if (items.length) (v.repeats ||= {})[id] = {items};
           });
         });
-        SH.toast(`“${title}” repeats every ${wdN} now`, undo);
-        back = refSel('repeat:' + id);
+        SH.toast(`“${title}” repeats ${said()} now`, undo);
+        back = here ? refSel('repeat:' + id) : neighbourSel(ref);
       } else {
         record(edited, date, ref, () => editDay(date, v => { const b = holder(v, ref); if (!b) return false; Object.assign(b, {type, title, ...times, items}); }));
       }
     } else {
-      const id = ref.slice(7);
+      const id = ref.slice(7), series = ed.series;
+      // Where its kind, title and usual time are kept: the series, or its weekday.
+      const base = (series ? seriesBlocks() : weekOf(wd).blocks).find(b => b.id === id);
+      const how = repeat ? '' : F.blockForm.querySelector('input[name="bUnrep"]:checked')?.value || 'skip';
+      // A week's block moves to the series when its repeat changes or ends.
+      if (!series && (changed || how === 'end') && seriesFull()) return false;
       if (!repeat) {
         back = neighbourSel(ref);
-        if (F.blockForm.querySelector('input[name="bUnrep"]:checked')?.value === 'remove') {
-          const undo = record(`removed “${title}” from every ${wdN}`, date, ref, () => {
-            editWeek(wd, w => { w.blocks = w.blocks.filter(b => b.id !== id); });
+        if (how === 'remove') {
+          const undo = record(series ? `removed “${title}” from every day` : `removed “${title}” from every ${wdN}`, date, ref, () => {
+            if (series) editSeries(v => { v.blocks = v.blocks.filter(b => b.id !== id); });
+            else editWeek(wd, w => { w.blocks = w.blocks.filter(b => b.id !== id); });
             editDay(date, () => {});  // drops this date's changes to it
           });
-          SH.toast(`Removed “${title}” from every ${wdN}`, undo);
+          SH.toast(series ? `Removed “${title}” from every day` : `Removed “${title}” from every ${wdN}`, undo);
+        } else if (how === 'end') {
+          const from = isToday(date) ? 'today' : shortDate(date);
+          const undo = record(`stopped “${title}” from ${from} on`, date, ref, () => {
+            ruleFrom(series, id, date, null);
+            editDay(date, v => { if (v.repeats) delete v.repeats[id]; });
+          });
+          SH.toast(`Stopped “${title}” from ${from} on`, undo);
         } else {
           const undo = record(`skipped “${title}” ${onDay(date)}`, date, ref, () => editDay(date, v => { Object.assign(holder(v, ref), {skip: true, items}); }));
           SH.toast(`Skipped “${title}” ${onDay(date)}`, undo);
         }
+      } else if (changed) {
+        // The new repeat holds from this date on; the days before keep the old one.
+        const undo = record(`changed “${title}” to repeat ${said()}`, date, ref, () => {
+          ruleFrom(series, id, date, rule, {type, title});
+          editDay(date, v => {
+            if (here) Object.assign(holder(v, ref), times, {items});
+            else if (v.repeats) delete v.repeats[id];
+          });
+        });
+        SH.toast(`“${title}” repeats ${said()} now`, undo);
+        if (!here) back = neighbourSel(ref);
       } else {
-        // The kind and title belong to the week; the time set here and the items, to this date.
-        const wb = weekOf(wd).blocks.find(b => b.id === id);
+        // The kind and title belong to the repeat; the time set here and the items, to this date.
         record(edited, date, ref, () => {
-          if (wb && (wb.type !== type || wb.title !== title))
-            editWeek(wd, w => { Object.assign(w.blocks.find(b => b.id === id), {type, title}); });
+          if (base && (base.type !== type || base.title !== title)) {
+            if (series) editSeries(v => { Object.assign(v.blocks.find(b => b.id === id), {type, title}); });
+            else editWeek(wd, w => { Object.assign(w.blocks.find(b => b.id === id), {type, title}); });
+          }
           editDay(date, v => { Object.assign(holder(v, ref), times, {items}); });
         });
       }
@@ -1605,20 +1992,18 @@
     const start = readTime(F.bStart, false), end = readTime(F.bEnd, true);
     const bad = spanError(start, end);
     if (bad) return showErr(F.bErr, bad, F.bEnd);
-    const {date, ref} = ed, wd = wdOf(date);
-    const undo = record(`set ${named(ed.kind === 'meal' ? {kind: 'meal', title: MEAL_NAME[ed.meal]} : ed)} to ${range(start, end)} every ${wdName(date)}`, date, ref, () => {
-      editWeek(wd, w => {
-        const t = ed.kind === 'meal' ? w.meals[ed.meal] : w.blocks.find(b => 'repeat:' + b.id === ref);
-        if (!t) return false;
-        Object.assign(t, {start: toTime(start), end: toTime(end)});
-      });
+    const {date, ref} = ed, wd = wdOf(date), every = ed.series ? 'every time it repeats' : 'every ' + wdName(date);
+    const undo = record(`set ${named(ed.kind === 'meal' ? {kind: 'meal', title: MEAL_NAME[ed.meal]} : ed)} to ${range(start, end)} ${every}`, date, ref, () => {
+      const set = t => { if (!t) return false; Object.assign(t, {start: toTime(start), end: toTime(end)}); };
+      if (ed.series) editSeries(v => set(v.blocks.find(b => 'repeat:' + b.id === ref)));
+      else editWeek(wd, w => set(ed.kind === 'meal' ? w.meals[ed.meal] : w.blocks.find(b => 'repeat:' + b.id === ref)));
       editDay(date, v => { const h = holder(v, ref); delete h.start; delete h.end; });
     });
     // The button goes with the note: focus stays in the dialog, on the start time.
     F.bChanged.hidden = true;
     F.bStart.focus();
     showErr(F.bErr, '');
-    SH.toast(`${ed.kind === 'meal' ? MEAL_NAME[ed.meal] : ed.title} is ${range(start, end)} every ${wdName(date)} now`, undo);
+    SH.toast(`${ed.kind === 'meal' ? MEAL_NAME[ed.meal] : ed.title} is ${range(start, end)} ${every} now`, undo);
   }
   if (F.blockDialog) {
     F.blockForm.addEventListener('submit', e => { e.preventDefault(); saveEditor(); });
@@ -1630,7 +2015,16 @@
     F.bDelete.onclick = deleteFromEditor;
     F.bUseWeek.onclick = useForWeek;
     F.bKind.onchange = () => { F.bTitle.placeholder = KIND_NAME[F.bKind.value]; };
-    F.bRepeat.onchange = () => { F.bUnrepeat.hidden = !(ed.repeat && !F.bRepeat.checked); };
+    // Any change to the repeat's fields: what shows follows, and the repeat counts as changed here.
+    const repeatChanged = e => {
+      ed.touched = true;
+      // A day of the month ticked means "each of these days", whichever was chosen.
+      if (e.target.name === 'bDate') F.blockForm.querySelector('input[name="bMonthBy"][value="each"]').checked = true;
+      showErr(F.bErr, '');
+      repeatShown();
+    };
+    F.bRepeatField.addEventListener('change', repeatChanged);
+    F.bRepeatField.addEventListener('input', e => { if (e.target.matches('input[type=number], input[type=date]')) repeatChanged(e); });
     F.bPlaceWeek.onclick = () => { const m = ed.meal, wd = wdOf(ed.date); if (saveEditor()) openWeek(`wk-${wd}-${m}-place`); };
     F.bPick.onclick = () => togglePicker(F.bPicker.hidden);
     F.bNewItem.addEventListener('keydown', e => {
@@ -1717,7 +2111,7 @@
   function detailsHtml(e, preview){
     const meal = e.kind === 'meal', wdN = wdName(shown), can = editable();
     const notes = [];
-    if (e.repeat) notes.push(`Repeats every ${wdN}`);
+    if (e.repeat) notes.push('R' + repeatsText(e.rule).slice(1));
     if (e.changed) notes.push(`${e.repeat ? 'changed' : 'Changed'} for ${thisDay(shown)} only`);
     else if (meal && e.placeChanged) notes.push(`Place changed for ${thisDay(shown)} only`);
     else if (meal) notes.push(`Same every ${wdN}`);
@@ -2084,12 +2478,19 @@
           + `<button type="button" class="btn small" data-wk-rm="${esc(key)}" aria-label="${gone ? 'Keep' : 'Remove'} ${esc(what)} on ${WD_NAME[i]}s">${gone ? 'Keep' : 'Remove'}</button></li>`);
       }
     });
-    F.wBlocks.innerHTML = rows.join('') || '<li class="b-none">None yet. Tick “Repeat every …” on a block to add one.</li>';
+    // Then those that repeat by a rule, each with its rule now (or the last it had).
+    for (const b of wk.series) {
+      const key = `series:${b.id}`, gone = wk.removed.has(key);
+      const what = b.title === KIND_NAME[b.type] ? b.title : `${b.title} (${KIND_NAME[b.type]})`;
+      rows.push(`<li class="${gone ? 'removed' : ''}"><span>${esc(ruleText(b.rules[b.rules.length - 1]))} · ${esc(what)} · ${esc(range(toMin(b.start), toMin(b.end)))}</span>`
+        + `<button type="button" class="btn small" data-wk-rm="${esc(key)}" aria-label="${gone ? 'Keep' : 'Remove'} ${esc(what)}, on every day it repeats">${gone ? 'Keep' : 'Remove'}</button></li>`);
+    }
+    F.wBlocks.innerHTML = rows.join('') || '<li class="b-none">None yet. Set Repeat on a block to add one.</li>';
     SH.markEmoji?.(F.wBlocks);
   }
   function openWeek(focusId){
     if (!editable() || !F.weekDialog) return;
-    wk = {weeks: Object.fromEntries(WD.map(wd => [wd, clone(weekOf(wd))])), removed: new Set(), back: focusKey()};
+    wk = {weeks: Object.fromEntries(WD.map(wd => [wd, clone(weekOf(wd))])), series: clone(seriesBlocks()), removed: new Set(), back: focusKey()};
     F.wDays.innerHTML = WD.map((wd, i) => `<div class="wk-row" role="group" aria-labelledby="wk-${wd}"><div class="wk-day" id="wk-${wd}">${WD_NAME[i]}</div>${MEALS.map(m => mealCell(wd, i, m)).join('')}</div>`).join('');
     weekBlocks();
     const s = settings();
@@ -2117,9 +2518,12 @@
     if (de - ds < 4) return showErr(F.wErr, 'The day must be at least 4 hours long.', F.wEnd);
     const keys = WD.filter(wd => JSON.stringify(next[wd]) !== JSON.stringify(cleanWeek(weekOf(wd)))).map(wd => 'week:' + wd);
     const s = settings(), hours = ds !== s.day_start || de !== s.day_end;
+    // The blocks of the series removed here go from every day they repeat on.
+    const gone = id => wk.removed.has('series:' + id), series = seriesBlocks().some(b => gone(b.id));
     F.weekDialog.close();
-    if (!keys.length && !hours) return;
-    const undo = record(keys.length ? 'changed your week' : 'changed the hours shown', null, null, () => {
+    if (!keys.length && !hours && !series) return;
+    const undo = record(keys.length || series ? 'changed your week' : 'changed the hours shown', null, null, () => {
+      if (series) editSeries(v => { v.blocks = v.blocks.filter(b => !gone(b.id)); });
       for (const k of keys) save(k, next[k.slice(5)]);
       if (hours) { save('settings', {day_start: ds, day_end: de}); scrolledFor = null; render(); }
     });

@@ -11,7 +11,7 @@ from datetime import date, timedelta
 # [0-9] rather than \d, which in Python also matches other scripts' digits; fullmatch rather than
 # $, which in Python also matches before a final newline. Both would let through what JavaScript
 # refuses.
-KEY = re.compile(r"settings|week:(?:sun|mon|tue|wed|thu|fri|sat)|day:([0-9]{4})-([0-9]{2})-([0-9]{2})")
+KEY = re.compile(r"settings|series|week:(?:sun|mon|tue|wed|thu|fri|sat)|day:([0-9]{4})-([0-9]{2})-([0-9]{2})")
 DATE = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})")
 ID = re.compile(r"[a-z0-9]{6,32}")
 TIME = re.compile(r"([0-9]{2}):([0-9]{2})")
@@ -19,6 +19,12 @@ WEEKDAYS = ("sun", "mon", "tue", "wed", "thu", "fri", "sat")
 TYPES = {"deep": "Deep work", "social": "Socialize", "other": "Block"}
 MEALS = {"breakfast": ("11:00", "12:00"), "lunch": ("16:00", "17:00"), "dinner": ("18:00", "19:00")}
 MAX_BLOCKS, MAX_ITEMS, MAX_REPEATS = 40, 50, 100
+# Repeating blocks with a rule (the series key): how many, how many rules one may have had in turn,
+# and the largest "every N" and "after N times".
+MAX_SERIES, MAX_RULES, MAX_EVERY, MAX_COUNT = 100, 12, 999, 999
+FREQS = ("day", "week", "month", "year")
+NTH_WHICH = (1, 2, 3, 4, 5, -1)                      # first to fifth, and last
+NTH_DAYS = WEEKDAYS + ("day", "weekday", "weekend")  # a weekday, any day, Monday to Friday, Saturday or Sunday
 MIN_MINUTES = 5   # one step of the clock: the page's drags make 15 or more, a typed time may be shorter
 MAX_RANGE_DAYS = 62
 AROUND_TODAY = 7
@@ -36,6 +42,10 @@ def default_week():
     return {"meals": {name: {"start": start, "end": end, "place": "", "off": False}
                       for name, (start, end) in MEALS.items()},
             "blocks": []}
+
+
+def default_series():
+    return {"blocks": []}
 
 
 def _real_date(y, m, d):
@@ -245,6 +255,110 @@ def _repeats(v, ids):
     return out
 
 
+def _day_of(v, reason):
+    """A real calendar date written YYYY-MM-DD, or Refused."""
+    m = DATE.fullmatch(v) if isinstance(v, str) else None
+    if not m or not _real_date(*m.groups()):
+        raise Refused(reason)
+    return v
+
+
+def _each_once(v, allowed, reason):
+    """A list with at least one entry, every entry one of allowed and none twice, or Refused. The
+    order is kept as given."""
+    if not isinstance(v, list) or not v:
+        raise Refused(reason)
+    out = []
+    for x in v:
+        if isinstance(x, float) and x.is_integer():
+            x = int(x)
+        if isinstance(x, bool) or x not in allowed or x in out:
+            raise Refused(reason)
+        out.append(x)
+    return out
+
+
+def _on_the(src, out):
+    """How a monthly or yearly rule picks its day of the month: "on the" nth day (the first Monday,
+    the last weekday), which wins when both are given, or each of its dates."""
+    nth = src.get("nth")
+    if nth is not None:
+        if not isinstance(nth, dict):
+            raise Refused("nth must be an object")
+        which = nth.get("which")
+        if isinstance(which, float) and which.is_integer():
+            which = int(which)
+        if isinstance(which, bool) or which not in NTH_WHICH:
+            raise Refused("nth.which must be 1 to 5, or -1 for the last")
+        day = nth.get("day")
+        if not isinstance(day, str) or day not in NTH_DAYS:
+            raise Refused("nth.day must be a weekday, day, weekday or weekend")
+        out["nth"] = {"which": which, "day": day}
+    else:
+        out["dates"] = _each_once(src.get("dates"), range(1, 32), "dates must be days of the month from 1 to 31, each once")
+
+
+def _rule(src):
+    """One rule of a repeating block: when it starts, how often it comes round, on which days, and
+    when it ends. What its frequency does not use is dropped. count is only what was asked for
+    ("after 10 times"): the page works out the last day and gives it as until."""
+    if not isinstance(src, dict):
+        raise Refused("a rule must be an object")
+    out = {"from": _day_of(src.get("from"), "a rule needs the date it starts, YYYY-MM-DD")}
+    if src.get("until") is not None:
+        out["until"] = _day_of(src["until"], "until must be a date, YYYY-MM-DD")
+        if out["until"] < out["from"]:
+            raise Refused("a rule must end on or after the day it starts")
+    if src.get("count") is not None:
+        out["count"] = _hour(src["count"], 1, MAX_COUNT, "count must be a whole number from 1 to 999")
+    freq = src.get("freq")
+    if not isinstance(freq, str) or freq not in FREQS:
+        raise Refused("freq must be day, week, month or year")
+    out["freq"] = freq
+    out["every"] = _hour(1 if src.get("every") is None else src["every"], 1, MAX_EVERY,
+                          "every must be a whole number from 1 to 999")
+    if freq == "week":
+        out["days"] = _each_once(src.get("days"), WEEKDAYS, "days must be weekdays, each once")
+    elif freq == "month":
+        _on_the(src, out)
+    elif freq == "year":
+        out["months"] = _each_once(src.get("months"), range(1, 13), "months must be from 1 to 12, each once")
+        _on_the(src, out)
+    return out
+
+
+def _rules(v):
+    """A repeating block's rules, in order: each is in force from its own start to its end, and
+    every one but the last must end before the next starts."""
+    if not isinstance(v, list) or not v:
+        raise Refused("a repeating block needs a rule")
+    if len(v) > MAX_RULES:
+        raise Refused("at most 12 rules in a repeating block")
+    out = [_rule(x) for x in v]
+    for before, after in zip(out, out[1:]):
+        if "until" not in before or before["until"] >= after["from"]:
+            raise Refused("each rule must end before the next one starts")
+    return out
+
+
+def _series(v):
+    """The blocks that repeat by a rule: each a block as a week has it (no items, which belong to a
+    date), with its rules."""
+    blocks = v.get("blocks")
+    if blocks is None:
+        blocks = []
+    if not isinstance(blocks, list):
+        raise Refused("blocks must be a list")
+    if len(blocks) > MAX_SERIES:
+        raise Refused("at most 100 repeating blocks")
+    ids, out = set(), []
+    for src in blocks:
+        block = _block(src, ids, dated=False)
+        block["rules"] = _rules(src.get("rules"))
+        out.append(block)
+    return {"blocks": out}
+
+
 def _settings(v):
     start = 5 if v.get("day_start") is None else v["day_start"]
     end = 24 if v.get("day_end") is None else v["day_end"]
@@ -296,6 +410,8 @@ def clean_plan(key, value):
             raise Refused("the value must be an object")
         if kind == "settings":
             return _settings(value), None
+        if kind == "series":
+            return _series(value), None
         if kind == "week":
             return _week(value), None
         return _day(value), None
@@ -329,10 +445,10 @@ def plan_range(query, today):
 
 
 def assemble(stored, start, end):
-    """What GET /api/plan answers: the settings and all seven weekdays (as stored, or the defaults),
-    and the stored dates from start to end. Everything is cleaned on the way out too, so a value
+    """What GET /api/plan answers: the settings, all seven weekdays and the blocks that repeat by a
+    rule (as stored, or the defaults), and the stored dates from start to end. Everything is cleaned on the way out too, so a value
     saved before a rule changed never reaches the page broken; one that no longer passes is left out
-    (a date) or shown as the defaults (the settings or a weekday)."""
+    (a date) or shown as the defaults (the settings, a weekday or the series)."""
     def stored_or(key, default):
         value, error = clean_plan(key, stored.get(key))
         return default if error or value is None else value
@@ -347,4 +463,5 @@ def assemble(stored, start, end):
                 days[d.isoformat()] = value
     return {"settings": stored_or("settings", default_settings()),
             "week": {wd: stored_or(f"week:{wd}", default_week()) for wd in WEEKDAYS},
+            "series": stored_or("series", default_series()),
             "days": dict(sorted(days.items()))}

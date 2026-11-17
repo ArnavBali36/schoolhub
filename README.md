@@ -113,9 +113,13 @@ it runs at login: `launchctl kickstart -k gui/$(id -u)/com.schoolhub.server`.
 Beside the list (or under **Day** on a narrow screen) is a calendar of the day by the hour, 5 AM to
 midnight by default. It holds the three meals, each with where you eat it, and blocks of your own:
 **Deep work**, **Socialize** or a plain **Block**. Each block lists the things to get done in it:
-assignments and tasks dragged in from the list, or to-dos you type. A meal's place and time and a
-block marked to repeat are set once per weekday in the weekly form (**Week…**), so set Sunday's lunch
-place once and every Sunday shows it; a change made on one day stays on that day. Resting the pointer
+assignments and tasks dragged in from the list, or to-dos you type. A meal's place and time are
+set once per weekday in the weekly form (**Week…**), so set Sunday's lunch place once and every
+Sunday shows it; a change made on one day stays on that day. A block can repeat the way a calendar's
+events do (its **Repeat** menu): every day, week, 2 weeks, month or year, or a custom rule such as
+every 2 weeks on Monday and Wednesday, the last weekday of every month, or the first Monday of
+November every year, for good, until a date, or a number of times. Changing a repeat holds from
+that day on; the days before keep what they had. Resting the pointer
 on a block (or on a flag of something due) shows its details beside it, as does Tab from the
 keyboard; a click opens the same details as a card you can act on. The whole design is in
 [docs/planner.md](docs/planner.md).

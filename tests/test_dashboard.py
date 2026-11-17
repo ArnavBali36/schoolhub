@@ -316,7 +316,7 @@ class PlannerPageTest(unittest.TestCase):
         # What it shows: the time and length, repeats or changed, the items with their checkboxes, and
         # for work its course, due date, status and a link to its drawer.
         self.assertIn("${esc(range(e.start, e.end))} · ${esc(duration(e.end - e.start))}", PLANNER)
-        self.assertIn("if (e.repeat) notes.push(`Repeats every ${wdN}`);", PLANNER)
+        self.assertIn("if (e.repeat) notes.push('R' + repeatsText(e.rule).slice(1));", PLANNER)
         self.assertIn("for ${thisDay(shown)} only`);", PLANNER)
         self.assertIn('data-pd-item="${esc(it.id)}"', PLANNER)
         self.assertIn('data-pd-open="${esc(a.id)}"', PLANNER)
@@ -1080,7 +1080,7 @@ for (const v of {json.dumps(cls.vectors)}) {{
   const ids = Object.keys(v.value?.repeats && typeof v.value.repeats === 'object' ? v.value.repeats : {{}});
   const week = cleanWeek({{blocks: ids.map(id => ({{id, type: 'deep', start: '09:00', end: '11:00'}}))}});
   try {{
-    out.push({{key: v.key, value: kind === 'settings' ? cleanSettings(v.value) : kind === 'week' ? cleanWeek(v.value) : kind === 'day' ? cleanDay(v.value, week) : null}});
+    out.push({{key: v.key, value: kind === 'settings' ? cleanSettings(v.value) : kind === 'series' ? cleanSeries(v.value) : kind === 'week' ? cleanWeek(v.value) : kind === 'day' ? cleanDay(v.value, week) : null}});
   }} catch (e) {{ out.push({{key: v.key, threw: String(e)}}); }}
 }}
 console.log(JSON.stringify(out));
@@ -1097,8 +1097,11 @@ console.log(JSON.stringify(out));
                 self.assertNotIn("threw", got)
                 if not plan.KEY.fullmatch(vector["key"]) or (vector["key"].startswith("day:") and "real date" in str(plan.clean_plan(vector["key"], {})[1])):
                     continue  # a bad key: the page never makes one
-                _, error = plan.clean_plan(vector["key"], got["value"])
+                kept, error = plan.clean_plan(vector["key"], got["value"])
                 self.assertIsNone(error)
+                # The series as the page cleans it is already as the server keeps it, field for field.
+                if vector["key"] == "series":
+                    self.assertEqual(kept, got["value"])
 
     def test_a_good_value_comes_through_as_the_server_cleans_it(self):
         # Where the server takes a value, the page's cleaning gives the same (dates drop what equals
@@ -1107,6 +1110,210 @@ console.log(JSON.stringify(out));
             if vector["ok"] and vector["key"].startswith(("settings", "week:")) and vector["value"] is not None:
                 with self.subTest(note=vector.get("note"), key=vector["key"]):
                     self.assertEqual(got["value"], vector["cleaned"])
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class PlannerRepeatTest(unittest.TestCase):
+    """Repeating by a rule (docs/planner.md, "Repeating by a rule"): which dates a rule falls on, how
+    it reads, how a block's rules follow one another, and what then shows on a date."""
+
+    @classmethod
+    def setUpClass(cls):
+        start, end = PLANNER.index(PLAN_START), PLANNER.index(PLAN_END)
+        shows = PLANNER[PLANNER.index(SHOWS_START):PLANNER.index(SHOWS_END)]
+        script = PLANNER[start:end] + f"""
+const R = o => cleanRule({{from: '2026-11-17', ...o}});   // a Tuesday
+const SH = {{items: [], byId: () => null, isDone: () => false}};
+let shown = '2026-11-17';
+const plan = {{settings: {{day_start: 5, day_end: 24}}, days: {{}},
+  week: {{tue: cleanWeek({{blocks: [{{id: 'w1aaaaaaaa', type: 'deep', title: 'Lab', start: '13:00', end: '14:00'}}]}})}},
+  series: cleanSeries({{blocks: [
+    {{id: 's1aaaaaaaa', type: 'other', title: 'Gym', start: '07:00', end: '08:00', rules: [
+      {{from: '2026-11-01', until: '2026-11-16', freq: 'week', days: ['sun']}}, {{from: '2026-11-17', freq: 'week', every: 2, days: ['tue', 'thu']}}]}},
+    {{id: 's2aaaaaaaa', type: 'social', title: 'Club', start: '18:00', end: '19:00', rules: [{{from: '2026-11-17', freq: 'month', nth: {{which: 3, day: 'tue'}}}}]}},
+    {{id: 'w1aaaaaaaa', type: 'deep', title: 'Twice', start: '13:00', end: '14:00', rules: [{{from: '2026-11-17', freq: 'day'}}]}}]}})}};
+const weekOf = wd => plan.week[wd] || cleanWeek(null);
+plan.days['2026-11-17'] = cleanDay({{repeats: {{s1aaaaaaaa: {{start: '07:30', end: '08:30'}}, s2aaaaaaaa: {{skip: true}}, goneaaaaaa: {{skip: true}}, w1aaaaaaaa: {{items: [{{id: 'i1aaaaaaaa', kind: 'own', text: 'Prep'}}]}}}}}}, plan.week.tue, plan.series.blocks);
+{shows}
+const refs = d => entriesOn(d).filter(e => e.repeat).map(e => [e.ref, e.series, e.start, e.skip, e.changed, ruleText(e.rule)]);
+console.log(JSON.stringify({{
+  dates: {{
+    daily3: ruleDates(R({{freq: 'day', every: 3}}), '2026-11-17', 4),
+    before: ruleDates(R({{freq: 'day'}}), '2026-11-01', 2),
+    weeks2: ruleDates(R({{freq: 'week', every: 2, days: ['mon', 'wed']}}), '2026-11-17', 5),
+    sunSat: ruleDates(cleanRule({{from: '2026-11-21', freq: 'week', every: 2, days: ['sun', 'sat']}}), '2026-11-21', 4),
+    the31st: ruleDates(R({{freq: 'month', dates: [31]}}), '2026-11-17', 4),
+    lastWeekday: ruleDates(R({{freq: 'month', nth: {{which: -1, day: 'weekday'}}}}), '2026-11-17', 4),
+    firstMonEvery3: ruleDates(R({{freq: 'month', every: 3, nth: {{which: 1, day: 'mon'}}}}), '2026-11-17', 3),
+    fifthMon: ruleDates(R({{freq: 'month', nth: {{which: 5, day: 'mon'}}}}), '2026-11-17', 3),
+    secondWeekendDay: ruleDates(R({{freq: 'month', nth: {{which: 2, day: 'weekend'}}}}), '2026-11-17', 2),
+    lastDay: ruleDates(R({{freq: 'month', nth: {{which: -1, day: 'day'}}}}), '2026-11-17', 4),
+    yearly: ruleDates(R({{freq: 'year', months: [11], dates: [17]}}), '2026-11-17', 3),
+    feb29: ruleDates(R({{freq: 'year', months: [2], dates: [29]}}), '2026-11-17', 2),
+    every5Years: ruleDates(R({{freq: 'year', every: 5, months: [3], dates: [1]}}), '2026-11-17', 2),
+    every40Years: firstOn([R({{freq: 'year', every: 40, months: [3], dates: [1]}})], '2026-11-17'),
+    thanksgiving: ruleDates(R({{freq: 'year', months: [11], nth: {{which: 4, day: 'thu'}}}}), '2026-11-17', 2),
+    until: ruleDates(R({{freq: 'day', until: '2026-11-19'}}), '2026-11-01', 9),
+    tenth: nthTime(R({{freq: 'week', days: ['tue', 'thu']}}), 10),
+    year999: nthTime(R({{freq: 'year', months: [11], dates: [17]}}), 999),
+    never: firstOn([R({{freq: 'month', dates: [31], until: '2026-11-30'}})], '2026-11-17'),
+  }},
+  texts: [R({{freq: 'day'}}), R({{freq: 'day', every: 3}}), R({{freq: 'week', days: ['wed', 'mon']}}), R({{freq: 'week', days: ['mon', 'tue', 'wed', 'thu', 'fri']}}),
+    R({{freq: 'week', every: 2, days: ['tue']}}), R({{freq: 'week', days: [...WD]}}), R({{freq: 'month', dates: [15, 1]}}), R({{freq: 'month', every: 3, nth: {{which: -1, day: 'weekday'}}}}),
+    R({{freq: 'year', months: [11], dates: [17]}}), R({{freq: 'year', months: [3, 11], dates: [17]}}), R({{freq: 'year', every: 2, months: [11], nth: {{which: 1, day: 'mon'}}}}),
+    R({{freq: 'day', until: '2026-12-19'}}), R({{freq: 'day', until: '2026-11-26', count: 10}}), weekRule('sun'), R({{freq: 'month', dates: [1, 2, 3, 21, 22, 23, 11, 12, 13]}})].map(r => ruleText(r)),
+  refused: [{{freq: 'week'}}, {{freq: 'week', days: []}}, {{freq: 'month'}}, {{freq: 'year', dates: [1]}}, {{freq: 'year', months: [2]}}, {{freq: 'hour'}}, {{freq: 'day', until: '2026-11-16'}},
+    {{freq: 'day', from: '2026-02-30'}}, {{freq: 'day', until: 'soon'}}].map(o => R(o)),
+  kept: R({{freq: 'month', every: 1000, count: 3, until: '2026-12-01', dates: [3, 1, 3, 40], nth: {{which: 9, day: 'mon'}}, days: ['mon'], months: [1], extra: true}}),
+  rules: cleanRules([{{from: '2026-11-17', freq: 'day'}}, {{from: '2026-11-01', freq: 'week', days: ['sun'], until: '2026-12-31', count: 9}}, {{from: '2026-11-17', freq: 'month', dates: [17]}}, {{from: 'x', freq: 'day'}}]),
+  thirteen: cleanRules(Array.from({{length: 13}}, (_, i) => ({{from: `20${{10 + i}}-01-01`, freq: 'day'}}))).map(r => r.from + ' ' + (r.until || '')),
+  same: [sameRule(R({{freq: 'day'}}), {{from: '2020-01-01', freq: 'day', every: 1}}), sameRule(R({{freq: 'day'}}), R({{freq: 'day', until: '2026-12-01'}})), sameRule(weekRule('tue'), R({{freq: 'week', days: ['tue']}}))],
+  series: cleanSeries({{blocks: [{{id: 's1aaaaaaaa', type: 'deep', title: 'Gym', start: '09:00', end: '10:00', items: [1], rules: [{{from: '2026-11-17', freq: 'week', days: ['fri', 'mon'], every: 2}}]}},
+    {{id: 's2aaaaaaaa', type: 'deep', start: '09:00', end: '10:00', rules: []}}, 'x']}}),
+  nov17: refs('2026-11-17'), nov19: refs('2026-11-19'), nov24: refs('2026-11-24'), nov15: refs('2026-11-15'), dec1: refs('2026-12-01'),
+  stored: plan.days['2026-11-17'],
+  spoken: spoken(entriesOn('2026-11-17').find(e => e.ref === 'repeat:s1aaaaaaaa')),
+  noSeries: cleanDay({{repeats: {{s1aaaaaaaa: {{skip: true}}}}}}, plan.week.tue),
+}}));
+"""
+        cls.out = run_node(script)
+
+    def test_the_dates_a_rule_falls_on(self):
+        d = self.out["dates"]
+        self.assertEqual(d["daily3"], ["2026-11-17", "2026-11-20", "2026-11-23", "2026-11-26"])
+        # Never before its start, whatever is asked from.
+        self.assertEqual(d["before"], ["2026-11-17", "2026-11-18"])
+        # Every 2 weeks counts from the week the rule starts in (Sunday to Saturday): the Monday of
+        # that week is before the start, so Wednesday comes first.
+        self.assertEqual(d["weeks2"], ["2026-11-18", "2026-11-30", "2026-12-02", "2026-12-14", "2026-12-16"])
+        self.assertEqual(d["sunSat"], ["2026-11-21", "2026-11-29", "2026-12-05", "2026-12-13"])
+        # A month without the date is passed over.
+        self.assertEqual(d["the31st"], ["2026-12-31", "2027-01-31", "2027-03-31", "2027-05-31"])
+        self.assertEqual(d["lastWeekday"], ["2026-11-30", "2026-12-31", "2027-01-29", "2027-02-26"])
+        self.assertEqual(d["firstMonEvery3"], ["2027-02-01", "2027-05-03", "2027-08-02"])
+        self.assertEqual(d["fifthMon"], ["2026-11-30", "2027-03-29", "2027-05-31"])
+        self.assertEqual(d["secondWeekendDay"], ["2026-12-06", "2027-01-03"])
+        self.assertEqual(d["lastDay"], ["2026-11-30", "2026-12-31", "2027-01-31", "2027-02-28"])
+        self.assertEqual(d["yearly"], ["2026-11-17", "2027-11-17", "2028-11-17"])
+        self.assertEqual(d["feb29"], ["2028-02-29", "2032-02-29"])
+        self.assertEqual(d["every5Years"], ["2031-03-01", "2036-03-01"])
+        self.assertEqual(d["every40Years"], "2066-03-01")
+        self.assertEqual(d["thanksgiving"], ["2026-11-26", "2027-11-25"])
+        self.assertEqual(d["until"], ["2026-11-17", "2026-11-18", "2026-11-19"])
+        # "After 10 times" ends on the tenth day; a count the years can hold is found, however far.
+        self.assertEqual(d["tenth"], "2026-12-17")
+        self.assertEqual(d["year999"], "3024-11-17")
+        self.assertIsNone(d["never"])
+
+    def test_a_rule_in_words(self):
+        self.assertEqual(self.out["texts"], [
+            "Every day", "Every 3 days", "Every Monday and Wednesday", "Every weekday", "Every 2 weeks on Tuesday", "Every day",
+            "Every month on the 1st and 15th", "Every 3 months on the last weekday", "Every year on November 17",
+            "Every year in March and November on the 17th", "Every 2 years on the first Monday of November",
+            "Every day, until Dec 19, 2026", "Every day, 10 times", "Every Sunday",
+            "Every month on the 1st, 2nd, 3rd, 11th, 12th, 13th, 21st, 22nd and 23rd"])
+
+    def test_a_rule_the_server_would_refuse_is_no_rule(self):
+        self.assertEqual(self.out["refused"], [None] * 9)
+        # What is kept is in the server's order, lists in the calendar's; what a month does not use goes.
+        self.assertEqual(self.out["kept"], {"from": "2026-11-17", "until": "2026-12-01", "count": 3, "freq": "month", "every": 1, "dates": [1, 3]})
+        self.assertEqual(list(self.out["kept"]), ["from", "until", "count", "freq", "every", "dates"])
+        import sys
+        sys.path.insert(0, str(REPO))
+        import plan
+        block = {"id": "s1aaaaaaaa", "type": "deep", "title": "Gym", "start": "09:00", "end": "10:00"}
+        value, error = plan.clean_plan("series", {"blocks": [{**block, "rules": [self.out["kept"]]}]})
+        self.assertIsNone(error)
+        self.assertEqual(value["blocks"][0]["rules"], [self.out["kept"]])
+
+    def test_rules_follow_one_another(self):
+        # By their start; one cut short ends the day before the next and loses its count; of two that
+        # start the same day the later one stays; one that is no rule goes.
+        self.assertEqual(self.out["rules"], [
+            {"from": "2026-11-01", "until": "2026-11-16", "freq": "week", "every": 1, "days": ["sun"]},
+            {"from": "2026-11-17", "freq": "month", "every": 1, "dates": [17]}])
+        # The latest twelve, each ending the day before the next.
+        self.assertEqual(len(self.out["thirteen"]), 12)
+        self.assertEqual(self.out["thirteen"][0], "2011-01-01 2011-12-31")
+        self.assertEqual(self.out["thirteen"][-1], "2022-01-01 ")
+        self.assertEqual(self.out["same"], [True, False, True])
+        # A block with no rule left is dropped; one kept has no items and its days in the week's order.
+        self.assertEqual(self.out["series"], {"blocks": [{"id": "s1aaaaaaaa", "type": "deep", "title": "Gym", "start": "09:00", "end": "10:00",
+                                                           "rules": [{"from": "2026-11-17", "freq": "week", "every": 2, "days": ["mon", "fri"]}]}]})
+
+    def test_what_shows_on_a_date(self):
+        o = self.out
+        # Tuesday the 17th: the week's own block (never twice, though the series has its id too),
+        # Gym under its new rule with the date's time, and the club skipped.
+        self.assertEqual(o["nov17"], [["repeat:w1aaaaaaaa", False, 780, False, False, "Every Tuesday"],
+                                       ["repeat:s1aaaaaaaa", True, 450, False, True, "Every 2 weeks on Tuesday and Thursday"],
+                                       ["repeat:s2aaaaaaaa", True, 1080, True, False, "Every month on the third Tuesday"]])
+        self.assertEqual([r[0] for r in o["nov19"]], ["repeat:s1aaaaaaaa", "repeat:w1aaaaaaaa"])
+        # The week after is not one of "every 2 weeks"; the week's block and the daily one's id still show once.
+        self.assertEqual([r[0] for r in o["nov24"]], ["repeat:w1aaaaaaaa"])
+        # Before the change the old rule holds: a Sunday, with its end said. (The daily one had not
+        # started.)
+        self.assertEqual(o["nov15"], [["repeat:s1aaaaaaaa", True, 420, False, False, "Every Sunday, until Nov 16, 2026"]])
+        self.assertEqual([r[0] for r in o["dec1"]], ["repeat:w1aaaaaaaa", "repeat:s1aaaaaaaa"])
+        self.assertIn("repeats every 2 weeks on Tuesday and Thursday", o["spoken"])
+        self.assertRegex(o["spoken"], r"changed for (this day|today)$")
+
+    def test_a_dates_changes_to_a_series_block_are_kept(self):
+        # A change to a block of the series stays; one to a block that is gone is dropped; without
+        # the series' list (an older caller) only the week's are known.
+        self.assertEqual(self.out["stored"], {"repeats": {"s1aaaaaaaa": {"start": "07:30", "end": "08:30"}, "s2aaaaaaaa": {"skip": True},
+                                                           "w1aaaaaaaa": {"items": [{"id": "i1aaaaaaaa", "kind": "own", "text": "Prep", "done": False}]}}})
+        self.assertIsNone(self.out["noSeries"])
+
+
+class RepeatEditorTest(unittest.TestCase):
+    """The editor's Repeat (docs/planner.md, "Repeat"): the menu a calendar has, and Custom."""
+
+    def test_the_menu_and_customs_fields_are_in_the_form(self):
+        self.assertIn('<label>Repeat<select id="bRepeat"><option value="none">Never</option><option value="day">Every day</option>'
+                      '<option value="week">Every week</option><option value="2weeks">Every 2 weeks</option><option value="month">Every month</option>'
+                      '<option value="year">Every year</option><option value="custom">Custom…</option></select></label>', HTML)
+        for field in ('id="bEvery" type="number" min="1" max="999"', '<select id="bFreq"', 'id="bDays" role="group" aria-label="On these weekdays"',
+                      'name="bMonthBy" value="each" checked', 'name="bMonthBy" value="nth"', 'id="bDates" role="group"', 'id="bMonths" role="group"',
+                      'id="bYearNth"', '<select id="bNthWhich"', '<select id="bNthDay"',
+                      '<select id="bRepEnd"><option value="never">Never</option><option value="date">On date</option><option value="count">After</option></select>',
+                      'id="bRepUntil" type="date"', 'id="bRepCount" type="number" min="1" max="999"', 'id="bRepSummary" aria-live="polite"'):
+            self.assertIn(field, HTML)
+        # Leaving a repeat: skip the day, stop from the day on, or remove it all.
+        self.assertEqual(re.findall(r'name="bUnrep" value="(\w+)"', HTML), ["skip", "end", "remove"])
+        # The old tick box is gone.
+        self.assertNotIn('id="bRepeat" type="checkbox"', HTML)
+        self.assertNotIn("F.bRepeat.checked", PLANNER)
+
+    def test_every_field_the_page_asks_for_is_in_the_form(self):
+        names = re.search(r"const F = Object\.fromEntries\(\[(.*?)\]\.map\(id =>", PLANNER, re.S).group(1)
+        for name in re.findall(r"'(\w+)'", names):
+            self.assertIn(f'id="{name}"', HTML, name)
+
+    def test_a_pill_is_a_tick_box_that_takes_the_click(self):
+        self.assertIn("dialog.task label.b-pill input{position:absolute;inset:0;width:100%;height:100%;margin:0;border:0;opacity:0;cursor:pointer}", HTML)
+        self.assertIn(".b-pill input:checked + span{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}", HTML)
+        self.assertIn(".b-pill input:focus-visible + span{outline:2px solid var(--accent);outline-offset:2px}", HTML)
+        self.assertIn("F.bDays.innerHTML = WD.map((d, i) => pill('bDay', d, WD_NAME[i][0], WD_NAME[i])).join('');", PLANNER)
+
+    def test_a_changed_repeat_holds_from_the_day_on(self):
+        # The rules before the date are cut to end the day before; a week's block moves to the series
+        # with its own id, so each date's changes to it stay where they are.
+        self.assertIn("const cutBefore = rules => rules.filter(r => r.from < date).map(r => {", PLANNER)
+        self.assertIn("return editSeries(v => { v.blocks.push({...wb, ...patch, rules: [...cutBefore([weekRule(wd)]), ...(rule ? [rule] : [])]}); });", PLANNER)
+        # Untouched, a repeat is never rewritten (its count would be counted again from this date).
+        self.assertIn("const rule = asked && was && (!ed.touched || sameRule(asked, was)) ? was : asked;", PLANNER)
+        # What is to get done on a date needs the block to be there.
+        self.assertIn("if (first !== date && items.length)", PLANNER)
+        self.assertIn("if (!first) return showErr(F.bErr, 'That repeat never comes up. Check its days and when it ends.', F.bRepeat);", PLANNER)
+
+    def test_the_plan_carries_the_series(self):
+        self.assertIn("const p = {settings: cleanSettings(body.settings), week: {}, series: cleanSeries(body.series), days: {}};", PLANNER)
+        self.assertIn("plan.series = cleanSeries(body.series);", PLANNER)
+        self.assertIn("save('series', next.blocks.length ? next : null);", PLANNER)
+        # The weekly form lists them after the weekdays' own, and removes them through the same step.
+        self.assertIn("for (const b of wk.series) {", PLANNER)
+        self.assertIn("if (series) editSeries(v => { v.blocks = v.blocks.filter(b => !gone(b.id)); });", PLANNER)
 
 
 @unittest.skipUnless(NODE, "Node is not installed")
@@ -1999,11 +2206,18 @@ class UndoSourceTest(unittest.TestCase):
         self.assertEqual(len(re.findall(r"SH\.api\('api/plan'", PLANNER)), 1)
         self.assertNotIn("snapshot(", PLANNER)
         lines = PLANNER.splitlines()
-        own = ("function save(", "function editDay(", "function editWeek(", "sent.push(save(key, none ? null : v));",
-               "save('day:' + date, cleanDay(v, weekOf(wdOf(date))));", "save('week:' + wd, cleanWeek(v));")
+        # ruleFrom() is the one helper that saves for its caller ("from this day on" for a repeating
+        # block): its own three lines are let be, and each call of it is checked like a save.
+        own = ("function save(", "function editDay(", "function editWeek(", "function editSeries(", "function ruleFrom(", "sent.push(save(key, none ? null : v));",
+               "save('day:' + date, cleanDay(v, weekOf(wdOf(date)), seriesBlocks()));", "save('week:' + wd, cleanWeek(v));",
+               "save('series', next.blocks.length ? next : null);")
+        from_ = PLANNER.index("  function ruleFrom(")
+        helper = range(PLANNER[:from_].count("\n"), PLANNER[:PLANNER.index("\n  }\n", from_)].count("\n") + 1)
         checked = 0
         for i, line in enumerate(lines):
-            if not re.search(r"\b(save|editDay|editWeek)\(", line) or line.lstrip().startswith("//") or any(x in line for x in own):
+            if i in helper:
+                continue
+            if not re.search(r"\b(save|editDay|editWeek|editSeries|ruleFrom)\(", line) or line.lstrip().startswith("//") or any(x in line for x in own):
                 continue
             checked += 1
             # Going up from the call, record( comes before the start of the function or handler it is in.
@@ -2795,7 +3009,7 @@ class PreviewSourceTest(unittest.TestCase):
         self.assertIn("return e && !e.off && !e.skip ? detailsHtml(e, true) : '';", tip_section())
         self.assertIn("return a ? dueHtml(a) : '';", tip_section())
         # Each fact is written in one place only.
-        for fact in ("${esc(range(e.start, e.end))} · ${esc(duration(e.end - e.start))}", "'At ' + esc(e.place)", "notes.push(`Repeats every ${wdN}`)",
+        for fact in ("${esc(range(e.start, e.end))} · ${esc(duration(e.end - e.start))}", "'At ' + esc(e.place)", "notes.push('R' + repeatsText(e.rule).slice(1))",
                      "'Due ' + esc(SH.fmtDue(a.due_at, true, a.all_day))", "const [st, cls] = workStatus(a);"):
             self.assertEqual(PLANNER.count(fact), 1, fact)
             self.assertIn(fact, says)
@@ -2873,7 +3087,7 @@ let shown = todayIso(), can = true;
 const settings = () => ({day_start: 5, day_end: 24}), editable = () => can;
 """ + says + """
 const own = (n, isDone) => ({id: 'own' + n, kind: 'own', text: 'To-do ' + n, done: isDone});
-const block = {ref: 'block:b1', kind: 'deep', title: 'Concepts <review>', start: 1215, end: 1320, repeat: true, changed: true, items: [
+const block = {ref: 'block:b1', kind: 'deep', title: 'Concepts <review>', start: 1215, end: 1320, repeat: true, rule: weekRule(wdOf(shown)), changed: true, items: [
   own(1, true), {id: 'w9', kind: 'work', ref: 'canvas:9', text: 'old name', course: '21-127', done: false},
   {id: 'w8', kind: 'work', ref: 'canvas:8', text: 'HW 8', course: '21-127', done: true}, {id: 'gone', kind: 'work', ref: 'canvas:1', text: 'Dropped quiz', course: '15-122', done: false},
   {id: 'w7', kind: 'work', ref: 'canvas:7', text: 'HW 7', course: '', done: false}, own(6, false), own(7, false), own(8, true)]};
