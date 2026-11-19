@@ -911,8 +911,12 @@
   const ICON = {prev: svg('M10 3.5 5.5 8l4.5 4.5'), next: svg('M6 3.5 10.5 8 6 12.5'), plus: svg('M8 3.2v9.6M3.2 8h9.6'),
     today: svg('M4.5 3.5h7a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2zM2.5 7h11M5.5 2v3M10.5 2v3'),
     week: svg('M3 6.5A3.5 3.5 0 0 1 6.5 3H12m0 0-2-2m2 2-2 2M13 9.5A3.5 3.5 0 0 1 9.5 13H4m0 0 2 2m-2-2 2-2')};
+  // The glance (bar.js): today's plan only to be read, with the time it is and what is on now.
+  const GLANCE = document.documentElement.classList.contains('glance');
   root.innerHTML = `<div class="ph">
       <h2 class="ph-date" id="planDate" aria-live="polite"></h2>
+      <p class="ph-clock" id="planClock" hidden></p>
+      <p class="ph-on" id="planOn" hidden></p>
       <div class="ph-actions">
         <button type="button" class="btn small" id="planToday" title="Back to today (T)" hidden>${ICON.today}Today</button>
         <button type="button" class="btn small" id="planWeek" title="Meals and repeating blocks for every week (W)" disabled>${ICON.week}Week…</button>
@@ -933,7 +937,8 @@
       </div>
     </div>`;
   const els = {date: $('#planDate'), today: $('#planToday'), week: $('#planWeek'), add: $('#planAdd'), strip: $('#planStrip'),
-    scroll: $('#planScroll'), msg: $('#planMsg'), time: $('#planTime'), hours: $('#planHours'), grid: $('#planGrid'), days: $('#planDays')};
+    scroll: $('#planScroll'), msg: $('#planMsg'), time: $('#planTime'), hours: $('#planHours'), grid: $('#planGrid'), days: $('#planDays'),
+    clock: $('#planClock'), on: $('#planOn')};
   const grid = els.grid;
   // The week strip, Sunday to Saturday around the day on show: seven buttons that stay, only their
   // date and state changing (.on: the day on show, .today), so one that has the focus keeps it.
@@ -1110,6 +1115,7 @@
       h.dataset.now = Math.abs(d) < NOW_HIDE_PX ? 'at' : Math.abs(d) < NOW_CLEAR_PX ? d < 0 ? 'above' : 'below' : '';
     }
     for (const f of grid.querySelectorAll('.pfree')) f.hidden = isToday(shown) && +f.dataset.from < m;
+    if (GLANCE) drawGlance(m);
     if (!on) return line?.remove();
     const el = line || grid.appendChild(Object.assign(document.createElement('div'), {className: 'pnow'}));
     el.setAttribute('aria-hidden', 'true');
@@ -1254,6 +1260,29 @@
   window.addEventListener('resize', refit);
   window.visualViewport?.addEventListener('resize', refit);
 
+  // ---- the glance ----
+  // What is on now and what comes next, in a line: "Now: Deep work until 3:30 PM" and "Next: Lunch
+  // at 4:00 PM"; between blocks, "Free until 4:00 PM" and "Then Lunch"; after the last, "Nothing
+  // more today". list: the day's entries; m: the minutes since midnight.
+  function nowWords(list, m){
+    const day = list.filter(e => !e.off && !e.skip).sort((a, b) => a.start - b.start || a.end - b.end);
+    const on = day.filter(e => e.start <= m && m < e.end), next = day.find(e => e.start > m);
+    const names = on.length > 2 ? `${on[0].title} and ${on.length - 1} more` : on.map(e => e.title).join(' and ');
+    const now = on.length ? `Now: ${names} until ${clock(Math.min(...on.map(e => e.end)))}` : next ? `Free until ${clock(next.start)}` : 'Nothing more today';
+    return {now, next: !next ? (on.length ? 'Nothing after it today' : '') : on.length ? `Next: ${next.title} at ${clock(next.start)}` : `Then ${next.title}`};
+  }
+  // The glance's heading: the time it is, and what is on. Drawn with the now line, each minute.
+  function drawGlance(m){
+    els.clock.hidden = els.on.hidden = false;
+    els.clock.textContent = clock(m);
+    const w = plan ? nowWords(entriesOn(shown), m) : {now: '', next: ''};
+    els.on.innerHTML = `<b>${esc(w.now)}</b>${w.next ? `<span>${esc(w.next)}</span>` : ''}`;
+    SH.markEmoji?.(els.on);
+  }
+  // Opened again (the Mac app says so): today, whatever day it was last looked at, from the top of
+  // what the day still holds. The plan itself comes fresh with the list (dashboard.js, 'reload').
+  if (GLANCE) window.addEventListener('qp:glance', () => { scrolledFor = null; setDate(todayIso()); });
+
   function setDate(d){
     shown = d;
     if (!inRange(d)) load(d);
@@ -1262,6 +1291,8 @@
 
   // The now line moves each minute.
   (function tick(){
+    // A glance left open over midnight moves on to the new day.
+    if (GLANCE && shown !== todayIso()) setDate(todayIso());
     if (SH.plannerState === 'on' && plan && !drag) placeNow();
     setTimeout(tick, 60000 - Date.now() % 60000 + 50);
   })();

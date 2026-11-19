@@ -443,6 +443,7 @@ class PlannerPageTest(unittest.TestCase):
         place = re.search(r"^  function placeNow\(\)\{.*?^  \}$", PLANNER, re.M | re.S).group(0)
         out = run_node(consts + """
 let at = 0;
+const GLANCE = false;   // the glance's heading is drawn with the now line, only in the glance
 const shown = 'today', isToday = () => true, settings = () => ({day_start: 5, day_end: 24}), minutesNow = () => 600, nowTop = () => at, entriesOn = () => [], clock = () => '';
 const hours = Array.from({length: 20}, (_, i) => ({style: {top: i * 25 + 'px'}, dataset: {}}));
 const els = {hours: {children: hours, firstElementChild: hours[0], lastElementChild: hours[19]}};
@@ -1264,6 +1265,68 @@ console.log(JSON.stringify({{
         self.assertEqual(self.out["stored"], {"repeats": {"s1aaaaaaaa": {"start": "07:30", "end": "08:30"}, "s2aaaaaaaa": {"skip": True},
                                                            "w1aaaaaaaa": {"items": [{"id": "i1aaaaaaaa", "kind": "own", "text": "Prep", "done": False}]}}})
         self.assertIsNone(self.out["noSeries"])
+
+
+class GlanceTest(unittest.TestCase):
+    """The glance (docs/planner.md, "The glance"): the page at #glance is today's plan alone, to be
+    read in the small window under the Mac app's menu bar icon."""
+
+    def test_the_mark_goes_on_before_anything_is_painted_and_no_key_acts(self):
+        # bar.js is read in <head>: the mark is there for the first paint.
+        self.assertIn("if (location.hash === '#glance') {\n    document.documentElement.classList.add('glance');\n"
+                      "    window.addEventListener('keydown', e => { e.stopImmediatePropagation(); }, true);\n  }", BAR)
+        head = HTML[:HTML.index("</head>")]
+        self.assertIn('src="bar.js"', head)
+        # Nothing else reads the address's #fragment, so a glance is never taken for something else.
+        self.assertEqual(len(re.findall(r"location\.hash", JS + PLANNER + BAR)), 1)
+
+    def test_only_the_plan_shows_and_it_takes_no_click(self):
+        self.assertIn(":root.glance :is(.topbar,.syncrow,.left,.fab,.ph-actions,.ph-nav,.pstrip,.ptip){display:none !important}", HTML)
+        self.assertIn(":root.glance .pgrid{pointer-events:none}", HTML)
+        # The planner fills the small window whatever view the page was last on, but only where
+        # there is a plan to show (a server without one keeps it hidden, as on the page itself).
+        self.assertIn(':root.glance .page:is([data-plan="on"],[data-plan="unknown"]) .planner{display:flex;flex:1;position:static;height:auto;min-height:0;', HTML)
+        self.assertIn(":root.glance .page{display:flex;flex-direction:column;height:100vh;height:100dvh;min-height:0;", HTML)
+        # No room kept for a page scrollbar, and the canvas starts at the top (there is no bar).
+        self.assertIn(":root.glance{overflow:hidden;--bar-height:-1px}", HTML)
+        # The clock and the line are the glance's alone.
+        self.assertIn(".ph-clock,.ph-on{display:none}", HTML)
+        self.assertIn(":root.glance .ph-clock{display:block;", HTML)
+        self.assertIn('<p class="ph-clock" id="planClock" hidden></p>\n      <p class="ph-on" id="planOn" hidden></p>', PLANNER)
+
+    def test_it_is_today_and_fresh_each_time_it_is_opened(self):
+        # The Mac app says when its window opens; the list (and the plan with it) is asked for again,
+        # and the planner goes to today, from where the day now stands.
+        self.assertIn("window.addEventListener('qp:glance', backOnShow);", JS)
+        self.assertIn("if (GLANCE) window.addEventListener('qp:glance', () => { scrolledFor = null; setDate(todayIso()); });", PLANNER)
+        # Left open over midnight, it moves on with the minute's tick.
+        self.assertIn("if (GLANCE && shown !== todayIso()) setDate(todayIso());", PLANNER)
+        # Its heading is drawn with the now line, so it is right to the minute.
+        self.assertIn("if (GLANCE) drawGlance(m);", PLANNER)
+
+    @unittest.skipUnless(NODE, "Node is not installed")
+    def test_what_is_on_now_and_next_in_words(self):
+        start, end = PLANNER.index(PLAN_START), PLANNER.index(PLAN_END)
+        words = PLANNER[PLANNER.index("  function nowWords(list, m){"):PLANNER.index("  // The glance's heading: the time it is")]
+        out = run_node(PLANNER[start:end] + words + """
+const E = (title, start, end, more = {}) => ({title, start, end, ...more});
+const day = [E('Lunch', 900, 960), E('Deep work', 540, 660), E('Class', 600, 690), E('Gym', 1080, 1140),
+  E('Skipped', 700, 760, {skip: true}), E('Dinner', 1100, 1160, {off: true})];
+console.log(JSON.stringify([480, 560, 620, 700, 930, 1100, 1200].map(m => nowWords(day, m))
+  .concat([nowWords([], 600), nowWords([E('A', 0, 100), E('B', 0, 200), E('C', 50, 300)], 60)]).map(w => [w.now, w.next])));
+""")
+        self.assertEqual(out, [
+            ["Free until 9:00 AM", "Then Deep work"],
+            ["Now: Deep work until 11:00 AM", "Next: Class at 10:00 AM"],
+            # Two at once: until the first of them ends.
+            ["Now: Deep work and Class until 11:00 AM", "Next: Lunch at 3:00 PM"],
+            # A block skipped today and a meal that is off are not on the day.
+            ["Free until 3:00 PM", "Then Lunch"],
+            ["Now: Lunch until 4:00 PM", "Next: Gym at 6:00 PM"],
+            ["Now: Gym until 7:00 PM", "Nothing after it today"],
+            ["Nothing more today", ""],
+            ["Nothing more today", ""],
+            ["Now: A and 2 more until 1:40 AM", "Nothing after it today"]])
 
 
 class RepeatEditorTest(unittest.TestCase):

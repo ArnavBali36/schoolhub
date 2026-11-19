@@ -450,6 +450,28 @@ A dialog, built like the task dialog, with these fields:
 
 Items can also be ticked straight on the timeline.
 
+### The glance
+
+Asked for on 2026-11-18: the day's calendar as a popup from the Mac's menu bar, showing only the
+time it is and what the calendar looks like.
+
+- **The page at `#glance`** is today's plan alone, filling whatever small window it is in: a
+  heading with the date, the time it is, and a line of what is on now and next ("Now: Deep work
+  until 3:30 PM", "Next: Lunch at 4:00 PM"; between blocks "Free until 4:00 PM", "Then Lunch"),
+  and under it the day's timeline as the planner draws it, with the now line. No bar, no list, no
+  buttons, no week strip.
+- **Only to be read.** The timeline takes no click and no key does anything, so nothing can be
+  changed from it by accident. Changes are made in School itself.
+- **How it is made:** `bar.js` puts the class `glance` on `<html>` before the first paint when the
+  address ends in `#glance`; the page's CSS hides the rest and lets the planner fill the window;
+  `planner.js` draws the heading with the now line, each minute, and moves on to the new day at
+  midnight.
+- **Fresh when opened:** the window's owner sends the page the event `qp:glance` each time it
+  opens it; the page then asks for the list and the plan again and shows today.
+- **Where it shows:** the Mac app "Prep & School" has an icon in the menu bar that opens it in a
+  small window (QuantPrep's `app/desktop/PrepSchool.swift`). Any browser can open it too, at
+  `…/school/#glance`.
+
 ### The weekly form
 
 Opened with **Week…**. It is a dialog with a table, one row per weekday, Sunday first:

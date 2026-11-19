@@ -1323,6 +1323,9 @@ function backOnShow(){
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) watchSync(); else backOnShow(); });
 window.addEventListener('pageshow', e => { if (e.persisted) backOnShow(); });
+// The Mac app's glance (bar.js) stays loaded behind its menu bar icon and is told each time it is
+// opened, since nothing else says so: a window that was never the tab in front has no return.
+window.addEventListener('qp:glance', backOnShow);
 // ---- end of back on show ----
 
 // ---- what planner.js uses ----

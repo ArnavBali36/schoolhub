@@ -119,7 +119,9 @@ Sunday shows it; a change made on one day stays on that day. A block can repeat 
 events do (its **Repeat** menu): every day, week, 2 weeks, month or year, or a custom rule such as
 every 2 weeks on Monday and Wednesday, the last weekday of every month, or the first Monday of
 November every year, for good, until a date, or a number of times. Changing a repeat holds from
-that day on; the days before keep what they had. Resting the pointer
+that day on; the days before keep what they had. In the Mac app "Prep & School" an icon in
+the menu bar opens today's plan at a glance: the time it is, what is on now and next, and the
+day's timeline (the page at `#glance`). Resting the pointer
 on a block (or on a flag of something due) shows its details beside it, as does Tab from the
 keyboard; a click opens the same details as a card you can act on. The whole design is in
 [docs/planner.md](docs/planner.md).

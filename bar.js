@@ -12,6 +12,18 @@
   const PHONE = $('meta[name="schoolhub-site"]')?.content === 'phone';
   const LOCAL_FILES = location.protocol === 'file:';
 
+  // ---- the glance ----
+  // The page opened at #glance is today's plan to be read at a glance and nothing else: the Mac
+  // app shows it in a small window under its menu bar icon (docs/planner.md, "The glance"). The
+  // mark goes on <html> here, before anything is painted, and the page's CSS and planner.js do the
+  // rest. Nothing is changed from a glance, so no key does anything in it: the page's own keys
+  // (B for a block, N for a task, the views, O for the next app) would act on parts that are not
+  // on show.
+  if (location.hash === '#glance') {
+    document.documentElement.classList.add('glance');
+    window.addEventListener('keydown', e => { e.stopImmediatePropagation(); }, true);
+  }
+
   // ---- filling the bar in as it is read ----
   // A MutationObserver's callback runs after the browser adds elements and before it next paints,
   // so each part is filled in the moment it exists. A fill returns true once its part is complete.
