@@ -256,6 +256,26 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(back["tasks"][task["id"]], back["task"])
         self.post("/api/task/delete", {"id": task["id"]})
 
+    def test_a_task_that_repeats_keeps_its_days_and_has_no_date(self):
+        _, made = self.post("/api/task", {"name": "LeetCode", "due_at": "2026-10-09T03:59:00.000Z", "all_day": True,
+                                          "repeat": {"days": [5, 1, 3, 1], "until": "2026-12-18"}})
+        task = made["task"]
+        self.assertEqual(task["repeat"], {"days": [1, 3, 5], "until": "2026-12-18"})
+        self.assertEqual((task["due_at"], task["all_day"]), (None, False))
+        # No end, and the repeat taken off again: a task like any other, stored without the key.
+        _, open_ended = self.post("/api/task", {"id": task["id"], "name": "LeetCode", "repeat": {"days": [0, 6], "until": ""}})
+        self.assertEqual(open_ended["task"]["repeat"], {"days": [0, 6], "until": None})
+        _, plain = self.post("/api/task", {"id": task["id"], "name": "LeetCode", "repeat": None})
+        self.assertNotIn("repeat", plain["task"])
+        for repeat, why in (("daily", b"repeat must be an object"), ({"days": []}, b"repeat needs days, each a weekday from 0 (Sunday) to 6"),
+                            ({"days": [7]}, b"repeat needs days, each a weekday from 0 (Sunday) to 6"),
+                            ({"days": [True]}, b"repeat needs days, each a weekday from 0 (Sunday) to 6"),
+                            ({"days": [1], "until": "2026-02-30"}, b"repeat's until must be a date written YYYY-MM-DD"),
+                            ({"days": [1], "until": "tomorrow"}, b"repeat's until must be a date written YYYY-MM-DD")):
+            with self.subTest(repeat=repeat):
+                self.assertEqual(self.post("/api/task", {"name": "x", "repeat": repeat}), (400, why))
+        self.post("/api/task/delete", {"id": task["id"]})
+
     def test_notes_are_kept_as_typed_under_their_own_ids(self):
         status, data = self.post("/api/note", {"id": "note:abc123def456", "text": "Lab 4\n  bring goggles  \n\n"})
         self.assertEqual(status, 200)

@@ -568,6 +568,8 @@ def add_tasks(courses, now):
             "created_at": t.get("created_at", ""),
             # Kept at the top, or in the list by date; one saved before the choice is pinned undated.
             "pinned": bool(t["pinned"]) if "pinned" in t else not t.get("due_at"),
+            # A task that repeats (server.py clean_repeat): the page shows it on its days.
+            **({"repeat": t["repeat"]} if isinstance(t.get("repeat"), dict) else {}),
         })
     if personal["assignments"]:
         courses.append(personal)

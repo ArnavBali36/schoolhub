@@ -78,18 +78,30 @@ module.exports = async (req, res) => {
       if (!name) return res.status(400).json({error: 'a task needs a name'});
       const due = body.due_at ? String(body.due_at) : null;
       if (due && Number.isNaN(Date.parse(due))) return res.status(400).json({error: 'due_at must be an ISO date'});
+      // A task that repeats (server.py clean_repeat): weekdays 0 (Sunday) to 6, and its last day.
+      let repeat = null;
+      if (body.repeat) {
+        const r = body.repeat, days = r && r.days, until = (r && r.until) || null;
+        if (typeof r !== 'object' || Array.isArray(r)) return res.status(400).json({error: 'repeat must be an object'});
+        if (!Array.isArray(days) || !days.length || days.some(d => !Number.isInteger(d) || d < 0 || d > 6))
+          return res.status(400).json({error: 'repeat needs days, each a weekday from 0 (Sunday) to 6'});
+        if (until !== null && (typeof until !== 'string' || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(until) || Number.isNaN(Date.parse(until + 'T00:00:00Z')) || new Date(until + 'T00:00:00Z').toISOString().slice(0, 10) !== until))
+          return res.status(400).json({error: "repeat's until must be a date written YYYY-MM-DD"});
+        repeat = {days: [...new Set(days)].sort((a, b) => a - b), until};
+      }
       const existing = await redis('HGET', TASKS, id);
       const task = {
         id,
         name,
         course_id: clip(body.course_id, 80) || 'personal',
-        due_at: due,
-        all_day: Boolean(due) && Boolean(body.all_day),
+        due_at: repeat ? null : due,
+        all_day: !repeat && Boolean(due) && Boolean(body.all_day),
         // Kept at the top, or in the list by date; without the choice, pinned when it has no date.
-        pinned: 'pinned' in body ? Boolean(body.pinned) : !due,
+        pinned: 'pinned' in body ? Boolean(body.pinned) : !due || !!repeat,
         notes: clip(body.notes, 5000),
         created_at: (existing && JSON.parse(existing).created_at) || body.created_at || now,
         updated_at: now,
+        ...(repeat ? {repeat} : {}),
       };
       await redis('HSET', TASKS, id, JSON.stringify(task));
       return res.json({task, ...(await readState())});

@@ -354,6 +354,31 @@ def mark_time(given):
     return now.isoformat()
 
 
+REPEAT_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+
+
+def clean_repeat(given):
+    """A task's repeat, for one that shows fresh each day it is on (the page's Daily group): the
+    weekdays, 0 for Sunday to 6 for Saturday as the page counts them, and the last day it shows
+    (until, a date or None for no end). None for a task that does not repeat. Returns (repeat, error)."""
+    if given is None or given is False:
+        return None, None
+    if not isinstance(given, dict):
+        return None, "repeat must be an object"
+    days = given.get("days")
+    if not isinstance(days, list) or not days or any(type(d) is not int or not 0 <= d <= 6 for d in days):
+        return None, "repeat needs days, each a weekday from 0 (Sunday) to 6"
+    until = given.get("until") or None
+    if until is not None:
+        try:
+            if not isinstance(until, str) or not REPEAT_DATE.fullmatch(until):
+                raise ValueError(until)
+            date.fromisoformat(until)
+        except ValueError:
+            return None, "repeat's until must be a date written YYYY-MM-DD"
+    return {"days": sorted(set(days)), "until": until}, None
+
+
 def clean_task(body, existing):
     """Validate a task from the dashboard form. Returns (task, error)."""
     name = str(body.get("name") or "").strip()[:200]
@@ -365,6 +390,11 @@ def clean_task(body, existing):
             datetime.fromisoformat(str(due).replace("Z", "+00:00"))
         except ValueError:
             return None, "due_at must be an ISO date"
+    repeat, error = clean_repeat(body.get("repeat"))
+    if error:
+        return None, error
+    if repeat:
+        due = None  # it shows on its days, never by a date of its own
     stamp = datetime.now(timezone.utc).isoformat()
     return {
         "name": name,
@@ -377,6 +407,8 @@ def clean_task(body, existing):
         "notes": str(body.get("notes") or "").strip()[:5000],
         "created_at": (existing or {}).get("created_at") or body.get("created_at") or stamp,
         "updated_at": stamp,
+        # Only on a task that repeats, so every other task is stored as it always was.
+        **({"repeat": repeat} if repeat else {}),
     }, None
 
 

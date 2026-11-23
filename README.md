@@ -25,6 +25,12 @@ put them yourself, and writes a static page you open in your browser. Everything
 - **Add your own tasks** with the **+** button (or press **N**): a name, a course or "Personal", an
   optional due date and time, and notes. They get ✓, Undo, overdue warnings and due-soon alerts like
   everything else, and they show up on the phone view.
+- **Tasks that repeat**: in the same form, tick **Repeat it every day**, choose the days of the
+  week and, if you like, a last day. The task then shows fresh under **Daily** on each of its days,
+  with a ✓ of that day alone, and stays out of the list by date. On its other days, and once it has
+  ended, it waits under **Show done**, where you can edit or delete it.
+- **Notes**: the notepad button in the bar opens a small window of short text notes, saved as you
+  type (`state/notes.json`).
 - **Undo and redo** for everything you change: **Cmd+Z** (or Ctrl+Z) takes back the last change to a
   ✓, a task or the day planner, and **Shift+Cmd+Z** (Shift+Ctrl+Z, or Ctrl+Y) makes it again, about a
   hundred steps back for as long as the page is open. See [Undo and redo](#undo-and-redo).

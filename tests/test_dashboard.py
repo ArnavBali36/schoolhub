@@ -2096,6 +2096,68 @@ class NotesTest(unittest.TestCase):
     def test_the_pages_keys_stay_out_of_the_notes_window(self):
         self.assertIn("if (typing || dialogOpen() || $('#notesPop')?.contains(document.activeElement)) return;", JS)
 
+
+@unittest.skipUnless(NODE, "needs Node to run dashboard.js")
+class DailyTest(unittest.TestCase):
+    """A task that repeats shows fresh on each of its days, under an id of that day (dashboard.js,
+    "daily tasks")."""
+
+    @classmethod
+    def setUpClass(cls):
+        start, end = JS.index("// ---- daily tasks ----"), JS.index("// ---- end of daily tasks ----")
+        consts = []
+        for name in ("const SOURCE_DONE", "const past", "function eff", "const isDone", "const needsAttention", "const canMark", "function pillText"):
+            tail = r".*?^\}$" if name.startswith("function") else r".*?$"
+            consts.append(re.search(r"^" + re.escape(name) + tail, JS, re.M | re.S).group(0))
+        cls.out = run_node("const now = new Date(), WRITE = 'local', num = n => String(n);\nlet marks = {};\n" + JS[start:end] + "\n" + "\n".join(consts) + """
+const today = new Date(), wd = today.getDay(), day = dayKey(today);
+const before = dayKey(new Date(Date.now() - 864e5)), after = dayKey(new Date(Date.now() + 864e5));
+const task = repeat => ({id: 'task:ab12cd34', name: 'LeetCode', status: 'todo', is_task: true, due_at: null, pinned: false, repeat});
+const view = a => ({id: a.id, task: a.task_id, daily: !!a.daily, off: a.off, ended: a.ended, done: isDone(a), mark: !!canMark(a), pill: pillText(a, eff(a))});
+const on = dailyItem(task({days: [wd], until: null}));
+marks = {};
+const out = {day,
+  on: view(on),
+  lastDay: view(dailyItem(task({days: [0, 1, 2, 3, 4, 5, 6], until: day}))),
+  rest: view(dailyItem(task({days: [(wd + 1) % 7], until: null}))),
+  ended: view(dailyItem(task({days: [0, 1, 2, 3, 4, 5, 6], until: before}))),
+  plain: dailyItem({id: 'task:zz99zz99', name: 'Buy milk'}).daily === undefined,
+  text: [repeatText({days: [0, 1, 2, 3, 4, 5, 6]}), repeatText({days: [5, 1, 3]}), repeatText({days: [1, 2, 3, 4, 5]}), repeatText({days: [6, 0]}),
+         repeatText({days: [2, 4], until: '2031-03-09'}, true).replace(/until.*2031/, 'until … 2031')],
+};
+// Ticked today: done today; tomorrow's is another id, so it starts fresh.
+marks = {[on.id]: {marked_at: new Date().toISOString()}};
+out.ticked = view(on);
+out.tomorrowId = 'task:ab12cd34@' + after !== on.id;
+console.log(JSON.stringify(out));
+""")
+
+    def test_it_is_an_item_of_today_on_its_days(self):
+        o = self.out
+        want = {"id": "task:ab12cd34@" + o["day"], "task": "task:ab12cd34", "daily": True, "off": False, "ended": False, "done": False, "mark": True, "pill": "To do"}
+        self.assertEqual(o["on"], want)
+        self.assertEqual(o["lastDay"], want)          # its last day is still one of its days
+        self.assertEqual(o["ticked"], {**want, "done": True, "pill": "Done ✓"})
+        self.assertTrue(o["tomorrowId"])
+        self.assertTrue(o["plain"])
+
+    def test_on_other_days_and_once_ended_it_waits_among_the_done(self):
+        rest = {"id": "task:ab12cd34", "task": "task:ab12cd34", "daily": True, "off": True, "ended": False, "done": True, "mark": False, "pill": "Not today"}
+        self.assertEqual(self.out["rest"], rest)
+        self.assertEqual(self.out["ended"], {**rest, "ended": True, "pill": "Ended"})
+
+    def test_its_days_in_words(self):
+        self.assertEqual(self.out["text"], ["Every day", "Mon, Wed, Fri", "Weekdays", "Weekends", "Tue, Thu, until … 2031"])
+
+    def test_the_list_keeps_it_under_daily_and_is_built_again_on_a_new_day(self):
+        self.assertIn("const order = ['Daily','My tasks','Needs attention','Today','Tomorrow','Next 7 days','Later','No due date','Earlier'];", JS)
+        self.assertIn("if (a.daily) { G['Daily'].push(a); continue; }", JS)
+        self.assertIn("if (dayKey() === shownDay || !D || dialogOpen()) return;", JS)
+        self.assertIn("setInterval(newDay, 60000);", JS)
+        # Edit and Delete are the task's, whatever day's item the drawer shows.
+        self.assertIn('data-edit-task="${esc(a.task_id || a.id)}"', JS)
+        self.assertIn('data-delete-task="${esc(a.task_id || a.id)}"', JS)
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -2141,9 +2203,12 @@ class TaskFormTest(unittest.TestCase):
         cls.out = run_node("""
 const save = {disabled: false, textContent: 'Save'};
 const els = {'#tName': {value: ' Buy milk ', focus(){}}, '#tDate': {value: ''}, '#tTime': {value: ''}, '#tCourse': {value: 'personal'}, '#tNotes': {value: ''},
-  '#tPinned': {checked: true}, '#taskForm button[type="submit"]': save};
+  '#tPinned': {checked: true}, '#taskForm button[type="submit"]': save, '#tRepeat': {checked: false}, '#tUntil': {value: ''}};
 const $ = sel => els[sel] || null;
-const taskDialog = {closed: 0, close(){ this.closed++; }};
+// The days of a task that repeats ("daily tasks"): the ticked ones, and the first, which says when none is.
+const dayBoxes = {ticked: [], said: [], shown: 0};
+const firstDay = {setCustomValidity(s){ dayBoxes.said.push(s); }, reportValidity(){ dayBoxes.shown++; }};
+const taskDialog = {closed: 0, close(){ this.closed++; }, querySelectorAll: () => dayBoxes.ticked.map(value => ({value})), querySelector: () => firstDay};
 let editingTask = null, taskForms = 1, savingTask = false, tasks = {};
 const toasts = [], sent = [];
 let answer = null;
@@ -2175,9 +2240,25 @@ const out = {};
   out.whileOther = [save.disabled, sent[sent.length - 1].id];
   answer.res(made(1)); await fourth;
   out.late = state();
+  // A task that repeats: its days and its last day, and no date or pin of its own.
+  editingTask = null;
+  els['#tRepeat'].checked = true; els['#tDate'].value = '2026-11-30'; els['#tUntil'].value = '2026-12-18';
+  const none = press(); await tick(); await none;
+  out.noDays = {sent: sent.length, said: dayBoxes.said[dayBoxes.said.length - 1], shown: dayBoxes.shown};
+  dayBoxes.ticked = ['1', '3', '5'];
+  const fifth = press(); await tick();
+  out.repeatBody = sent[sent.length - 1];
+  answer.res(made(2)); await fifth;
   console.log(JSON.stringify(out));
 })();
 """)
+
+    def test_a_task_that_repeats_is_sent_with_its_days_and_no_date(self):
+        o = self.out
+        # No day ticked: nothing is sent, and the days say so.
+        self.assertEqual(o["noDays"], {"sent": 3, "said": "Choose at least one day for it to show on.", "shown": 1})
+        self.assertEqual(o["repeatBody"], {"name": "Buy milk", "course_id": "personal", "notes": "", "due_at": None, "all_day": False,
+                                           "pinned": False, "repeat": {"days": [1, 3, 5], "until": "2026-12-18"}})
 
     def test_save_pressed_twice_makes_one_task(self):
         o = self.out
@@ -2278,7 +2359,9 @@ class UndoSourceTest(unittest.TestCase):
         outside = JS[:JS.index(UNDO_START)] + JS[JS.index(UNDO_END):]
         self.assertEqual(len(re.findall(r"backend\.(saveTask|deleteTask)\(", outside)), 2)
         self.assertEqual(len(re.findall(r"\bsetMark\(", outside)), 2)   # its definition, and toggleMark
-        self.assertEqual(len(re.findall(r"backend\.mark\(", JS)), 1)     # setMark
+        # setMark, and the tidying of a daily task's ✓ of days long past (tidyDaily).
+        self.assertEqual(len(re.findall(r"backend\.mark\(", JS)), 2)
+        self.assertIn("for (const id of old) backend.mark(id, false).then(() => { delete marks[id]; }, () => {});", JS)
         # A mark put back carries its own time, and the way back first asks what is stored now.
         self.assertIn("if (done && as?.marked_at) body.marked_at = as.marked_at;", JS)
         self.assertIn("try { stored = await backend.marks(); } catch { return {ok: false, why: 'failed'}; }", JS)

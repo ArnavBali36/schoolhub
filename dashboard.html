@@ -391,7 +391,7 @@ input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 .pill::before{content:"";display:inline-block;position:relative;top:-1px;width:5px;height:5px;margin-right:5px;border-radius:50%;background:currentColor;vertical-align:middle}
 .s-missing,.s-overdue{background:var(--bad-soft);color:var(--bad)}.s-soon,.s-flagged,.s-check{background:var(--warn-soft);color:var(--warn)}
 .s-todo{background:var(--surface-3);color:var(--text)}.s-submitted{background:var(--accent-soft);color:var(--accent)}
-.s-graded,.s-marked{background:var(--good-soft);color:var(--good)}.s-offline,.s-excused,.s-expired{background:var(--surface-3);color:var(--muted)}
+.s-graded,.s-marked{background:var(--good-soft);color:var(--good)}.s-offline,.s-excused,.s-expired,.s-rest{background:var(--surface-3);color:var(--muted)}
 .check{width:26px;height:26px;border-radius:50%;border:1.5px solid var(--border-input);background:var(--surface);box-shadow:var(--neu-sm);color:transparent;cursor:pointer;display:grid;place-items:center;font-size:13px;font-weight:700;padding:0;transition:background-color var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),transform var(--dur-2) var(--ease-spring)}
 .check:hover{border-color:var(--good);color:var(--good)}
 .check:active{transform:scale(.92)}
@@ -518,6 +518,11 @@ dialog.task select{appearance:none;padding-right:32px;cursor:pointer;
   background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
   background-position:calc(100% - 17px) 50%,calc(100% - 12px) 50%;background-size:5px 5px;background-repeat:no-repeat}
 dialog.task .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+/* A task that repeats (dashboard.js, "daily tasks"): its days as the planner's pills, and its last
+   day. The date, the time and the pin are for a task that does not. */
+dialog.task :is(.t-repeat,.t-once){display:grid;gap:12px}
+dialog.task :is(.t-repeat,.t-once)[hidden]{display:none}
+dialog.task .t-repeat{padding:12px;border-radius:var(--radius-sm);background:var(--surface-2)}
 /* Every dialog's buttons stay in reach on a bar of glass at its bottom; the weekly form's title
    stays at its top. The margins take the form's padding back, so both meet the dialog's edges. */
 dialog.task .buttons{display:flex;justify-content:flex-end;gap:8px;position:sticky;bottom:0;z-index:2;margin:4px -24px -24px;padding:14px 24px 20px;border-top:1px solid var(--glass-edge);
@@ -1139,11 +1144,18 @@ dialog.task .wk-hours label{flex:1 1 160px}
     <h3 id="taskHeading">New task</h3>
     <label>Task<input id="tName" maxlength="200" placeholder="e.g. Start the CGA draft" required></label>
     <label>Course<select id="tCourse"></select></label>
-    <div class="two">
-      <label>Due date<input id="tDate" type="date"></label>
-      <label>Time (optional)<input id="tTime" type="time"></label>
+    <label class="pin-check"><input id="tRepeat" type="checkbox"> Repeat it every day<span class="hint">It shows fresh under Daily on the days you choose, with a new ✓ each day, and stays out of the list by date.</span></label>
+    <div class="t-repeat" id="tRepeatBox" hidden>
+      <div class="b-rep-days" id="tDays" role="group" aria-label="On these days"><label class="b-pill" title="Sunday"><input type="checkbox" name="tDay" value="0" aria-label="Sunday"><span aria-hidden="true">S</span></label><label class="b-pill" title="Monday"><input type="checkbox" name="tDay" value="1" aria-label="Monday"><span aria-hidden="true">M</span></label><label class="b-pill" title="Tuesday"><input type="checkbox" name="tDay" value="2" aria-label="Tuesday"><span aria-hidden="true">T</span></label><label class="b-pill" title="Wednesday"><input type="checkbox" name="tDay" value="3" aria-label="Wednesday"><span aria-hidden="true">W</span></label><label class="b-pill" title="Thursday"><input type="checkbox" name="tDay" value="4" aria-label="Thursday"><span aria-hidden="true">T</span></label><label class="b-pill" title="Friday"><input type="checkbox" name="tDay" value="5" aria-label="Friday"><span aria-hidden="true">F</span></label><label class="b-pill" title="Saturday"><input type="checkbox" name="tDay" value="6" aria-label="Saturday"><span aria-hidden="true">S</span></label></div>
+      <label>Ends (optional)<input id="tUntil" type="date"></label>
     </div>
-    <label class="pin-check"><input id="tPinned" type="checkbox"> Keep it at the top, under My tasks<span class="hint">Unchecked, it goes in the list by its date like any other item.</span></label>
+    <div class="t-once" id="tOnce">
+      <div class="two">
+        <label>Due date<input id="tDate" type="date"></label>
+        <label>Time (optional)<input id="tTime" type="time"></label>
+      </div>
+      <label class="pin-check"><input id="tPinned" type="checkbox"> Keep it at the top, under My tasks<span class="hint">Unchecked, it goes in the list by its date like any other item.</span></label>
+    </div>
     <label>Notes<textarea id="tNotes" maxlength="5000" placeholder="Optional"></textarea></label>
     <div class="buttons"><button type="button" class="btn" id="taskCancel">Cancel</button><button type="submit" class="btn primary">Save</button></div>
   </form>

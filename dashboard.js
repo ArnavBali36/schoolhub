@@ -304,23 +304,51 @@ function taskItem(t){
     status: due && due < now ? 'overdue' : 'todo', score: null, grade: null, submitted_at: null, late: false,
     platform: 'My task', verifiable: false, url: null, folder: null, files: [], submitted_files: [],
     description_html: '', comments: [], notes: t.notes || '', is_task: true, course_id: t.course_id || 'personal',
-    created_at: t.created_at || '', pinned: pinnedTask(t)};
+    created_at: t.created_at || '', pinned: pinnedTask(t), ...(t.repeat ? {repeat: t.repeat} : {})};
 }
+// ---- daily tasks ----
+// A task that repeats (its repeat: the weekdays it is on, 0 for Sunday, and a last day or none) is
+// not in the list by a date. Each day it is on, it shows fresh under Daily as an item of that day
+// alone: its id is the task's with the day ("task:ab12cd34@2026-11-23"), so its ✓ is that day's
+// and the next day's starts unticked. On its other days, and once its last day has passed, it
+// waits among the done (Show done), where it can still be edited or deleted.
+const dayKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const repeatOf = t => t?.repeat && Array.isArray(t.repeat.days) && t.repeat.days.length ? t.repeat : null;
+let shownDay = dayKey();     // the day the list was last built for
+function dailyItem(a){
+  const r = repeatOf(a);
+  if (!r) return a;
+  const today = new Date(), day = dayKey(today);
+  const ended = !!r.until && r.until < day, on = !ended && r.days.includes(today.getDay());
+  return {...a, task_id: a.id, id: on ? `${a.id}@${day}` : a.id, daily: true, off: !on, ended, due_at: null, all_day: false,
+    status: on ? 'todo' : 'rest', platform: 'Daily', pinned: false};
+}
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// "Every day", "Weekdays", "Mon, Wed, Fri"; long: with its last day.
+function repeatText(r, long){
+  const d = [...r.days].sort((x, y) => x - y), key = d.join('');
+  const days = key === '0123456' ? 'Every day' : key === '12345' ? 'Weekdays' : key === '06' ? 'Weekends' : d.map(i => DAY_NAMES[i]).join(', ');
+  if (!long || !r.until) return days;
+  const [y, m, n] = r.until.split('-').map(Number);
+  return `${days}, until ${new Date(y, m - 1, n).toLocaleDateString([], {month: 'short', day: 'numeric', year: y !== new Date().getFullYear() ? 'numeric' : undefined})}`;
+}
+// ---- end of daily tasks ----
 // A course's dot: the color set for it in config.json if any, else one of the theme's course colors.
 // The theme's own is kept too (slot): Night's red uses it in place of a set color, which may be blue.
 const courseSlot = (c, i) => c.id === 'personal' ? 'var(--course-personal)' : `var(--course-${i % COURSE_COLORS + 1})`;
 const courseColor = (c, i) => c.id === 'personal' ? courseSlot(c) : c.color || courseSlot(c, i);
 function rebuild(){
+  shownDay = dayKey();
   let base = D.courses;
   if (tasks) base = base.filter(c => c.id !== 'personal').map(c => ({...c, assignments: c.assignments.filter(a => !a.is_task)}));
-  courses = base.map((c, i) => ({...c, color: courseColor(c, i), slot: courseSlot(c, i), assignments: [...c.assignments]}));
+  courses = base.map((c, i) => ({...c, color: courseColor(c, i), slot: courseSlot(c, i), assignments: c.assignments.map(dailyItem)}));
   if (tasks) {
     const personal = {id: 'personal', source: 'personal', name: 'Personal tasks', short: 'Personal', color: courseColor({id: 'personal'}), slot: courseSlot({id: 'personal'}),
                       assignments: [], materials: []};
     // In the order they were made, wherever the store keeps them: a task an undo puts back is stored
     // last, and still shows where it was.
     const made = t => Date.parse(t.created_at) || 0;
-    for (const t of Object.values(tasks).sort((x, y) => made(x) - made(y))) (courses.find(c => c.id === t.course_id) || personal).assignments.push(taskItem(t));
+    for (const t of Object.values(tasks).sort((x, y) => made(x) - made(y))) (courses.find(c => c.id === t.course_id) || personal).assignments.push(dailyItem(taskItem(t)));
     if (personal.assignments.length) courses.push(personal);
   }
   all = courses.flatMap(c => c.assignments.map(a => ({...a, course: c})));
@@ -347,13 +375,14 @@ function eff(a){
 // Your ✓ is your word: a mark the last sync could not confirm ('flagged') still counts as done,
 // with a note on the item, rather than sitting in Needs attention. A check-in or a paper hand-in
 // leaves nothing on Canvas to find.
-const isDone = a => { const s = eff(a); return [...SOURCE_DONE, 'expired', 'marked', 'flagged'].includes(s) || (s === 'offline' && (!a.due_at || past(a))); };
+const isDone = a => { const s = eff(a); return [...SOURCE_DONE, 'expired', 'marked', 'flagged', 'rest'].includes(s) || (s === 'offline' && (!a.due_at || past(a))); };
 const needsAttention = a => ['missing','overdue','check'].includes(eff(a));
-const canMark = a => WRITE && !SOURCE_DONE.includes(a.status);
+const canMark = a => WRITE && !a.off && !SOURCE_DONE.includes(a.status);
 
 function pillText(a, s){
   if (s === 'graded' && a.score != null) return num(a.score) + (a.points ? ' / ' + num(a.points) : '');
   if (s === 'graded' && a.grade) return a.grade;
+  if (s === 'rest') return a.ended ? 'Ended' : 'Not today';
   return {missing:'Missing', soon:'Due soon', todo:'To do', submitted:'Submitted', graded:'Graded', offline:'Offline',
           excused:'Excused', expired:'Old', marked:'Done ✓', flagged:'Done ✓', check:'Confirm', overdue:'Overdue'}[s];
 }
@@ -372,7 +401,7 @@ function row(a){
     <span class="chip">${dot(a.course)}${esc(a.course.short || a.course.name)}</span>
     <button type="button" class="name" data-drawer="${esc(a.id)}">${esc(a.name)}${nf ? `<small>📎 ${nf}</small>` : ''}${a.late ? '<small>late</small>' : ''}${a.due_changed_from ? '<small>📅 date changed</small>' : ''}</button>
     <span class="plat">${esc(a.platform)}</span>
-    <span class="due">${fmtDue(a.due_at, false, a.all_day)}</span>
+    <span class="due">${a.daily ? esc(repeatText(a.repeat)) : fmtDue(a.due_at, false, a.all_day)}</span>
     <span class="pill s-${s}" title="${esc(PILL_TIP[s] || '')}">${esc(pillText(a, s))}</span>
     ${canMark(a) ? `<button class="check ${m ? 'on' : ''}" data-mark="${esc(a.id)}" title="${m ? 'Unmark' : 'Mark as done'}" aria-label="${m ? 'Unmark' : 'Mark as done'}">✓</button>` : '<span></span>'}
   </div>`;
@@ -397,9 +426,11 @@ function doneToggle(items){
 }
 
 function upcomingView(vis){
-  const order = ['My tasks','Needs attention','Today','Tomorrow','Next 7 days','Later','No due date','Earlier'];
+  const order = ['Daily','My tasks','Needs attention','Today','Tomorrow','Next 7 days','Later','No due date','Earlier'];
   const G = Object.fromEntries(order.map(k => [k, []]));
   for (const a of all.filter(vis)) {
+    // Today's own, first: what repeats, fresh each day ("daily tasks").
+    if (a.daily) { G['Daily'].push(a); continue; }
     if (pinnedItem(a)) { G['My tasks'].push(a); continue; }
     if (needsAttention(a)) { G['Needs attention'].push(a); continue; }
     if (!a.due_at) { G['No due date'].push(a); continue; }
@@ -409,6 +440,7 @@ function upcomingView(vis){
   G['Needs attention'].sort((x, y) => byDue(y, x));
   G['Earlier'].sort((x, y) => byDue(y, x));
   G['My tasks'].sort(listOrder);
+  G['Daily'].sort((x, y) => (x.off - y.off) || String(x.created_at).localeCompare(String(y.created_at)));
   for (const k of ['Today','Tomorrow','Next 7 days','Later']) G[k].sort(byDue);
   const html = order.filter(k => G[k].length).map(k =>
     `<section class="group"><h2>${k} · ${G[k].length}</h2><div class="list">${G[k].map(row).join('')}</div></section>`).join('');
@@ -642,11 +674,11 @@ function openDrawer(id, fromKeyboard = false){
     <span class="chip">${dot(a.course)}${esc(a.course.name)}</span>
     <h3 id="drawerTitle">${esc(a.name)}</h3>
     <div class="meta"><span class="pill s-${s}">${esc(pillText(a, s))}</span>
-      <span>${a.due_at ? (a.all_day ? 'On ' : 'Due ') + esc(fmtDue(a.due_at, true, a.all_day)) : 'No due date'}</span>
+      <span>${a.daily ? esc(repeatText(a.repeat, true)) : a.due_at ? (a.all_day ? 'On ' : 'Due ') + esc(fmtDue(a.due_at, true, a.all_day)) : 'No due date'}</span>
       ${a.due_changed_from ? `<span>· moved from ${esc(fmtDue(a.due_changed_from, true, a.all_day))}</span>` : ''}<span>· ${esc(a.platform)}</span>${a.points ? `<span>· ${num(a.points)} pts</span>` : ''}${a.late ? '<span>· Late</span>' : ''}</div>
     <div class="actions">
       ${canMark(a) ? `<button type="button" class="btn ${m ? '' : 'primary'}" data-mark="${esc(a.id)}">${m ? 'Unmark done' : '✓ Mark as done'}</button>` : ''}
-      ${a.is_task && WRITE ? `<button type="button" class="btn" data-edit-task="${esc(a.id)}">Edit</button><button type="button" class="btn" data-delete-task="${esc(a.id)}">Delete</button>` : ''}
+      ${a.is_task && WRITE ? `<button type="button" class="btn" data-edit-task="${esc(a.task_id || a.id)}">Edit</button><button type="button" class="btn" data-delete-task="${esc(a.task_id || a.id)}">Delete</button>` : ''}
       ${plannerState === 'on' && !isDone(a) ? `<button type="button" class="btn" data-plan-it="${esc(a.id)}" title="Add it to the next deep work block today">Plan it</button>` : ''}
       ${a.url ? `<a class="btn" href="${esc(a.url)}" target="_blank">Open on ${siteName(a.url)} ↗</a>` : ''}
       ${a.gradescope_url ? `<a class="btn" href="${esc(a.gradescope_url)}" target="_blank">Open on Gradescope ↗</a>` : ''}
@@ -710,6 +742,7 @@ async function setMark(id, done, as){
   try {
     const stored = marks = await backend.mark(id, done, a, as);
     refresh();
+    if (done && a?.daily) tidyDaily();
     return stored;
   } catch {
     if (prev) marks[id] = prev; else delete marks[id];
@@ -843,9 +876,25 @@ function openTaskForm(id){
   $('#tNotes').value = t?.notes || '';
   // A new task is kept at the top until you choose otherwise.
   $('#tPinned').checked = t ? pinnedTask(t) : true;
+  // Its repeat ("daily tasks"): every day until you choose the days.
+  const r = repeatOf(t);
+  $('#tRepeat').checked = !!r;
+  for (const box of taskDialog.querySelectorAll('[name="tDay"]')) box.checked = r ? r.days.includes(+box.value) : true;
+  $('#tUntil').value = r?.until || '';
+  showRepeat();
   taskDialog.showModal();
   $('#tName').focus();
 }
+// The form shows the days and the last day of a task that repeats, or the date and the pin of one
+// that does not.
+function showRepeat(){
+  const on = $('#tRepeat').checked;
+  $('#tRepeatBox').hidden = !on;
+  $('#tOnce').hidden = on;
+}
+$('#tRepeat').addEventListener('change', showRepeat);
+// A day chosen (or the repeat taken off) answers "choose at least one day".
+taskDialog.addEventListener('change', e => { if (e.target.matches?.('#tRepeat, [name="tDay"]')) taskDialog.querySelector('[name="tDay"]').setCustomValidity(''); });
 function refreshTasks(next){
   tasks = next;
   rebuild();
@@ -879,9 +928,16 @@ async function saveTask(e){
   const name = $('#tName').value.trim();
   if (!name) return $('#tName').focus();
   const date = $('#tDate').value, time = $('#tTime').value;
-  const body = {name, course_id: $('#tCourse').value, notes: $('#tNotes').value,
-    due_at: date ? new Date(`${date}T${time || '23:59'}`).toISOString() : null, all_day: !!date && !time,
-    pinned: $('#tPinned').checked};
+  const days = [...taskDialog.querySelectorAll('[name="tDay"]:checked')].map(b => +b.value);
+  const repeat = $('#tRepeat').checked ? {days, until: $('#tUntil').value || null} : null;
+  // Said on the days themselves: a toast would lie under the form.
+  const firstDay = taskDialog.querySelector('[name="tDay"]');
+  firstDay.setCustomValidity(repeat && !days.length ? 'Choose at least one day for it to show on.' : '');
+  if (repeat && !days.length) return firstDay.reportValidity();
+  const body = repeat ? {name, course_id: $('#tCourse').value, notes: $('#tNotes').value, due_at: null, all_day: false, pinned: false, repeat}
+    : {name, course_id: $('#tCourse').value, notes: $('#tNotes').value,
+      due_at: date ? new Date(`${date}T${time || '23:59'}`).toISOString() : null, all_day: !!date && !time,
+      pinned: $('#tPinned').checked};
   // The task and the form this Save is for: the answer may come after another form was opened.
   const editing = editingTask, form = taskForms;
   if (editing) body.id = editing;
@@ -1063,7 +1119,7 @@ function markStep(label, id, was){
 // and the ✓ of a deleted task was never taken away), or deletes the one the step added. Only while
 // the stored task is still as the step left it. The server stamps each save (updated_at), which is
 // not something you set, so it is not compared.
-const TASK_FIELDS = ['name', 'course_id', 'due_at', 'all_day', 'notes', 'created_at'];
+const TASK_FIELDS = ['name', 'course_id', 'due_at', 'all_day', 'notes', 'created_at', 'repeat'];
 const sameTask = (a, b) => !a || !b ? !a && !b : pinnedTask(a) === pinnedTask(b) && TASK_FIELDS.every(k => same(a[k], b[k]));
 const taskEdit = (was, now) => sameTask({...was, pinned: pinnedTask(now)}, now)
   ? `${pinnedTask(now) ? 'pinned' : 'unpinned'} “${now.name}”` : `edited “${now.name}”`;
@@ -1460,6 +1516,26 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('pagehide', () => saveNote(true));
 // ---- end of notes ----
+
+// ---- a new day ----
+// A page left open over midnight (the Mac app's stays for days) builds its list again when the day
+// changes, so what repeats shows fresh: looked at once a minute, and on coming back to the tab.
+// Never under an open form, whose task the list may be about to take.
+function newDay(){
+  if (dayKey() === shownDay || !D || dialogOpen()) return;
+  refreshTasks(tasks);
+}
+setInterval(newDay, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) newDay(); });
+// A daily task's ✓ of a day long past is of no more use, and every ✓ is in every answer: a few of
+// them are taken away each time one is made.
+const DAILY_KEEP = 30;
+function tidyDaily(){
+  const cut = dayKey(new Date(Date.now() - DAILY_KEEP * 864e5));
+  const old = Object.keys(marks).filter(id => { const m = /^task:[a-z0-9]+@(\d{4}-\d{2}-\d{2})$/.exec(id); return m && m[1] < cut; }).slice(0, 5);
+  for (const id of old) backend.mark(id, false).then(() => { delete marks[id]; }, () => {});
+}
+// ---- end of a new day ----
 
 // Pick up changes made on your other device when you come back to this tab.
 async function reloadState(tries = 3){
