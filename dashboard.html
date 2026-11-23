@@ -330,21 +330,21 @@ dialog.notes[open]{display:grid;grid-template-columns:200px minmax(0,1fr);animat
    the same place in both apps. */
 @media (min-width:641px) and (max-width:960px){.app-switch .brand-mark{display:none}.app-seg a{padding:0 9px}}
 @media (max-width:360px){.app-switch .brand-mark{display:none}}
-/* Beside Notes and the theme button the switch needs more room than QuantPrep's: from 361 to 390 px
-   (an iPhone at 375) it ran past its column, so up to 390 px its segments narrow as they do between
-   641 and 960 px, and below 341 px (a phone's larger text) a little more. The mark stays where
-   QuantPrep shows it. */
-@media (max-width:390px){.app-seg a{padding:0 9px}}
-@media (max-width:340px){.app-seg a{padding:0 7px}}
-/* A screen worked by touch alone: each control of the bar is a target at least 44 px tall (and the
-   two round buttons 42 and 44 px wide), with nothing drawn larger. An invisible hit area (::after)
-   grows each one to its row; the phone's two rows are 44 px each (below), so a target of one row
-   never reaches into the other. A Mac and a desktop browser keep the bar as it was. */
+/* A phone, as QuantPrep's bar has it (styles.css): the segments narrow up to 640 px, the mark goes
+   up to 430 px (the widest iPhone), and at 360 px and below the segments narrow once more. So the
+   switch has the same box in all three apps and does not move when the app changes. */
+@media (max-width:640px){.app-seg a{padding:0 9px}}
+@media (max-width:430px){.app-switch .brand-mark{display:none}}
+@media (max-width:360px){.app-seg a{padding:0 7px}}
+/* A screen worked by touch alone: each control of the bar takes the taps that land around it, with
+   nothing drawn larger and the bar the height QuantPrep's is: an invisible hit area (::after), the
+   same as QuantPrep's for the switch, about 40 px tall for the rest. A Mac and a desktop browser
+   keep the bar as it was. */
 @media (hover:none) and (pointer:coarse){
   .app-seg a,.views button,.theme-btn,.bar-end #syncBtn{position:relative}
   .app-seg a::after,.views button::after,.theme-btn::after,.bar-end #syncBtn::after{content:"";position:absolute}
-  .app-seg a::after{inset:-9px 0}
-  .views button::after,.bar-end #syncBtn::after{inset:-6px 0}
+  .app-seg a::after{inset:-11px -1px -3px}
+  .views button::after,.bar-end #syncBtn::after{inset:-4px 0}
   .theme-btn::after{inset:-6px -2px}
   .notes-btn::after{left:-8px}
   #themeBtn::after{right:-10px}
@@ -1140,12 +1140,6 @@ dialog.task .wk-hours label{flex:1 1 160px}
   .pday{height:42px}
   .pstrip{padding-top:6px}
   .pgrid{margin-right:8px}
-}
-/* A phone worked by touch: the bar's two rows are 44 px each with nothing between, so each row's
-   targets fill it (above); 88 px in all where a pointer's bar is 82. */
-@media (max-width:640px) and (hover:none) and (pointer:coarse){
-  :root{--bar-height:88px}
-  .bar{grid-template-rows:44px 44px;row-gap:0;padding-top:0;padding-bottom:0}
 }
 /* ---- School on a phone ---- */
 /* What a phone needs of the page, outside the bar and the day planner. Width decides only the

@@ -5986,18 +5986,17 @@ console.log(JSON.stringify({
     def test_the_bars_targets_on_a_touch_screen(self):
         touch = HTML[HTML.index("@media (hover:none) and (pointer:coarse){\n  .app-seg a,"):]
         touch = touch[:touch.index("\n}\n")]
-        self.assertIn(".app-seg a::after{inset:-9px 0}", touch)                       # 26 px drawn, 44 to a finger
-        self.assertIn(".views button::after,.bar-end #syncBtn::after{inset:-6px 0}", touch)   # 32 px drawn
+        self.assertIn(".app-seg a::after{inset:-11px -1px -3px}", touch)             # 26 px drawn, 40 to a finger, as QuantPrep's
+        self.assertIn(".views button::after,.bar-end #syncBtn::after{inset:-4px 0}", touch)   # 32 px drawn
         self.assertIn(".theme-btn::after{inset:-6px -2px}", touch)
         self.assertIn(".notes-btn::after{left:-8px}", touch)
         self.assertIn("#themeBtn::after{right:-10px}", touch)
-        rows = "@media (max-width:640px) and (hover:none) and (pointer:coarse){\n  :root{--bar-height:88px}\n  .bar{grid-template-rows:44px 44px;row-gap:0;padding-top:0;padding-bottom:0}\n}"
-        self.assertIn(rows, HTML)
-        # After the phone's own bar rules, which a narrow Mac window keeps as they were.
-        self.assertLess(HTML.index("  :root{--gutter:16px;--bar-height:82px}"), HTML.index(rows))
-        # The switch fits its column beside Notes and the theme button on every phone.
-        self.assertIn("@media (max-width:390px){.app-seg a{padding:0 9px}}\n@media (max-width:340px){.app-seg a{padding:0 7px}}", HTML)
-        for css in (touch, rows):
+        # The bar is as tall as QuantPrep's on a phone: no taller rows for touch.
+        self.assertNotIn("--bar-height:88px", HTML)
+        # The switch has QuantPrep's box on a phone (styles.css), so it does not move between apps.
+        widths = "@media (max-width:640px){.app-seg a{padding:0 9px}}\n@media (max-width:430px){.app-switch .brand-mark{display:none}}\n@media (max-width:360px){.app-seg a{padding:0 7px}}"
+        self.assertIn(widths, HTML)
+        for css in (touch,):
             self.assertNotRegex(css, r"#[0-9a-fA-F]{3,8}\b|\brgba?\(|var\(")
 
 
