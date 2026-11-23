@@ -378,6 +378,16 @@ class ServerTest(unittest.TestCase):
         self.assertNotIn("canvas:guard-1", marks)
         self.daily_cleanup(tid)
 
+    def test_the_door_reads_its_day_under_the_lock_and_the_fold_uses_the_same(self):
+        # An untick let through on one day must not meet a fold made on the next: the handler takes
+        # today once, inside the lock, for both.
+        src = (REPO / "server.py").read_text()
+        handler = src[src.index('if path == "/api/mark":'):src.index('if path == "/api/task":')]
+        self.assertLess(handler.index("with LOCK:"), handler.index("today = date.today()"))
+        self.assertLess(handler.index("today = date.today()"), handler.index("guard = daily_guard(aid, done, today)"))
+        self.assertIn("tidy_daily(today)", handler)
+        self.assertEqual(handler.count("date.today()"), 1)
+
     def test_what_folds_and_when(self):
         s = self.server_mod
         today = date(2026, 12, 20)
@@ -398,9 +408,13 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(s.fold_plan(marks, today),
                          (A, ["2026-11-06", "2026-11-07", "2026-11-12"], ["2026-11-01..2026-11-08", "2026-11-12"]))
         # A ledger that cannot be read counts as none: the days still fold, nothing is thrown.
-        for broken in ("days", {"days": "2026-11-01"}, None, [], {"days": [7, None]}):
+        for broken in ("days", {"days": "2026-11-01"}, None, [], {"days": []}):
             with self.subTest(broken=broken):
                 self.assertEqual(s.fold_plan({**m(A, "2026-11-06"), A + "@done": broken}, today), (A, ["2026-11-06"], ["2026-11-06"]))
+        # An entry of it that reads as no day or run (edited by hand) is carried over, never dropped.
+        hand = {"days": ["2026-10-01..2026-10-20", "2026-10-25 .. 2026-10-28", "2026-9-30", 7, None]}
+        self.assertEqual(s.fold_plan({**m(A, "2026-11-06"), A + "@done": hand}, today),
+                         (A, ["2026-11-06"], ["2026-10-01..2026-10-20", "2026-11-06", "2026-10-25 .. 2026-10-28", "2026-9-30", 7, None]))
         # The task whose oldest ✓ waits longest goes first; a tie goes by id.
         both = {**m(A, "2026-11-10", "2026-11-11"), **m(B, "2026-11-09")}
         self.assertEqual(s.fold_plan(both, today)[:2], (B, ["2026-11-09"]))

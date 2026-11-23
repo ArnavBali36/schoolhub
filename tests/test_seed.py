@@ -311,6 +311,29 @@ class FoldTest(unittest.TestCase):
         server.tidy_daily(self.TODAY)
         self.assertEqual(len(self.logged), 1)
 
+    def test_a_ledger_that_is_no_ledger_is_backed_up_before_a_fold_replaces_it(self):
+        odd = {**self.marks, self.TID + "@done": {"marked_at": "x", "days": "2026-10-01..2026-10-20"}}
+        db = self.use(FakeDb(marks=odd), local=odd)
+        server.tidy_daily(self.TODAY)
+        self.assertEqual(db.data["marks"][self.TID + "@done"]["days"], ["2026-11-23..2026-11-25"])
+        copies = list(server.BACKUPS.glob("marks-*.json"))
+        self.assertEqual(len(copies), 1)
+        self.assertEqual(json.loads(copies[0].read_text())[self.TID + "@done"]["days"], "2026-10-01..2026-10-20")
+
+    def test_a_local_copy_that_cannot_be_written_does_not_fail_a_read(self):
+        db = self.use(FakeDb(marks=self.marks))
+        saved = server.write_state
+
+        def full(path, obj):
+            raise OSError(28, "No space left on device")
+        server.write_state = full
+        try:
+            self.assertEqual(server.load("marks"), self.marks)
+        finally:
+            server.write_state = saved
+        self.assertEqual(len(self.logged), 1)
+        self.assertIn("No space left on device", self.logged[0])
+
     def test_what_was_folded_is_not_a_loss_to_back_up_and_a_ledger_that_lost_days_is(self):
         # The local file still has the day marks, the database has them in the ledger (a fold
         # whose last step did not reach this file). Nothing is lost, so no dated copy is kept.

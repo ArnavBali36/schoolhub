@@ -303,11 +303,15 @@ def keep_copy(name, data):
     gone = set(local) - set(data)
     if name == "marks":
         gone = {key for key in gone if not folded(key, data)} | {key for key in local if lost_days(key, local, data)}
-    if not gone:
-        return
+    if gone:
+        backup(name, local)
+
+
+def backup(name, data):
+    """A dated copy of marks, tasks or the plan in state/backups/; the last KEEP_BACKUPS are kept."""
     BACKUPS.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
-    (BACKUPS / f"{name}-{stamp}.json").write_text(json.dumps(local, indent=1))
+    (BACKUPS / f"{name}-{stamp}.json").write_text(json.dumps(data, indent=1))
     for old in sorted(BACKUPS.glob(f"{name}-*.json"))[:-KEEP_BACKUPS]:
         old.unlink(missing_ok=True)
 
@@ -324,8 +328,13 @@ def fresh(name):
         data = CLOUD.get_all(name)
     except (OSError, RuntimeError):
         return None
-    keep_copy(name, data)
-    write_state(FILES[name], data)  # local copy for offline reads and the next sync
+    # The local copy is for offline reads and the next sync: a disk that cannot take it (full, say)
+    # does not make the database's answer any less right.
+    try:
+        keep_copy(name, data)
+        write_state(FILES[name], data)
+    except OSError as e:
+        log(f"keeping the local copy of {name} failed: {e}")
     return data
 
 
@@ -528,7 +537,12 @@ def fold_plan(marks, today):
     if min(old[tid]) >= days_ago(today, FOLD_WHEN):
         return None
     days = sorted(old[tid])[:FOLD_AT_ONCE]
-    return tid, days, day_runs(ledger_days(marks, tid, LEDGER_LIMIT) + days)
+    # An entry of the stored ledger that does not read as a day or a run (one edited by hand, say)
+    # is carried over as it is, after the runs: no reader counts it, and no fold throws it away.
+    stored = marks.get(tid + LEDGER)
+    stored = stored.get("days") if isinstance(stored, dict) else None
+    unread = [r for r in stored if not (type(r) is str and run_days([r], 1))] if isinstance(stored, list) else []
+    return tid, days, day_runs(ledger_days(marks, tid, LEDGER_LIMIT) + days) + unread
 
 
 def tidy_daily(today=None):
@@ -545,6 +559,11 @@ def tidy_daily(today=None):
         if not plan:
             return
         tid, days, runs = plan
+        ledger = marks.get(tid + LEDGER)
+        if tid + LEDGER in marks and not (isinstance(ledger, dict) and isinstance(ledger.get("days"), list)):
+            # A ledger that is no ledger (changed by hand in the database): it is replaced, so the
+            # marks as they were are kept in state/backups first.
+            backup("marks", marks)
         put("marks", tid + LEDGER, {"marked_at": datetime.now(timezone.utc).isoformat(), "days": runs})
         after = fresh("marks")
         if after is None:
@@ -724,10 +743,13 @@ class Handler(BaseHTTPRequestHandler):
             if not aid:
                 return self._send(400, b"missing id")
             done = bool(body.get("done"))
-            guard = daily_guard(aid, done, date.today())
-            if guard in ("bad id", "bad day"):
-                return self._send(400, guard.encode())
             with LOCK:
+                # One day for the door and the fold, read under the lock: an untick let through just
+                # before midnight must not meet a fold made just after it.
+                today = date.today()
+                guard = daily_guard(aid, done, today)
+                if guard in ("bad id", "bad day"):
+                    return self._send(400, guard.encode())
                 try:
                     if guard == "keep":
                         pass
@@ -739,7 +761,7 @@ class Handler(BaseHTTPRequestHandler):
                 except (OSError, RuntimeError):
                     return self._send(502, b"couldn't reach the cloud database")
                 if done and DAILY_MARK.fullmatch(aid):
-                    tidy_daily()
+                    tidy_daily(today)
                 marks = load("marks")
             return self._json(marks)
 
