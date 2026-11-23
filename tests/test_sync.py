@@ -203,6 +203,25 @@ class ShareDataTest(unittest.TestCase):
         marked = {a["id"]: a.get("mark_check") for a in data["courses"][0]["assignments"]}
         self.assertEqual(marked, {"canvas:11": None, "canvas:12": "confirmed"})
 
+    def test_a_sync_bakes_the_ticks_of_daily_tasks_and_their_ledgers(self):
+        self.use_turso()
+        tid = "task:ab12cd34ef56"
+        rows = {f"{tid}@2026-11-22": {"marked_at": "2026-11-23T01:00:00+00:00", "name": "LeetCode", "course": "Personal"},
+                f"{tid}@done": {"marked_at": "2026-11-20T01:00:00+00:00", "days": ["2026-10-01..2026-10-20"]},
+                "canvas:12": {"marked_at": "2026-10-06T00:00:00+00:00"},
+                f"{tid}@soon": {"marked_at": "x"}, "note:ab12cd34ef56@done": {"marked_at": "x", "days": []}}
+        for key, value in rows.items():
+            self.fake.query("INSERT INTO school_kv VALUES ('marks', ?, ?, 1)", key, json.dumps(value))
+        self.run_sync()
+        data = json.loads((self.hub / "data.js").read_text().split("=", 1)[1].strip().rstrip(";"))
+        # A daily ✓ with its time, a ledger with its days too, and nothing that is neither.
+        self.assertEqual(data["daily_marks"], {
+            f"{tid}@2026-11-22": {"marked_at": "2026-11-23T01:00:00+00:00"},
+            f"{tid}@done": {"marked_at": "2026-11-20T01:00:00+00:00", "days": ["2026-10-01..2026-10-20"]}})
+        # The shared copy carries them as they are.
+        self.assertIn('"daily_marks": {"' + tid + '@2026-11-22"', self.shared()[0][0])
+        self.assertEqual(sync.daily_marks({"x": 1, 7: {}, f"{tid}@done": {"days": "no list"}}), {f"{tid}@done": {"marked_at": ""}})
+
     def test_a_sync_still_finishes_when_sharing_fails(self):
         self.use_turso(token="wrong")
         out, err = self.run_sync()

@@ -383,6 +383,23 @@ input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 /* The name is a button, so the drawer opens from the keyboard too; it reads as text. */
 .name{display:block;min-width:0;padding:0;border:0;background:none;color:inherit;font:inherit;font-weight:560;text-align:left;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .name small{color:var(--muted);font-weight:400;margin-left:8px}
+/* A daily task's run of days (dashboard.js, "the run of a daily task"). On its row: a small pill,
+   the accent on its soft ground, with a flame and the number of days. In the drawer: the number,
+   the best run, and its last fourteen days, where done is the accent, missed is hatched, a day
+   that was not one of its days is only an outline and today still open is a ring: the four differ
+   in shape, never in hue alone. */
+.name small.streak{display:inline-flex;align-items:center;gap:3px;margin-left:8px;padding:0 7px 0 5px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:11.5px;font-weight:650;line-height:18px;font-variant-numeric:tabular-nums;white-space:nowrap;vertical-align:1px}
+.name small.streak svg{flex:none;width:10px;height:10px}
+.streakbox{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:baseline;gap:4px 10px}
+.streakbox b{font:300 30px/1 var(--font-rounded);letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.streakbox span{font-size:13px;color:var(--muted)}
+.sdays{grid-column:1 / -1;display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:4px;margin-top:6px}
+.sdays i{height:10px;border-radius:3px}
+.sd-done{background:var(--accent)}
+.sd-missed{background:repeating-linear-gradient(45deg,var(--text) 0 2px,var(--surface-3) 2px 5px)}
+.sd-off{box-shadow:inset 0 0 0 1px var(--border-strong);opacity:.6}
+.sd-open{box-shadow:inset 0 0 0 1.5px var(--accent)}
+:root[data-theme="red"] .streakbox b{font-weight:400}
 .plat{font-size:11.5px;color:var(--muted);border:1px solid var(--border-strong);border-radius:999px;padding:0 8px;line-height:18px;white-space:nowrap}
 .due{font-size:12.5px;color:var(--muted);text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
 /* Status pills, soft like QuantPrep's state tags, with a hairline of their own colour. */

@@ -332,6 +332,78 @@ function repeatText(r, long){
   const [y, m, n] = r.until.split('-').map(Number);
   return `${days}, until ${new Date(y, m - 1, n).toLocaleDateString([], {month: 'short', day: 'numeric', year: y !== new Date().getFullYear() ? 'numeric' : undefined})}`;
 }
+// ---- the run of a daily task ----
+// How many days in a row a task that repeats was done, the best such run, and its last days: the
+// row's badge, the drawer's line and the toast's words. Its days are read from the marks: its own
+// ✓ marks ("<task id>@<day>"), and its ledger ("<task id>@done"), into which the Mac's server folds
+// the marks of days more than a week past, written as runs ("2026-11-03", or
+// "2026-11-09..2026-11-13" for days in a row), so that years of them stay a few characters
+// (server.py, tidy_daily). The page only reads a ledger: nothing here writes or deletes one.
+//
+// The run: the task begins with its first ✓. From then on each of its days up to yesterday either
+// has a ✓ or breaks the run. A day that is not one of its days is passed over, a ✓ on a day that
+// is no longer one of its days still counts, and today does not break the run before it is over.
+// A ✓ dated after today (a device ahead of this one) waits for its day. The Dashboard works out
+// the same figures (QuantPrep packages/shared/src/dash.ts, dailyStreak), and both are held to
+// tests/daily_vectors.json.
+const DAILY_MARK = /^(task:[a-z0-9]{8,32})@([0-9]{4}-[0-9]{2}-[0-9]{2})$/;
+// Days are counted as whole numbers (the days since 1 January 1970), worked out from the text and
+// never through a clock's midnight: no time zone can skip or repeat one, and a walk over years of
+// days costs nothing. dayOf is only for saying a day in words.
+const dayNum = s => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) / 864e5;
+const numDay = n => new Date(n * 864e5).toISOString().slice(0, 10);
+const dayOf = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+// A day on the calendar written YYYY-MM-DD, of the year 2000 or later (server.py's real_day).
+const realDay = s => typeof s === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(s) && s >= '2000-01-01' && numDay(dayNum(s)) === s;
+// The days of a list of runs, each once, sorted. What is no day or run is left out; at most `limit`
+// days are read, from the end of the list back, so a list too long keeps its latest days.
+function runDays(runs, limit = 5000){
+  const days = new Set();
+  for (const r of Array.isArray(runs) ? [...runs].reverse() : []) {
+    if (typeof r !== 'string') continue;
+    const parts = r.split('..'), from = parts[0], to = parts.length > 1 ? parts[1] : from;
+    if (parts.length > 2 || !realDay(from) || !realDay(to) || to < from) continue;
+    for (let n = dayNum(to), stop = dayNum(from); n >= stop && days.size < limit; n--) days.add(n);
+  }
+  return [...days].sort((x, y) => x - y).map(numDay);
+}
+// r: the task's repeat; done: the days it has a ✓ for, real days all (daysDone gives them); today:
+// the day it is. It answers the run now, the best run, and the last `span` days, oldest first,
+// each 'done', 'missed', 'off' (not one of its days) or 'open' (today, not done yet).
+function dailyStreak(r, done, today, span = 14){
+  if (!realDay(today)) return {current: 0, best: 0, doneToday: false, onToday: false, ended: false, strip: []};
+  const t = dayNum(today), until = r.until || null, ticked = new Set();
+  let start = t;
+  for (const d of done) { const n = dayNum(d); if (n <= t) { ticked.add(n); if (n < start) start = n; } }
+  // Its last day is compared as the list compares it (dailyItem), as text: a last day that is no
+  // real day (a year typed with two digits) still ends it where the list says it ended.
+  const last = until === null ? Infinity : realDay(until) ? dayNum(until) : null;
+  const isOn = n => n >= start && (last === null ? numDay(n) <= until : n <= last) && r.days.includes(((n + 4) % 7 + 7) % 7);
+  let current = 0, best = 0;
+  for (let n = start; n <= t; n++) {
+    if (ticked.has(n)) best = Math.max(best, ++current);
+    else if (n < t && isOn(n)) current = 0;
+  }
+  const strip = [];
+  for (let n = t - span + 1; n <= t; n++)
+    strip.push({day: numDay(n), state: ticked.has(n) ? 'done' : !isOn(n) ? 'off' : n === t ? 'open' : 'missed'});
+  return {current, best, doneToday: ticked.has(t), onToday: isOn(t), ended: until !== null && until < today, strip};
+}
+// The days a daily task has a ✓ for, from the marks: its ledger's and its own marks'.
+function daysDone(tid, from = marks){
+  const days = runDays(from[`${tid}@done`]?.days);
+  for (const id in from) { const m = DAILY_MARK.exec(id); if (m && m[1] === tid && realDay(m[2])) days.push(m[2]); }
+  return days;
+}
+// A daily item's run as it stands this minute, from the marks as they are (a ✓ just made is in
+// them): by today's date, never the moment the page was opened, which may be days ago. It is
+// asked for while a row is drawn and inside a ✓'s own save, so it never throws: marks it cannot
+// read are no run.
+function streakOf(a, span){
+  try { return dailyStreak(a.repeat, daysDone(a.task_id), dayKey(), span); }
+  catch (err) { console.error(err); return {current: 0, best: 0, doneToday: false, onToday: false, ended: false, strip: []}; }
+}
+const runWords = n => `${n} ${n === 1 ? 'day' : 'days'} in a row`;
 // ---- end of daily tasks ----
 // A course's dot: the color set for it in config.json if any, else one of the theme's course colors.
 // The theme's own is kept too (slot): Night's red uses it in place of a set color, which may be blue.
@@ -358,7 +430,7 @@ const dot = c => `<i class="dot" style="--dot:${esc(c.color)};--dot-theme:${esc(
 
 // Marks as of the last sync (syncedMarks, once its data is here); replaced by the live copy from
 // server.py when available.
-const syncedMarks = () => Object.fromEntries(all.filter(a => a.marked_done).map(a => [a.id, {marked_at: a.marked_done}]));
+const syncedMarks = () => ({...Object.fromEntries(Object.entries(isMap(D?.daily_marks) ? D.daily_marks : {}).filter(([, m]) => isMap(m) && typeof m.marked_at === 'string')), ...Object.fromEntries(all.filter(a => a.marked_done && !a.daily).map(a => [a.id, {marked_at: a.marked_done}]))});
 let marks = {};
 
 const SOURCE_DONE = ['submitted','graded','excused'];
@@ -395,11 +467,30 @@ const PILL_TIP = {
 // An open item can be dragged onto the planner (planner.js reads the drag), with a grip on hover.
 const GRIP = '<span class="grip" aria-hidden="true" title="Drag onto the planner"><svg viewBox="0 0 6 14" fill="currentColor"><circle cx="1" cy="1.5" r="1"/><circle cx="5" cy="1.5" r="1"/><circle cx="1" cy="7" r="1"/><circle cx="5" cy="7" r="1"/><circle cx="1" cy="12.5" r="1"/><circle cx="5" cy="12.5" r="1"/></svg></span>';
 const draggable = a => plannerState === 'on' && !isDone(a);
+// A daily task's run on its row: a flame and the number of days, from a run of one, with the
+// words in its title and, for a screen reader, after the name. Worked out as the row is drawn, so
+// a ✓ just made counts.
+const FLAME = '<svg viewBox="0 0 12 12" aria-hidden="true" focusable="false"><path d="M6 1c.4 2-2 3.2-2.6 5C2.6 8.4 4 11 6 11s3.4-2.2 2.8-4.4c-.3-1-.8-1.6-1.2-2-.1 1-.6 1.6-1.2 1.8C6.9 4.6 6.7 2.6 6 1Z" fill="currentColor"/></svg>';
+function streakBadge(a){
+  const s = streakOf(a, 1);
+  return s.current ? `<small class="streak" title="${esc(`${runWords(s.current)}, best ${s.best}`)}">${FLAME}<span aria-hidden="true">${s.current}</span><span class="sr-only">, ${esc(runWords(s.current))}</span></small>` : '';
+}
+// The same in the drawer, with the best run and the last fourteen days: done, missed (hatched), not
+// one of its days (an outline), and today still open (a ring).
+const STREAK_DAY = {done: 'done', missed: 'missed', off: 'not one of its days', open: 'not done yet'};
+function streakBlock(a){
+  const s = streakOf(a, 14), n = {done: 0, missed: 0, off: 0, open: 0};
+  if (!s.strip.length) return '';
+  for (const c of s.strip) n[c.state]++;
+  const cells = s.strip.map(c => `<i class="sd-${c.state}" title="${esc(dayOf(c.day).toLocaleDateString([], {weekday: 'short', month: 'short', day: 'numeric'}))}: ${STREAK_DAY[c.state]}"></i>`).join('');
+  return `<h4>Streak</h4><div class="streakbox"><b>${s.current}</b><span>${s.current === 1 ? 'day' : 'days'} in a row · best ${s.best}</span>
+    <div class="sdays" role="img" aria-label="The last 14 days: ${n.done} done, ${n.missed} missed.">${cells}</div></div>`;
+}
 function row(a){
   const s = eff(a), nf = (a.files?.length || 0), m = !!marks[a.id], drag = draggable(a);
   return `<div class="row" data-id="${esc(a.id)}"${drag ? ' draggable="true"' : ''}>${drag ? GRIP : ''}
     <span class="chip">${dot(a.course)}${esc(a.course.short || a.course.name)}</span>
-    <button type="button" class="name" data-drawer="${esc(a.id)}">${esc(a.name)}${nf ? `<small>📎 ${nf}</small>` : ''}${a.late ? '<small>late</small>' : ''}${a.due_changed_from ? '<small>📅 date changed</small>' : ''}</button>
+    <button type="button" class="name" data-drawer="${esc(a.id)}">${esc(a.name)}${a.daily ? streakBadge(a) : ''}${nf ? `<small>📎 ${nf}</small>` : ''}${a.late ? '<small>late</small>' : ''}${a.due_changed_from ? '<small>📅 date changed</small>' : ''}</button>
     <span class="plat">${esc(a.platform)}</span>
     <span class="due">${a.daily ? esc(repeatText(a.repeat)) : fmtDue(a.due_at, false, a.all_day)}</span>
     <span class="pill s-${s}" title="${esc(PILL_TIP[s] || '')}">${esc(pillText(a, s))}</span>
@@ -687,6 +778,7 @@ function openDrawer(id, fromKeyboard = false){
     </div>
     ${a.folder && REMOTE ? `<div class="note">${folderLink(a.folder)}</div>` : ''}
     ${markNote(a, s)}
+    ${a.daily ? streakBlock(a) : ''}
     ${a.is_task && a.notes ? `<h4>Notes</h4><div class="comment">${esc(a.notes)}</div>` : ''}
     ${a.submitted_at ? `<h4>Submission</h4><div>Submitted ${esc(fmtDue(a.submitted_at, true))}${a.late ? ' (late)' : ''}</div>` : ''}
     ${fileList('Your submitted files', a.submitted_files)}
@@ -742,7 +834,6 @@ async function setMark(id, done, as){
   try {
     const stored = marks = await backend.mark(id, done, a, as);
     refresh();
-    if (done && a?.daily) tidyDaily();
     return stored;
   } catch {
     if (prev) marks[id] = prev; else delete marks[id];
@@ -765,7 +856,9 @@ function toggleMark(id){
     if (before) step.was = await before.settled ? before.now : before.was;
     return !!stored;
   }));
-  toast(done ? `Marked “${a.name}” done` : `Unmarked “${a.name}”`, offerStep(step));
+  // A daily task's ✓ says its run with it (the ✓ is in the marks already: setMark put it there).
+  const run = done && a.daily ? streakOf(a, 1).current : 0;
+  toast(done ? `Marked “${a.name}” done${run ? ` · ${runWords(run)}` : ''}` : `Unmarked “${a.name}”`, offerStep(step));
 }
 function refresh(){ render(); if (drawerId) openDrawer(drawerId); }
 
@@ -982,7 +1075,10 @@ $('#fab').onclick = () => openTaskForm();
 //   'failed'    the save did not go through: nothing changed, and the step stays to try again;
 //   'conflict'  what is stored is no longer what the step left (changed on another device, say), and
 //               taking the step back would overwrite that: nothing changes, the step goes, and the
-//               toast says so.
+//               toast says so;
+//   'kept'      the server took the request and kept the ✓: a daily task's ✓ of a day more than a
+//               week past is its history (server.py, daily_guard). The step goes, and the toast
+//               says so.
 // Before it changes anything a step asks the server what is stored now, so it never goes by a copy
 // the page has had for a while.
 const UNDO_STEPS = 100;
@@ -1053,6 +1149,8 @@ function travel(dir, o){
         toast(`Couldn't ${dir} that. Check your connection and try again.`);
       } else if (r.why === 'conflict') {
         toast(`Can't ${dir}: ${step.label}. It was changed somewhere else since.`);
+      } else if (r.why === 'kept') {
+        toast(`Can't ${dir}: ${step.label}. A daily ✓ more than a week old stays in its run of days.`);
       } else endWait();     // the change itself was never saved, and has said so
     } finally { travels--; }
   });
@@ -1104,6 +1202,8 @@ function markStep(label, id, was){
     if ((stored[id]?.marked_at || null) !== (from?.marked_at || null)) { refresh(); return {ok: false, why: 'conflict'}; }
     const left = await setMark(id, !!to, to);
     if (!left) return {ok: false, why: 'failed'};
+    // Asked to take the ✓ away, and the server's answer still holds it: it was not taken back.
+    if (!to && left[id]) return {ok: false, why: 'kept'};
     step[side] = left[id] || null;   // as the server keeps it now, for the way back
     // A toast's button went with the toast: focus goes to the assignment's ✓.
     if (o?.refocus) focusMark(id);
@@ -1527,14 +1627,8 @@ function newDay(){
 }
 setInterval(newDay, 60000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) newDay(); });
-// A daily task's ✓ of a day long past is of no more use, and every ✓ is in every answer: a few of
-// them are taken away each time one is made.
-const DAILY_KEEP = 30;
-function tidyDaily(){
-  const cut = dayKey(new Date(Date.now() - DAILY_KEEP * 864e5));
-  const old = Object.keys(marks).filter(id => { const m = /^task:[a-z0-9]+@(\d{4}-\d{2}-\d{2})$/.exec(id); return m && m[1] < cut; }).slice(0, 5);
-  for (const id of old) backend.mark(id, false).then(() => { delete marks[id]; }, () => {});
-}
+// (A daily task's ✓ marks of days long past are its history: the page never takes one away. The
+// Mac's server folds them into the task's ledger when a daily ✓ is made there: server.py, tidy_daily.)
 // ---- end of a new day ----
 
 // Pick up changes made on your other device when you come back to this tab.

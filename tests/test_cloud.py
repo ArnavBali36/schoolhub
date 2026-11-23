@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import unittest
+from datetime import date, timedelta
 from http.client import HTTPConnection
 from pathlib import Path
 
@@ -88,7 +89,8 @@ class UpstashTest(unittest.TestCase):
             if kind == "HSET":
                 h[rest[0]] = rest[1]
             elif kind == "HDEL":
-                h.pop(rest[0], None)
+                for field in rest:
+                    h.pop(field, None)
             elif kind == "HGETALL":
                 return [x for pair in h.items() for x in pair]
         self.db.run = run
@@ -111,6 +113,18 @@ class UpstashTest(unittest.TestCase):
         self.db.put("plan", "settings", {"day_start": 6, "day_end": 23})
         self.cloud.seed(self.db, "plan", {"settings": {"day_start": 5, "day_end": 24}, "week:mon": {"blocks": []}})
         self.assertEqual(self.db.get_all("plan"), {"settings": {"day_start": 6, "day_end": 23}, "week:mon": {"blocks": []}})
+
+    def test_several_fields_go_in_one_request(self):
+        for key in ("a", "b", "c"):
+            self.db.put("marks", key, {"k": key})
+        self.sent.clear()
+        self.db.remove_many("marks", ["a", "c", "never-there"])
+        self.assertEqual(self.sent, [("HDEL", "schoolhub:marks", "a", "c", "never-there")])
+        self.assertEqual(self.db.get_all("marks"), {"b": {"k": "b"}})
+        # None at all asks nothing (HDEL with no field is an error).
+        self.sent.clear()
+        self.db.remove_many("marks", [])
+        self.assertEqual(self.sent, [])
 
 
 class PipelineUrlTest(unittest.TestCase):
@@ -203,6 +217,30 @@ class TursoTest(unittest.TestCase):
         self.db.remove("marks", "never-there")
         self.assertEqual(self.db.get_all("marks"), {})
         self.assertEqual(self.db.get_all("tasks"), {"a": {"v": "task"}})
+
+    def test_several_keys_go_in_one_request_and_only_their_own(self):
+        for key in ("a", "b", "c"):
+            self.db.put("marks", key, {"k": key})
+        self.db.put("tasks", "a", {"v": "task"})
+        self.db.put("notes", "note:abc123def456", {"text": "x"})
+        self.db.put("notes", "note:abc123def457", {"text": "y"})
+        asked = len(self.fake.pipelines)
+        self.db.remove_many("marks", ["a", "c", "never-there"])
+        self.assertEqual(len(self.fake.pipelines), asked + 1)
+        # A statement each, then the close, on one stream.
+        requests = self.fake.pipelines[-1]["requests"]
+        self.assertEqual([r["type"] for r in requests], ["execute"] * 3 + ["close"])
+        self.assertEqual({r["stmt"]["sql"] for r in requests[:-1]}, {"DELETE FROM school_kv WHERE name = ? AND key = ?"})
+        self.assertEqual(self.db.get_all("marks"), {"b": {"k": "b"}})
+        self.assertEqual(self.db.get_all("tasks"), {"a": {"v": "task"}})
+        # None at all asks nothing; a table of its own works the same; a name that is none is refused.
+        asked = len(self.fake.pipelines)
+        self.db.remove_many("marks", [])
+        self.assertEqual(len(self.fake.pipelines), asked)
+        self.db.remove_many("notes", ["note:abc123def456"])
+        self.assertEqual(list(self.db.get_all("notes")), ["note:abc123def457"])
+        with self.assertRaises(KeyError):
+            self.db.remove_many("grades", ["a"])
 
     def test_oldest_change_first(self):
         # The order a hosted copy reading school_kv answers in (updated_at, then key).
@@ -494,6 +532,36 @@ class ServerWithTursoTest(ServerRun, unittest.TestCase):
         self.assertNotIn("canvas:1", self.kv("marks"))
         # The local copy follows, for offline reads and the next sync.
         self.assertIn("canvas:2", json.loads((self.hub / "state" / "marks.json").read_text()))
+
+    def test_a_daily_tick_folds_the_old_ones_into_the_ledger_in_the_database(self):
+        tid = "task:fold0000000e"
+        day = lambda n: (date.today() - timedelta(days=n)).isoformat()
+        for n in (30, 29, 28, 3):
+            self.fake.query("INSERT INTO school_kv VALUES ('marks', ?, ?, 1)", f"{tid}@{day(n)}", json.dumps({"marked_at": "x", "name": "LeetCode"}))
+        self.assertEqual(self.request("GET", "/api/marks")[0], 200)
+        asked = len(self.fake.pipelines)
+        status, marks = self.request("POST", "/api/mark", {"id": f"{tid}@{day(0)}", "done": True, "name": "LeetCode", "course": "Personal"})
+        self.assertEqual(status, 200)
+        mine = lambda rows: sorted(k for k in rows if k.startswith(tid))
+        want = sorted([f"{tid}@{day(3)}", f"{tid}@{day(0)}", tid + "@done"])
+        self.assertEqual(mine(marks), want)
+        self.assertEqual(mine(self.kv("marks")), want)
+        self.assertEqual(self.kv("marks")[tid + "@done"]["days"], [f"{day(30)}..{day(28)}"])
+        self.assertEqual(marks[tid + "@done"], self.kv("marks")[tid + "@done"])
+        # The ✓, a read, the ledger, the ledger read back, the three old marks in one request, the answer's read.
+        sent = [[r["stmt"]["sql"].split()[0] for r in p["requests"] if r["type"] == "execute"] for p in self.fake.pipelines[asked:]]
+        self.assertEqual(sent, [["INSERT"], ["SELECT"], ["INSERT"], ["SELECT"], ["DELETE"] * 3, ["SELECT"]])
+        # The local copy follows.
+        self.assertEqual(mine(json.loads((self.hub / "state" / "marks.json").read_text())), want)
+        # The door: no ✓ for a day long past, and one of a day long past is not taken away.
+        self.assertEqual(self.request("POST", "/api/mark", {"id": f"{tid}@{day(9)}", "done": True}), (400, b"bad day"))
+        self.assertEqual(self.request("POST", "/api/mark", {"id": tid + "@done", "done": False}), (400, b"bad id"))
+        self.fake.query("INSERT INTO school_kv VALUES ('marks', ?, ?, 1)", f"{tid}@{day(8)}", json.dumps({"marked_at": "x"}))
+        status, marks = self.request("POST", "/api/mark", {"id": f"{tid}@{day(8)}", "done": False})
+        self.assertEqual((status, f"{tid}@{day(8)}" in marks), (200, True))
+        self.assertIn(f"{tid}@{day(8)}", self.kv("marks"))
+        for key in mine(self.kv("marks")):
+            self.fake.query("DELETE FROM school_kv WHERE name = 'marks' AND key = ?", key)
 
     def test_database_unreachable(self):
         token, self.fake.token = self.fake.token, "rotated"

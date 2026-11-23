@@ -15,7 +15,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
@@ -120,6 +120,11 @@ def run_sync(clock=time.time):
                 f.write(out + "\n")
     except OSError:
         pass
+    # A daily task's old ✓ marks are folded when one is stored through this server; a ✓ made on the
+    # public site is stored there, so the marks are looked at after each sync too (the Mac runs one
+    # twice a day by itself). Never an error: tidy_daily keeps its own.
+    with LOCK:
+        tidy_daily()
     with SYNC_LOCK:
         good = AUTO.finished(ok, began, clock(), synced())
         if not good:
@@ -291,9 +296,14 @@ def ensure_seeded(name):
 
 def keep_copy(name, data):
     """Before the local file takes a set from the cloud that lacks some of its keys (deleted on the
-    phone, or a database gone wrong), a dated copy of it is kept in state/backups/."""
+    phone, or a database gone wrong), a dated copy of it is kept in state/backups/. A daily task's
+    ✓ that was folded into its ledger there (tidy_daily) is not lost, so it does not count; a
+    ledger that holds fewer days there than here is a loss like a key gone."""
     local = read_state(FILES[name])
-    if not set(local) - set(data):
+    gone = set(local) - set(data)
+    if name == "marks":
+        gone = {key for key in gone if not folded(key, data)} | {key for key in local if lost_days(key, local, data)}
+    if not gone:
         return
     BACKUPS.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
@@ -302,18 +312,28 @@ def keep_copy(name, data):
         old.unlink(missing_ok=True)
 
 
+def fresh(name):
+    """Marks, tasks, the plan or the notes read from the shared database itself, or None when that
+    cannot be done now (it did not answer, or it does not hold everything this Mac had yet): never
+    the local copy, which may be behind it. With no shared database the local file is the store."""
+    if not CLOUD:
+        return read_state(FILES[name])
+    if not SEEDED[name]:
+        return None
+    try:
+        data = CLOUD.get_all(name)
+    except (OSError, RuntimeError):
+        return None
+    keep_copy(name, data)
+    write_state(FILES[name], data)  # local copy for offline reads and the next sync
+    return data
+
+
 def load(name):
     """Marks, tasks or the plan: from the cloud database once it holds everything this Mac had (the phone
     can change them there), else the local file."""
-    if CLOUD and SEEDED[name]:
-        try:
-            data = CLOUD.get_all(name)
-            keep_copy(name, data)
-            write_state(FILES[name], data)  # local copy for offline reads and the next sync
-            return data
-        except (OSError, RuntimeError):
-            pass
-    return read_state(FILES[name])
+    data = fresh(name)
+    return read_state(FILES[name]) if data is None else data
 
 
 def put(name, key, obj):
@@ -329,6 +349,16 @@ def remove(name, key):
         CLOUD.remove(name, key)
     data = read_state(FILES[name])
     data.pop(key, None)
+    write_state(FILES[name], data)
+
+
+def remove_all(name, keys):
+    """Several keys at once: one request to the shared database, however many there are."""
+    if CLOUD:
+        CLOUD.remove_many(name, keys)
+    data = read_state(FILES[name])
+    for key in keys:
+        data.pop(key, None)
     write_state(FILES[name], data)
 
 
@@ -355,6 +385,176 @@ def mark_time(given):
 
 
 REPEAT_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+
+# ---------- daily tasks: the days done, kept for good ----------
+#
+# A task that repeats is shown by the page as an item of each day it is on, and its ✓ is an ordinary
+# mark under "<task id>@<day>" (dashboard.js, "daily tasks"). So that a run of days can be counted
+# for as long as it lasts, those marks are never thrown away; but a mark is some 140 characters, and
+# every mark travels in every answer. So the ✓ of a day more than a week past is FOLDED: its day
+# goes into the task's ledger, one mark under "<task id>@done" whose `days` are written as runs
+# ("2026-11-03", or "2026-11-09..2026-11-13" for days in a row: years of a daily task are one
+# entry), and the day's own mark goes. The page, QuantPrep's Dashboard and its public site read a
+# task's days from both. The ledger does not need the task: it outlives a deleted task, and is
+# found again by one brought back.
+#
+# This server is the only writer of ledgers: the public site and the phone view store and remove
+# daily marks under the same three rules at the door (daily_guard) and never fold. A ledger is
+# changed by hand only in the database itself.
+DAILY_MARK = re.compile(r"(task:[a-z0-9]{8,32})@([0-9]{4}-[0-9]{2}-[0-9]{2})")
+LEDGER = "@done"
+FOLD_AFTER = 7       # days: a ✓ at most this old is a mark, made and taken back as any ✓ is
+TICK_AHEAD = 2       # days: how far past this computer's today a ✓ may be dated (clocks differ by a day)
+FOLD_WHEN = 14       # days: a task's marks are folded once its oldest ✓ is older than this
+FOLD_AT_ONCE = 31    # days folded at a time, the oldest first
+RUN_DAYS_LIMIT = 5000
+LEDGER_LIMIT = 40000  # days of a ledger read before it is written again: over a century of them
+
+
+def real_day(v):
+    """Whether v is a day on the calendar written YYYY-MM-DD, of the year 2000 or later: the one
+    rule the page (realDay) and QuantPrep (isDay) use too."""
+    if type(v) is not str or not REPEAT_DATE.fullmatch(v) or v < "2000-01-01":
+        return False
+    try:
+        date.fromisoformat(v)
+    except ValueError:
+        return False
+    return True
+
+
+def day_runs(days):
+    """Days written as runs: sorted, each once, a day alone as itself and days in a row as
+    "first..last". What is not a real day is left out. tests/daily_vectors.json holds this and
+    run_days to what the page and QuantPrep do."""
+    runs, first, last = [], None, None
+    for day in sorted({d for d in days if real_day(d)}):
+        if last is not None and date.fromisoformat(day) - date.fromisoformat(last) == timedelta(days=1):
+            last = day
+            continue
+        if first is not None:
+            runs.append(first if first == last else f"{first}..{last}")
+        first = last = day
+    if first is not None:
+        runs.append(first if first == last else f"{first}..{last}")
+    return runs
+
+
+def run_days(runs, limit=RUN_DAYS_LIMIT):
+    """The days of a list of runs, each once, sorted. What is no day or run is left out (a run
+    written backwards too). At most `limit` days are read, from the end of the list back, so a list
+    too long keeps its latest days."""
+    days = set()
+    for run in reversed(runs) if isinstance(runs, list) else ():
+        if type(run) is not str:
+            continue
+        parts = run.split("..")
+        first, last = parts[0], parts[1] if len(parts) > 1 else parts[0]
+        if len(parts) > 2 or not real_day(first) or not real_day(last) or last < first:
+            continue
+        day, stop = date.fromisoformat(last), date.fromisoformat(first)
+        while day >= stop and len(days) < limit:
+            days.add(day.isoformat())
+            day -= timedelta(days=1)
+    return sorted(days)
+
+
+def ledger_days(marks, tid, limit=RUN_DAYS_LIMIT):
+    """The days in the ledger of the daily task `tid`, or none when it has no ledger that reads."""
+    ledger = marks.get(tid + LEDGER)
+    return run_days(ledger.get("days"), limit) if isinstance(ledger, dict) else []
+
+
+def folded(key, marks):
+    """Whether `key` is a daily task's ✓ whose day is in that task's ledger in `marks`."""
+    m = DAILY_MARK.fullmatch(key) if type(key) is str else None
+    return bool(m) and m.group(2) in ledger_days(marks, m.group(1))
+
+
+def lost_days(key, local, data):
+    """Whether `key` is a ledger whose days in `local` are not all in `data`, as that ledger's or
+    as marks of their own."""
+    if type(key) is not str or not key.endswith(LEDGER):
+        return False
+    tid = key[:-len(LEDGER)]
+    there = set(ledger_days(data, tid, LEDGER_LIMIT))
+    return any(day not in there and f"{tid}@{day}" not in data for day in ledger_days(local, tid, LEDGER_LIMIT))
+
+
+def days_ago(today, n):
+    return (today - timedelta(days=n)).isoformat()
+
+
+def daily_guard(aid, done, today):
+    """What api/mark does with the mark `aid` before anything is stored, by this computer's `today`:
+
+      "bad id"   it names a ledger, which no request makes or takes away;
+      "bad day"  a daily task's ✓ for a day that is no day, or more than FOLD_AFTER days past, or
+                 more than TICK_AHEAD days ahead. Two honest clocks are never more than a day
+                 apart, so no real ✓ is refused, and none can be made that is old enough to fold;
+      "keep"     taking away a daily task's ✓ of a day more than FOLD_AFTER days past: that is its
+                 history, so nothing changes (a page from before the ledger tidied such marks by
+                 deleting them);
+      None       any other mark: stored, or removed.
+
+    The public site (QuantPrep's schoolPublic.ts) and the phone view (vercel/api/state.js) decide
+    the same way; the `guard` cases in tests/daily_vectors.json hold all three to it."""
+    if aid.endswith(LEDGER):
+        return "bad id"
+    m = DAILY_MARK.fullmatch(aid)
+    if not m:
+        return None
+    day, cut = m.group(2), days_ago(today, FOLD_AFTER)
+    if done:
+        return None if real_day(day) and cut <= day <= days_ago(today, -TICK_AHEAD) else "bad day"
+    return "keep" if real_day(day) and day < cut else None
+
+
+def fold_plan(marks, today):
+    """What to fold now, or None: (task id, its days to fold, its ledger's days as they are then).
+
+    Of the daily tasks with a ✓ more than FOLD_AFTER days past, the one whose oldest waits longest,
+    once that one is more than FOLD_WHEN days past: its marks older than FOLD_AFTER days, the
+    oldest FOLD_AT_ONCE of them. So a task's marks are folded about once a week, a week's worth at
+    a time, and a task no longer ticked gets its turn too."""
+    cut, old = days_ago(today, FOLD_AFTER), {}
+    for key in marks:
+        m = DAILY_MARK.fullmatch(key) if type(key) is str else None
+        if m and real_day(m.group(2)) and m.group(2) < cut:
+            old.setdefault(m.group(1), []).append(m.group(2))
+    if not old:
+        return None
+    tid = min(old, key=lambda t: (min(old[t]), t))
+    if min(old[tid]) >= days_ago(today, FOLD_WHEN):
+        return None
+    days = sorted(old[tid])[:FOLD_AT_ONCE]
+    return tid, days, day_runs(ledger_days(marks, tid, LEDGER_LIMIT) + days)
+
+
+def tidy_daily(today=None):
+    """Run after a daily task's ✓ is stored, with LOCK held: folds what fold_plan says, if anything.
+
+    The marks are read from the shared database itself, never from the local copy (which may lack
+    days the ledger there already holds), and nothing is folded when it cannot be read. The ledger
+    is written first and read back, and only the marks of days it then holds are removed: a
+    failure in between leaves a day in both, which every reader counts once, and a later fold
+    finishes the job. It never raises: the ✓ that set it off is stored whatever happens here."""
+    try:
+        marks = fresh("marks")
+        plan = fold_plan(marks, today or date.today()) if marks is not None else None
+        if not plan:
+            return
+        tid, days, runs = plan
+        put("marks", tid + LEDGER, {"marked_at": datetime.now(timezone.utc).isoformat(), "days": runs})
+        after = fresh("marks")
+        if after is None:
+            return
+        held = set(ledger_days(after, tid, LEDGER_LIMIT))
+        gone = [f"{tid}@{day}" for day in days if day in held]
+        if gone:
+            remove_all("marks", gone)
+    except Exception as e:  # the ✓ is stored; the fold waits for the next one
+        log(f"folding a daily task's old marks failed, they stay as they are: {e}")
 
 
 def clean_repeat(given):
@@ -523,15 +723,23 @@ class Handler(BaseHTTPRequestHandler):
             aid = str(body.get("id") or "")
             if not aid:
                 return self._send(400, b"missing id")
+            done = bool(body.get("done"))
+            guard = daily_guard(aid, done, date.today())
+            if guard in ("bad id", "bad day"):
+                return self._send(400, guard.encode())
             with LOCK:
                 try:
-                    if body.get("done"):
+                    if guard == "keep":
+                        pass
+                    elif done:
                         put("marks", aid, {"marked_at": mark_time(body.get("marked_at")),
                                            "name": body.get("name"), "course": body.get("course")})
                     else:
                         remove("marks", aid)
                 except (OSError, RuntimeError):
                     return self._send(502, b"couldn't reach the cloud database")
+                if done and DAILY_MARK.fullmatch(aid):
+                    tidy_daily()
                 marks = load("marks")
             return self._json(marks)
 

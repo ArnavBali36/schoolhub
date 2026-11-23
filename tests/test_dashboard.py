@@ -9,6 +9,7 @@ The behaviour checks run dashboard.js's own code under Node when Node is install
 otherwise; the source checks always run.
 """
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -49,8 +50,10 @@ def esc_source():
     return re.search(r"^const esc = .*$", JS, re.M).group(0)
 
 
-def run_node(script):
-    out = subprocess.run([NODE, "-"], input=script, capture_output=True, text=True, timeout=30)
+def run_node(script, env=None):
+    """Runs a script in Node and answers what it printed, as JSON. env: variables of its own (TZ)."""
+    out = subprocess.run([NODE, "-"], input=script, capture_output=True, text=True, timeout=30,
+                         env={**os.environ, **env} if env else None)
     if out.returncode != 0:
         raise AssertionError(out.stderr)
     return json.loads(out.stdout)
@@ -2158,6 +2161,189 @@ console.log(JSON.stringify(out));
         self.assertIn('data-edit-task="${esc(a.task_id || a.id)}"', JS)
         self.assertIn('data-delete-task="${esc(a.task_id || a.id)}"', JS)
 
+
+@unittest.skipUnless(NODE, "needs Node to run dashboard.js")
+class StreakTest(unittest.TestCase):
+    """The run of a daily task (dashboard.js, "the run of a daily task"): held to the vectors QuantPrep's
+    Dashboard is held to (its copy of tests/daily_vectors.json is checked there to be this file)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.vectors = json.loads((REPO / "tests" / "daily_vectors.json").read_text(encoding="utf-8"))
+        start, end = JS.index("// ---- daily tasks ----"), JS.index("// ---- end of daily tasks ----")
+        cls.section = JS[start:end]
+        # Every zone gives the same answers: days are counted from their text, never through a
+        # clock's midnight. Apia skipped 30 December 2011; Gaza's clock change falls at midnight.
+        # (marks is declared after the section, as on the page: a read of it while the section is
+        # being set up would throw here as it would there.)
+        cls.zones = {zone: run_node(cls.section + "\nlet marks = {};\nconst V = " + json.dumps(cls.vectors) + """;
+const L = {done: 'x', missed: '-', off: '.', open: 'o'};
+const out = {
+  streak: V.streak.map(v => {
+    const s = dailyStreak({days: v.days, until: v.until}, runDays(v.done), v.today, v.span);
+    return {current: s.current, best: s.best, done_today: s.doneToday, on_today: s.onToday, ended: s.ended,
+      strip: s.strip.map(c => L[c.state]).join(''), last: s.strip[s.strip.length - 1].day, n: s.strip.length};
+  }),
+  read: V.read_runs.map(v => v.limit === undefined ? runDays(v.runs) : runDays(v.runs, v.limit)),
+  written: V.write_runs.map(v => runDays(v.runs)),
+  real: V.write_runs.flatMap(v => v.days).map(d => realDay(d)),
+};
+console.log(JSON.stringify(out));
+""", env={"TZ": zone}) for zone in ("America/New_York", "Pacific/Apia", "Asia/Gaza", "UTC")}
+        cls.out = run_node(cls.section + """
+let marks = {};
+const out = {
+  long: runDays(['2000-01-01..2999-12-31']).length,
+  fourteen: dailyStreak({days: [0, 1, 2, 3, 4, 5, 6], until: null}, [], '2026-11-23').strip.length,
+  // A clock that says a day that is none (1970, say): no run and no days, never a throw or a hang.
+  noToday: ['1970-01-01', '10000-01-01', 'soon', ''].map(t => dailyStreak({days: [1], until: null}, ['2026-11-20'], t)),
+};
+// A task's days are its ledger's and its own marks', and nobody else's.
+marks = {'task:ab12cd34@done': {marked_at: 'x', days: ['2026-11-01..2026-11-03', '2026-11-10']},
+  'task:ab12cd34@2026-11-10': {marked_at: 'x'}, 'task:ab12cd34@2026-11-22': {marked_at: 'x'}, 'task:ab12cd34@2026-02-30': {marked_at: 'x'},
+  'task:ab12cd34@soon': {marked_at: 'x'}, 'task:zz99zz99@2026-11-21': {marked_at: 'x'}, 'canvas:1': {marked_at: 'x'}};
+out.days = [...new Set(daysDone('task:ab12cd34'))].sort();
+out.none = daysDone('task:nothing00');
+out.words = [runWords(0), runWords(1), runWords(2)];
+// An item's run as the row asks for it: by today's date, from the marks as they are.
+const today = dayKey(), ago = n => numDay(dayNum(today) - n);
+marks = Object.fromEntries([0, 1, 2].map(n => [`task:ab12cd34@${ago(n)}`, {marked_at: 'x'}]));
+marks['task:ab12cd34@done'] = {marked_at: 'x', days: [`${ago(5)}..${ago(3)}`]};
+// When it was made plays no part: it begins with its first ✓, whatever its created_at says.
+const item = {task_id: 'task:ab12cd34', repeat: {days: [0, 1, 2, 3, 4, 5, 6], until: null}, created_at: '+010000-01-01T12:00:00Z'};
+const began = Date.now();
+out.now = [streakOf(item, 1).current, streakOf(item, 1).best, streakOf(item, 1).strip.length, streakOf(item).strip.length];
+delete marks[`task:ab12cd34@${ago(0)}`];
+out.untickedToday = streakOf(item, 1).current;
+// Ten years of days in a row cost nothing to count.
+marks = {'task:ab12cd34@done': {marked_at: 'x', days: [`${ago(3650)}..${ago(1)}`]}};
+out.tenYears = streakOf(item, 14).current;
+out.ms = Date.now() - began;
+// Marks that cannot be read are no run, and never a throw: a row is being drawn, or a ✓ saved.
+const error = console.error; console.error = () => {};
+marks = null;
+out.unreadable = [streakOf(item, 1).current, streakOf(item, 14).strip.length, streakOf({task_id: 'task:ab12cd34'}, 1).current];
+console.error = error;
+console.log(JSON.stringify(out));
+""")
+
+    def test_every_vector_in_every_zone(self):
+        self.assertGreaterEqual(len(self.vectors["streak"]), 38)
+        for zone, out in self.zones.items():
+            self.assertEqual(len(out["streak"]), len(self.vectors["streak"]))
+            for v, got in zip(self.vectors["streak"], out["streak"]):
+                with self.subTest(zone=zone, note=v["note"]):
+                    self.assertEqual({k: got[k] for k in v["want"]}, v["want"])
+                    self.assertEqual((got["last"], got["n"]), (v["today"], v["span"]))
+                    self.assertGreaterEqual(got["best"], got["current"])
+
+    @staticmethod
+    def real(day):
+        """Whether a vector's entry is a real day of 2000 or later, by Python's own calendar."""
+        from datetime import date
+        try:
+            return bool(re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", day)) and date.fromisoformat(day).year >= 2000
+        except (TypeError, ValueError):
+            return False
+
+    def test_runs_are_read_as_the_server_writes_them(self):
+        for zone, out in self.zones.items():
+            for v, got in zip(self.vectors["read_runs"], out["read"]):
+                with self.subTest(zone=zone, note=v["note"]):
+                    self.assertEqual(got, v["days"])
+            for v, got in zip(self.vectors["write_runs"], out["written"]):
+                with self.subTest(zone=zone, note=v["note"]):
+                    # What the server wrote reads back as the real days it was given, each once, sorted.
+                    self.assertEqual(got, sorted(set(got)))
+                    self.assertEqual(set(got), {d for d in v["days"] if self.real(d)})
+            # The page's test of a real day is Python's, whatever the entry is.
+            given = [d for v in self.vectors["write_runs"] for d in v["days"]]
+            self.assertEqual(out["real"], [self.real(d) for d in given], zone)
+        self.assertEqual(self.out["long"], 5000)
+        self.assertEqual(self.out["fourteen"], 14)
+        self.assertEqual(self.out["noToday"], [{"current": 0, "best": 0, "doneToday": False, "onToday": False, "ended": False, "strip": []}] * 4)
+
+    def test_a_tasks_days_are_its_ledgers_and_its_own_marks(self):
+        self.assertEqual(self.out["days"], ["2026-11-01", "2026-11-02", "2026-11-03", "2026-11-10", "2026-11-22"])
+        self.assertEqual(self.out["none"], [])
+        self.assertEqual(self.out["words"], ["0 days in a row", "1 day in a row", "2 days in a row"])
+
+    def test_the_run_is_worked_out_as_it_is_drawn_from_the_marks_as_they_are(self):
+        # Three marks up to today and three folded days before them: the run is six, and taking
+        # today's ✓ away leaves five.
+        self.assertEqual(self.out["now"], [6, 6, 1, 14])
+        self.assertEqual(self.out["untickedToday"], 5)
+        self.assertEqual(self.out["tenYears"], 3650)
+        self.assertLess(self.out["ms"], 2000)
+        self.assertEqual(self.out["unreadable"], [0, 0, 0])
+        self.assertIn("  try { return dailyStreak(a.repeat, daysDone(a.task_id), dayKey(), span); }", JS)
+        # On the row, in the drawer and in the ✓'s own toast, each only for a daily item.
+        self.assertIn("${esc(a.name)}${a.daily ? streakBadge(a) : ''}", JS)
+        self.assertIn("${a.daily ? streakBlock(a) : ''}", JS)
+        self.assertIn("const run = done && a.daily ? streakOf(a, 1).current : 0;", JS)
+        self.assertIn("done${run ? ` · ${runWords(run)}` : ''}`", JS)
+
+    def test_no_day_is_stepped_through_a_clocks_midnight(self):
+        # A walk by local Dates never ends where a zone skipped a day; the section counts whole
+        # numbers. Its one local Date (dayOf) is for saying a day in words.
+        run = self.section[self.section.index("// ---- the run of a daily task ----"):]
+        self.assertEqual(len(re.findall(r"new Date\(", run)), 2)      # numDay's, from a whole number, and dayOf's
+        self.assertNotIn("setDate(", run)
+        self.assertNotIn("created_at", run)
+
+    def test_the_marks_before_the_server_answers_hold_the_daily_ones_the_sync_baked(self):
+        line = re.search(r"^const syncedMarks = .*$", JS, re.M).group(0)
+        self.assertIn("\n" + line + "\nlet marks = {};\n", JS)   # one line, directly above: every boot harness lifts the two
+        out = run_node("const isMap = v => !!v && typeof v === 'object' && !Array.isArray(v);\n" + """
+const D = {daily_marks: {'task:ab12cd34@2026-11-22': {marked_at: 't'}, 'task:ab12cd34@done': {marked_at: 't', days: ['2026-11-01']},
+  'task:bad00000@2026-11-22': 'yes', 'task:bad00001@2026-11-22': {marked_at: 7}, 'task:bad00002@2026-11-22': null}};
+// A daily item's own marked_done (the task's, from the sync) is not today's ✓.
+const all = [{id: 'canvas:1', marked_done: 'm'}, {id: 'canvas:2'}, {id: 'task:ab12cd34@2026-11-23', daily: true, marked_done: 'm'}];
+""" + line + """
+const out = {full: syncedMarks()};
+for (const bad of [undefined, null, [], 'x', 7]) { D.daily_marks = bad; (out.bad ||= []).push(Object.keys(syncedMarks())); }
+console.log(JSON.stringify(out));
+""")
+        self.assertEqual(out["full"], {"task:ab12cd34@2026-11-22": {"marked_at": "t"},
+                                       "task:ab12cd34@done": {"marked_at": "t", "days": ["2026-11-01"]},
+                                       "canvas:1": {"marked_at": "m"}})
+        self.assertEqual(out["bad"], [["canvas:1"]] * 5)
+
+    def test_the_badge_and_the_days_use_the_looks_tokens_and_differ_in_shape(self):
+        self.assertIn(".name small.streak{", HTML)
+        rules = "\n".join(re.findall(r"^(?:\.name small\.streak|\.streakbox|\.sdays|\.sd-)[^\n{]*\{[^}]*\}", HTML, re.M))
+        self.assertGreaterEqual(rules.count("{"), 8)
+        self.assertNotRegex(rules, r"#[0-9a-fA-F]{3,8}\b")
+        self.assertNotRegex(rules, r"rgba?\(|hsla?\(")
+        self.assertRegex(HTML, r"\.sd-missed\{background:repeating-linear-gradient\(")
+        self.assertRegex(HTML, r"\.sd-open\{box-shadow:inset")
+        self.assertIn('<path d="M6 1c', JS)   # the flame is drawn, in the text's own colour: no emoji
+        self.assertIn('fill="currentColor"', JS)
+        # Read aloud after the name as words, not as a bare number run into it.
+        self.assertIn('<span aria-hidden="true">${s.current}</span><span class="sr-only">, ${esc(runWords(s.current))}</span></small>', JS)
+        self.assertIn(".sr-only{position:absolute;", HTML)
+
+    def test_the_page_never_folds_or_deletes_a_daily_mark(self):
+        # A daily task's ✓ marks of days long past are its history. The Mac's server folds them
+        # into the task's ledger (server.py, tidy_daily); the page only reads, and has no request
+        # that takes such a mark away or writes a ledger.
+        for gone in ("tidyDaily", "foldMarks", "api/mark/fold", "backend.mark(id, false)", "DAILY_KEEP"):
+            self.assertNotIn(gone, JS)
+        self.assertIn("path === 'api/marks' || path === 'api/mark' ? {marks: r}", JS)
+
+
+@unittest.skipUnless(NODE, "needs Node to run dashboard.js")
+class WholeScriptTest(unittest.TestCase):
+    """Each of the page's scripts parses whole: the other tests run parts of them, and a name
+    declared twice (a helper added in one section that another already has) stops the whole page."""
+
+    def test_each_script_parses(self):
+        for name in ("dashboard.js", "planner.js", "bar.js", "theme-init.js"):
+            with self.subTest(name):
+                done = subprocess.run([NODE, "--check", str(REPO / name)], capture_output=True, text=True)
+                self.assertEqual(done.returncode, 0, done.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -2359,9 +2545,7 @@ class UndoSourceTest(unittest.TestCase):
         outside = JS[:JS.index(UNDO_START)] + JS[JS.index(UNDO_END):]
         self.assertEqual(len(re.findall(r"backend\.(saveTask|deleteTask)\(", outside)), 2)
         self.assertEqual(len(re.findall(r"\bsetMark\(", outside)), 2)   # its definition, and toggleMark
-        # setMark, and the tidying of a daily task's ✓ of days long past (tidyDaily).
-        self.assertEqual(len(re.findall(r"backend\.mark\(", JS)), 2)
-        self.assertIn("for (const id of old) backend.mark(id, false).then(() => { delete marks[id]; }, () => {});", JS)
+        self.assertEqual(len(re.findall(r"backend\.mark\(", JS)), 1)     # setMark, and nothing else (StreakTest)
         # A mark put back carries its own time, and the way back first asks what is stored now.
         self.assertIn("if (done && as?.marked_at) body.marked_at = as.marked_at;", JS)
         self.assertIn("try { stored = await backend.marks(); } catch { return {ok: false, why: 'failed'}; }", JS)
@@ -2601,11 +2785,13 @@ const leaving = new Promise(() => {});
 const server = {marks: {}, tasks: {}}, sent = [];
 const copy = v => JSON.parse(JSON.stringify(v));
 const stamp = () => '2026-11-11T10:00:0' + (clock++) + '+00:00';
+const history = new Set();     // marks the server keeps when asked to take them away (a daily ✓ long past)
 const api = async (path, body) => {
   if (down) throw new Error('down');
   sent.push([path, copy(body)]);
   if (path === 'api/mark') {
-    if (body.done) server.marks[body.id] = {marked_at: body.marked_at || stamp(), name: body.name ?? null, course: body.course ?? null}; else delete server.marks[body.id];
+    if (body.done) server.marks[body.id] = {marked_at: body.marked_at || stamp(), name: body.name ?? null, course: body.course ?? null};
+    else if (!history.has(body.id)) delete server.marks[body.id];
     return copy(server.marks);
   }
   if (path === 'api/task') {
@@ -2695,6 +2881,19 @@ const out = {};
   out.taskConflict = {toast: toasts[toasts.length - 1], wrote: sent.length - m, name: server.tasks[old.id].name, localNotes: tasks[old.id].notes};
   out.sameTask = [sameTask(null, null), sameTask(null, old), sameTask(old, {...old, updated_at: 'later'}), sameTask(old, {...old, pinned: true}), sameTask(old, {...old, pinned: false}), sameTask(old, {...old, notes: ''})];
 
+  // A daily ✓ made more than a week ago (the page was left open that long): the server keeps it as
+  // the task's history, so the undo did not happen, and says so instead of "Undid".
+  steps.undo.length = steps.redo.length = 0;
+  const D1 = 'task:ab12cd34@2026-11-01';
+  server.marks = {[D1]: {marked_at: '2026-11-01T22:00:00+00:00', name: 'LeetCode', course: 'Personal'}};
+  marks = copy(server.marks);
+  history.add(D1);
+  const old1 = addStep(markStep('marked “LeetCode” done', D1, null));
+  old1.now = copy(server.marks[D1]);
+  await travel('undo');
+  out.kept = {toast: toasts[toasts.length - 1], stored: D1 in server.marks, shown: D1 in marks, undo: steps.undo.length, redo: steps.redo.length};
+  history.clear();
+
   // A slow server: the undo is said at once, and the ✓ changes only when the server has been asked.
   steps.undo.length = steps.redo.length = 0;
   server.marks = {}; marks = {};
@@ -2769,6 +2968,11 @@ const out = {};
 
     def test_a_mark_changed_elsewhere_is_left_alone(self):
         self.assertEqual(self.out["markConflict"], {"toast": "Can't redo: unmarked “HW 1”. It was changed somewhere else since.", "wrote": 0, "local": True})
+
+    def test_a_daily_mark_the_server_keeps_as_history_is_not_said_to_be_undone(self):
+        self.assertEqual(self.out["kept"], {"toast": "Can't undo: marked “LeetCode” done. A daily ✓ more than a week old stays in its run of days.",
+                                            "stored": True, "shown": True, "undo": 0, "redo": 0})
+        self.assertIn("if (!to && left[id]) return {ok: false, why: 'kept'};", JS)
 
     def test_a_mark_is_not_taken_back_blind(self):
         self.assertEqual(self.out["markDown"], {"toast": "Couldn't undo that. Check your connection and try again.", "left": 1, "marked": False})

@@ -28,7 +28,8 @@ put them yourself, and writes a static page you open in your browser. Everything
 - **Tasks that repeat**: in the same form, tick **Repeat it every day**, choose the days of the
   week and, if you like, a last day. The task then shows fresh under **Daily** on each of its days,
   with a ✓ of that day alone, and stays out of the list by date. On its other days, and once it has
-  ended, it waits under **Show done**, where you can edit or delete it.
+  ended, it waits under **Show done**, where you can edit or delete it. See
+  [Runs of days](#runs-of-days).
 - **Notes**: the notepad button in the bar opens a small window of short text notes, saved as you
   type (`state/notes.json`).
 - **Undo and redo** for everything you change: **Cmd+Z** (or Ctrl+Z) takes back the last change to a
@@ -186,6 +187,36 @@ it ran by itself). The view and the theme are not data, so they are not steps.
 (a UTC time that is not in the future; anything else is stamped now, as before). The Mac app's Edit
 menu can ask the page with `SchoolHub.undo()` and `SchoolHub.redo()`: each answers `true` when the
 page took the request and `false` when it belongs to the field being typed in.
+
+## Runs of days
+
+A task that repeats keeps count of its days in a row. Its row under **Daily** has a small flame with
+the number once it has a run of one, its drawer shows the run, the best run it ever had and its last
+fourteen days (done, missed, not one of its days, today still open), and its ✓ says the run in its
+toast: "Marked “LeetCode” done · 5 days in a row". QuantPrep's Dashboard shows the same figures on
+its **Daily** card, with a ✓ for today that saves through `POST /api/mark` like the page's own.
+
+- A task begins with its first ✓. From then on each of its days up to yesterday either has a ✓ or
+  breaks the run. A day that is not one of its days is passed over, a ✓ on a day that is no longer
+  one of its days still counts, and today does not break the run before it is over.
+- The days are written as the task's days are now: changing the days of the week counts the past by
+  the new ones too.
+- A daily ✓ can be made and taken back for a week. After that it is the task's history: `POST
+  /api/mark` makes no ✓ for a day more than 7 days past (or more than 2 days ahead) and answers `bad
+  day`; taking one away changes nothing, and an undo that tries says so instead of "Undid".
+- Every ✓ travels in every answer, so the server folds old ones: when a daily ✓ is stored, and after
+  each sync, the ✓ marks of one task more than a week old (once its oldest is more than two weeks
+  old) move into that task's ledger, the mark `<task id>@done`, whose `days` are written as runs
+  (`"2026-11-09..2026-11-13"` for days in a row). Years of a task are a few characters. The ledger is
+  written and read back before any mark goes, and nothing is folded when the shared database cannot
+  be read, so a failure part way loses no day. Only `server.py` folds; no request makes, changes or
+  removes a ledger (`bad id`), and the public site and the phone view refuse the same marks the same
+  way (the `guard` cases of `tests/daily_vectors.json`). A ledger is changed by hand only in the
+  database itself, as a row of `school_kv`.
+- A deleted task's ledger stays, so undoing the delete brings back its run.
+- The run is worked out on the page with its own today, in `dashboard.js` and in QuantPrep's
+  `@qp/shared`, and both are held to the same cases (`tests/daily_vectors.json`, of which QuantPrep
+  keeps an exact copy).
 
 ## Keys
 

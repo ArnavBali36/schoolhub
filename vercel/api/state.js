@@ -46,6 +46,29 @@ function authorized(req) {
 
 const clip = (value, max) => String(value ?? '').trim().slice(0, max);
 
+// ---- daily tasks: the door ----
+// A task that repeats has a ✓ a day, a mark under "<task id>@<day>"; the days the Mac's server has
+// folded away are in its ledger, the mark "<task id>@done", which only that server writes
+// (server.py, "daily tasks: the days done, kept for good"). What a mark request may do is decided
+// as server.py's daily_guard decides it, by this server's own day (UTC), and tests/daily_vectors.json
+// holds both to the same cases:
+//   'bad id'   the ledger: no request makes it or takes it away;
+//   'bad day'  a daily ✓ for a day that is none, more than 7 days past or more than 2 ahead;
+//   'keep'     taking away a daily ✓ of a day more than 7 days past: it is history, nothing changes;
+//   null       any other mark: stored, or removed.
+const DAILY_MARK = /^(task:[a-z0-9]{8,32})@([0-9]{4}-[0-9]{2}-[0-9]{2})$/;
+const utcDay = (y, m, d) => new Date(Date.UTC(y, m - 1, d)).toISOString().slice(0, 10);
+const dayPlus = (day, n) => utcDay(+day.slice(0, 4), +day.slice(5, 7), +day.slice(8, 10) + n);
+const realDay = s => /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(s) && s >= '2000-01-01' && dayPlus(s, 0) === s;
+function dailyGuard(id, done, today) {
+  if (id.endsWith('@done')) return 'bad id';
+  const m = DAILY_MARK.exec(id);
+  if (!m) return null;
+  const day = m[2], cut = dayPlus(today, -7);
+  if (done) return realDay(day) && day >= cut && day <= dayPlus(today, 2) ? null : 'bad day';
+  return realDay(day) && day < cut ? 'keep' : null;
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   if (!authorized(req)) return res.status(401).json({error: 'unauthorized'});
@@ -61,6 +84,10 @@ module.exports = async (req, res) => {
     if (body.action === 'mark') {
       const id = clip(body.id, 200);
       if (!id) return res.status(400).json({error: 'missing id'});
+      // Decided on the id as it will be stored (trimmed and cut), never as it was sent.
+      const guard = dailyGuard(id, Boolean(body.done), now.slice(0, 10));
+      if (guard === 'bad id' || guard === 'bad day') return res.status(400).json({error: guard});
+      if (guard === 'keep') return res.json(await readState());
       if (body.done) {
         await redis('HSET', MARKS, id, JSON.stringify({
           marked_at: now, name: clip(body.name, 200) || null, course: clip(body.course, 80) || null,
@@ -119,3 +146,5 @@ module.exports = async (req, res) => {
     return res.status(502).json({error: 'database error'});
   }
 };
+// For the tests (tests/test_state_api.py): the door on its own.
+module.exports.dailyGuard = dailyGuard;

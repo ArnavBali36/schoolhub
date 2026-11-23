@@ -84,6 +84,11 @@ class Cloud:
     def remove(self, name, field):
         self.run("HDEL", KEYS[name], field)
 
+    def remove_many(self, name, fields):
+        """Several fields in one request (server.py folds a daily task's old marks with it)."""
+        if fields:
+            self.run("HDEL", KEYS[name], *fields)
+
 
 # ---------- Turso ----------
 
@@ -242,6 +247,14 @@ class Turso:
         if name in TABLES:
             return self.pipeline((f"DELETE FROM {TABLES[name]} WHERE key = ?", (field,)))
         self.pipeline(("DELETE FROM school_kv WHERE name = ? AND key = ?", (_kv(name), field)))
+
+    def remove_many(self, name, fields):
+        """Several keys in one request: a statement each, on one stream."""
+        if not fields:
+            return
+        if name in TABLES:
+            return self.pipeline(*((f"DELETE FROM {TABLES[name]} WHERE key = ?", (field,)) for field in fields))
+        self.pipeline(*(("DELETE FROM school_kv WHERE name = ? AND key = ?", (_kv(name), field)) for field in fields))
 
     def save_data(self, data_js, synced_at):
         """The text of a sync's data.js, made at synced_at (milliseconds), as school_data's one row.

@@ -575,6 +575,27 @@ def add_tasks(courses, now):
         courses.append(personal)
 
 
+# ---------- daily tasks: their ✓ marks, for a page with nothing but data.js ----------
+
+# A daily task's ✓ is a mark under "<task id>@<day>", and the days server.py has folded away are in
+# its ledger, "<task id>@done" (server.py, fold_marks). No assignment has such an id, so nothing
+# below looks at them; they are baked into data.js as they are, so that a page with no server (it
+# was opened from disk), or one whose server has not answered yet, shows today's ✓ and the run of
+# days. Only what the page reads of each: the time, and a ledger's days.
+DAILY_MARK = re.compile(r"task:[a-z0-9]{8,32}@(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|done)")
+
+
+def daily_marks(marks):
+    out = {}
+    for key, m in marks.items():
+        if not isinstance(key, str) or not isinstance(m, dict) or not DAILY_MARK.fullmatch(key):
+            continue
+        at = m.get("marked_at")
+        out[key] = {"marked_at": at if isinstance(at, str) else "",
+                    **({"days": m["days"]} if isinstance(m.get("days"), list) else {})}
+    return out
+
+
 # ---------- "mark as done" double-check ----------
 
 def apply_marks(courses):
@@ -794,7 +815,7 @@ def run(cfg):
     files, since = new_files(store.new, previous, now)
 
     data = {"generated_at": now.isoformat(), "complete": complete, "errors": errors, "new_files": files,
-            "new_files_since": since, "courses": courses}
+            "new_files_since": since, "courses": courses, "daily_marks": daily_marks(load_user_state("marks"))}
     data_js = "window.SCHOOL_DATA = " + json.dumps(data) + ";\n"
     tmp = HUB / "data.js.tmp"
     tmp.write_text(data_js)

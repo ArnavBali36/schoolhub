@@ -16,6 +16,7 @@ import tempfile
 import threading
 import types
 import unittest
+from datetime import date, timedelta
 from html.parser import HTMLParser
 from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
@@ -119,6 +120,19 @@ class ServerTest(unittest.TestCase):
         self.server_mod.run_sync()
         self.assertEqual(log.read_text().count("--- sync from the server"), 2)
         log.unlink()
+
+    def test_a_sync_from_the_server_folds_old_daily_marks_too(self):
+        # A ✓ made on the public site is stored there and sets off no fold; the Mac's own sync does.
+        tid = "task:fold0000000s"
+        day = lambda n: (date.today() - timedelta(days=n)).isoformat()
+        self.plant({f"{tid}@{day(n)}": {"marked_at": "x"} for n in (21, 20, 2)})
+        log = self.server_mod.HUB / "state" / "sync.log"
+        self.server_mod.run_sync()          # the throwaway folder has no sync.py: it fails, and still tidies
+        marks = json.loads(self.request("GET", "/api/marks")[2])
+        self.assertEqual(marks[tid + "@done"]["days"], [f"{day(21)}..{day(20)}"])
+        self.assertEqual(sorted(k for k in marks if k.startswith(tid + "@")), sorted([f"{tid}@{day(2)}", tid + "@done"]))
+        self.daily_cleanup(tid)
+        log.unlink(missing_ok=True)
 
     def test_pages_served(self):
         pages = [("/", "text/html"), ("/dashboard.html", "text/html"), ("/dashboard.js", "text/javascript"),
@@ -275,6 +289,173 @@ class ServerTest(unittest.TestCase):
             with self.subTest(repeat=repeat):
                 self.assertEqual(self.post("/api/task", {"name": "x", "repeat": repeat}), (400, why))
         self.post("/api/task/delete", {"id": task["id"]})
+
+    def test_days_are_written_as_runs_and_read_back_as_the_shared_vectors_say(self):
+        # The same file holds the page's runDays and QuantPrep's dayRuns and runDays (its copy is
+        # app/packages/server/test/fixtures/daily_vectors.json, checked there to be this one).
+        vectors = json.loads((REPO / "tests" / "daily_vectors.json").read_text(encoding="utf-8"))
+        self.assertEqual(sorted(vectors), ["guard", "read_runs", "streak", "write_runs"])
+        s = self.server_mod
+        for v in vectors["write_runs"]:
+            with self.subTest(write=v["note"]):
+                self.assertEqual(s.day_runs(v["days"]), v["runs"])
+                self.assertEqual(s.day_runs(s.run_days(v["runs"])), v["runs"])
+        for v in vectors["read_runs"]:
+            with self.subTest(read=v["note"]):
+                self.assertEqual(s.run_days(v["runs"], v.get("limit", s.RUN_DAYS_LIMIT)), v["days"])
+        # However long a run claims to be, no more days than the limit are read, the latest ones.
+        days = s.run_days(["2000-01-01..2999-12-31"])
+        self.assertEqual((len(days), days[-1]), (s.RUN_DAYS_LIMIT, "2999-12-31"))
+        for no_day in ("2026-11-23\n", "２０２６-11-23", "1999-12-31", "2026-02-30", 20261123, None, ["2026-11-23"]):
+            self.assertFalse(s.real_day(no_day), no_day)
+        self.assertTrue(s.real_day("2028-02-29"))
+
+    def test_the_door_decides_as_the_shared_vectors_say(self):
+        # What api/mark does with a mark before anything is stored (daily_guard). QuantPrep's public
+        # site and the phone view are held to the same cases.
+        vectors = json.loads((REPO / "tests" / "daily_vectors.json").read_text(encoding="utf-8"))
+        s = self.server_mod
+        self.assertGreaterEqual(len(vectors["guard"]), 30)
+        for v in vectors["guard"]:
+            with self.subTest(v["note"]):
+                got = s.daily_guard(v["id"], v["done"], date.fromisoformat(v["today"]))
+                self.assertEqual(got or ("store" if v["done"] else "remove"), v["want"])
+        self.assertEqual((s.FOLD_AFTER, s.TICK_AHEAD), (7, 2))
+
+    def plant(self, marks):
+        """Puts marks straight into the test's store, as days past left them: the door (api/mark)
+        makes no ✓ for a day more than a week ago."""
+        with self.server_mod.LOCK:
+            for key, value in marks.items():
+                self.server_mod.put("marks", key, value)
+
+    def daily_cleanup(self, *tids):
+        """Takes made-up daily tasks' marks and ledgers out of the test's store again."""
+        with self.server_mod.LOCK:
+            for key in [k for k in self.server_mod.load("marks") if k.split("@")[0] in tids]:
+                self.server_mod.remove("marks", key)
+
+    def test_a_daily_tick_is_made_and_taken_back_within_a_week_and_is_history_after(self):
+        tid = "task:guard0000001"
+        day = lambda n: (date.today() - timedelta(days=n)).isoformat()
+        tick = lambda n: f"{tid}@{day(n)}"
+        stored = lambda: json.loads(self.request("GET", "/api/marks")[2])
+        # Today's, and one dated by a clock a day or two ahead: made, and taken back, as any ✓ is.
+        for n in (0, -1, -2, 7):
+            with self.subTest(days_ago=n):
+                status, marks = self.post("/api/mark", {"id": tick(n), "done": True, "name": "LeetCode", "course": "Personal"})
+                self.assertEqual(status, 200)
+                self.assertEqual(marks[tick(n)]["name"], "LeetCode")
+                status, marks = self.post("/api/mark", {"id": tick(n), "done": False})
+                self.assertEqual((status, tick(n) in marks), (200, False))
+        # No ✓ is made for a day long past, far ahead, or that is no day: nothing is stored.
+        before = stored()
+        for bad in (tick(8), tick(400), tick(-3), f"{tid}@2026-02-30", f"{tid}@1999-12-31"):
+            with self.subTest(bad=bad):
+                self.assertEqual(self.post("/api/mark", {"id": bad, "done": True, "name": "LeetCode"}), (400, b"bad day"))
+        self.assertEqual(stored(), before)
+        # A ✓ of a day long past is the task's history: taking it away changes nothing (a page from
+        # before the ledger tidied such marks by deleting them), and the answer is the marks as they are.
+        old = {tick(30): {"marked_at": "x", "name": "LeetCode"}, tick(8): {"marked_at": "x"}, tick(7): {"marked_at": "x"},
+               f"{tid}@2026-02-30": {"marked_at": "x"}}
+        self.plant(old)
+        for n in (30, 8):
+            status, marks = self.post("/api/mark", {"id": tick(n), "done": False})
+            self.assertEqual((status, tick(n) in marks), (200, True))
+        # One exactly a week old is still a ✓ like any other, and so is a mark for a day that is none.
+        _, marks = self.post("/api/mark", {"id": tick(7), "done": False})
+        self.assertNotIn(tick(7), marks)
+        _, marks = self.post("/api/mark", {"id": f"{tid}@2026-02-30", "done": False})
+        self.assertNotIn(f"{tid}@2026-02-30", marks)
+        # The ledger itself is no ✓: it can be neither made nor taken away through api/mark.
+        self.plant({tid + "@done": {"marked_at": "x", "days": ["2026-01-01"]}})
+        for done in (True, False):
+            self.assertEqual(self.post("/api/mark", {"id": tid + "@done", "done": done}), (400, b"bad id"))
+        self.assertEqual(stored()[tid + "@done"]["days"], ["2026-01-01"])
+        # An assignment's old ✓ is still taken away as ever.
+        self.post("/api/mark", {"id": "canvas:guard-1", "done": True})
+        _, marks = self.post("/api/mark", {"id": "canvas:guard-1", "done": False})
+        self.assertNotIn("canvas:guard-1", marks)
+        self.daily_cleanup(tid)
+
+    def test_what_folds_and_when(self):
+        s = self.server_mod
+        today = date(2026, 12, 20)
+        A, B = "task:aaaaaaaa0001", "task:bbbbbbbb0002"
+        m = lambda tid, *days: {f"{tid}@{d}": {"marked_at": "x"} for d in days}
+        self.assertEqual((s.FOLD_WHEN, s.FOLD_AT_ONCE), (14, 31))
+        # Nothing old enough: a ✓ of the last week is a mark, and a task is left alone until its
+        # oldest ✓ is more than two weeks past.
+        self.assertIsNone(s.fold_plan({}, today))
+        self.assertIsNone(s.fold_plan({"canvas:1": {"marked_at": "x"}, **m(A, "2026-12-13", "2026-12-20")}, today))
+        self.assertIsNone(s.fold_plan(m(A, "2026-12-06", "2026-12-12", "2026-12-14"), today))
+        # Then every ✓ of it more than a week past goes, the younger ones stay.
+        self.assertEqual(s.fold_plan(m(A, "2026-12-05", "2026-12-12", "2026-12-13", "2026-12-14"), today),
+                         (A, ["2026-12-05", "2026-12-12"], ["2026-12-05", "2026-12-12"]))
+        # Its days join the ledger's runs.
+        marks = {**m(A, "2026-11-06", "2026-11-07", "2026-11-12"),
+                 A + "@done": {"marked_at": "x", "days": ["2026-11-01..2026-11-05", "2026-11-08"]}}
+        self.assertEqual(s.fold_plan(marks, today),
+                         (A, ["2026-11-06", "2026-11-07", "2026-11-12"], ["2026-11-01..2026-11-08", "2026-11-12"]))
+        # A ledger that cannot be read counts as none: the days still fold, nothing is thrown.
+        for broken in ("days", {"days": "2026-11-01"}, None, [], {"days": [7, None]}):
+            with self.subTest(broken=broken):
+                self.assertEqual(s.fold_plan({**m(A, "2026-11-06"), A + "@done": broken}, today), (A, ["2026-11-06"], ["2026-11-06"]))
+        # The task whose oldest ✓ waits longest goes first; a tie goes by id.
+        both = {**m(A, "2026-11-10", "2026-11-11"), **m(B, "2026-11-09")}
+        self.assertEqual(s.fold_plan(both, today)[:2], (B, ["2026-11-09"]))
+        self.assertEqual(s.fold_plan({**m(B, "2026-11-10"), **m(A, "2026-11-10")}, today)[0], A)
+        # A mark for a day that is none is never folded and never holds up the rest.
+        junk = {f"{A}@2026-02-30": {}, f"{A}@1999-12-31": {}, f"{A}@soon": {}, f"{A}@2026-11-06\n": {}, 7: {}, **m(A, "2026-11-06")}
+        self.assertEqual(s.fold_plan(junk, today), (A, ["2026-11-06"], ["2026-11-06"]))
+        self.assertIsNone(s.fold_plan({f"{A}@2026-02-30": {}, f"{A}@1999-12-31": {}}, today))
+        # No more than a month of days at once, the oldest first.
+        many = m(A, *[(date(2026, 10, 1) + timedelta(days=n)).isoformat() for n in range(40)])
+        tid, days, runs = s.fold_plan(many, today)
+        self.assertEqual((len(days), days[0], days[-1], runs), (31, "2026-10-01", "2026-10-31", ["2026-10-01..2026-10-31"]))
+        # A ledger is read whole before it is written again: far more days than a page is ever sent.
+        long = {**m(A, "2026-11-06"), A + "@done": {"marked_at": "x", "days": ["2000-01-01..2026-11-05"]}}
+        self.assertEqual(s.fold_plan(long, today)[2], ["2000-01-01..2026-11-06"])
+        self.assertGreater(s.LEDGER_LIMIT, 9807)
+
+    def test_old_ticks_of_a_daily_task_are_folded_when_a_daily_tick_is_stored(self):
+        A, B, C = "task:fold0000000a", "task:fold0000000b", "task:fold0000000c"
+        day = lambda n: (date.today() - timedelta(days=n)).isoformat()
+        mark = lambda tid, *ago: {f"{tid}@{day(n)}": {"marked_at": "x", "name": "LeetCode", "course": "Personal"} for n in ago}
+        stored = lambda: json.loads(self.request("GET", "/api/marks")[2])
+        of = lambda marks, tid: sorted(k.split("@")[1] for k in marks if k.startswith(tid + "@"))
+        self.plant({**mark(A, 40, 39, 38, 20, 9, 8, 7, 3), **mark(B, 60), **mark(C, 10, 9),
+                    A + "@done": {"marked_at": "x", "days": [f"{day(45)}..{day(41)}"]}})
+        self.post("/api/mark", {"id": "canvas:fold-1", "done": True})
+        # A ✓ that is no daily task's folds nothing.
+        self.assertEqual(of(stored(), B), [day(60)])
+        # A daily ✓ is stored, and with it one task is folded: the one whose oldest ✓ waits longest.
+        status, marks = self.post("/api/mark", {"id": f"{A}@{day(0)}", "done": True, "name": "LeetCode", "course": "Personal"})
+        self.assertEqual(status, 200)
+        self.assertEqual(of(marks, B), ["done"])
+        self.assertEqual(marks[B + "@done"]["days"], [day(60)])
+        self.assertRegex(marks[B + "@done"]["marked_at"], r"^\d{4}-\d\d-\d\dT")
+        self.assertEqual(len(of(marks, A)), 10)             # A's turn has not come
+        self.assertEqual(marks, stored())                   # the answer is every mark, as ever
+        # The next daily ✓ folds the next: every ✓ of A more than a week past joins its ledger's runs.
+        self.post("/api/mark", {"id": f"{A}@{day(0)}", "done": False})
+        _, marks = self.post("/api/mark", {"id": f"{A}@{day(0)}", "done": True, "name": "LeetCode"})
+        self.assertEqual(marks[A + "@done"]["days"], [f"{day(45)}..{day(38)}", day(20), f"{day(9)}..{day(8)}"])
+        self.assertEqual(of(marks, A), sorted([day(7), day(3), day(0), "done"]))
+        self.assertIn("canvas:fold-1", marks)
+        # C's oldest ✓ is not two weeks old: it waits, whatever is ticked.
+        for _ in range(2):
+            self.post("/api/mark", {"id": f"{A}@{day(0)}", "done": False})
+            _, marks = self.post("/api/mark", {"id": f"{A}@{day(0)}", "done": True})
+        self.assertEqual(of(marks, C), sorted([day(10), day(9)]))
+        self.assertNotIn(C + "@done", marks)
+        # No day was lost on the way: a task's days are its ledger's and its marks'.
+        days = lambda tid: sorted(set(self.server_mod.ledger_days(marks, tid)) | {d for d in of(marks, tid) if d != "done"})
+        self.assertEqual(days(A), sorted(day(n) for n in (45, 44, 43, 42, 41, 40, 39, 38, 20, 9, 8, 7, 3, 0)))
+        self.assertEqual(days(B), [day(60)])
+        self.post("/api/mark", {"id": "canvas:fold-1", "done": False})
+        self.daily_cleanup(A, B, C)
+        self.assertEqual([k for k in stored() if k.startswith("task:fold")], [])
 
     def test_notes_are_kept_as_typed_under_their_own_ids(self):
         status, data = self.post("/api/note", {"id": "note:abc123def456", "text": "Lab 4\n  bring goggles  \n\n"})
