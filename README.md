@@ -332,6 +332,33 @@ device, except that files are listed by name only, as on the phone view, and the
 syncs run on your Mac. That server answers `data.js` and the `api/` routes for marks and tasks
 itself, and serves no files.
 
+## On a phone
+
+Under the platform the dashboard is part of one installed app with the platform's other apps: add
+the public site to the Home Screen from Safari (from any of its pages) and it opens without the
+browser around it. `theme-init.js` links the platform's one manifest and icon at the site's root
+(`/manifest.webmanifest`, `/apple-touch-icon.png`, never files beside the page) only where the page
+is at `/school/`, and colours the phone's own bar as the dashboard's bar in each theme; SchoolHub on
+its own port, from disk or as the phone view adds no manifest. The app starts at the platform's
+first app and goes on to the one open last: the dashboard notes itself in localStorage `qp.last`,
+and marks the launch as had (sessionStorage `qp.launched`), so a tap on Prep afterwards stays there.
+An icon added before the manifest existed opens where it was added: delete it and add it again.
+
+**Staying current.** A Home Screen app has no reload, and the phone brings the page back as it was
+left, for days. So each time the page comes back into view it builds its list for the present
+(Today, Overdue and the 48-hour count, and what repeats on a new day), asks for the marks and tasks,
+and asks `api/sync` whether the Mac has synced since: a newer `data.js` is taken in place, as on the
+Mac, with no timer in between. A tap on "Synced 2h ago" does the same and says the exact time. After
+more than an hour away the page loads itself again, unless a form, Notes, the drawer or a field is
+open. If the first questions get no answer (no signal, or the site busy for a moment) the page says
+so and asks again by itself, at once on coming back and when the phone is back online; `data.js`
+that could not be had is asked for again the same way. A page last known to be the public copy
+(its own copy, or the platform's word in `qp.platform`) stays one when `platform.json` alone fails.
+
+**What the phone does not do, by design.** Course files are named, not opened (they live on your
+Mac), there is no Sync now (syncs run on your Mac), and nothing opens or reveals anything on the
+Mac's screen.
+
 ## Tests
 
 ```bash

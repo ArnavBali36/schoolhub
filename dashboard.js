@@ -115,9 +115,15 @@ function heard(path, r){
 
 const VIEWS = ['upcoming', 'courses', 'day'];
 const state = { view: VIEWS.includes(mem.get('view', 'upcoming')) ? mem.get('view', 'upcoming') : 'upcoming', showDone: mem.get('showDone', false), course: mem.get('course', null) };
-const now = new Date();
+// The moment the list is dated by: renewed each time it is built (rebuild), so a page the phone
+// brings back a day later, or a page left open over midnight, is not dated the day it was loaded.
+let now = new Date();
 // From 1100 px the planner has a column of its own beside the list; narrower, it is the Day view.
 const WIDE = matchMedia('(min-width: 1100px)');
+// A screen worked by touch alone (a phone, a tablet without a pointer): what is only for a finger
+// ("on a phone", below) asks this, never the width, so the Mac app, a desktop browser and a narrow
+// window are left as they were.
+const TOUCH = matchMedia('(hover: none) and (pointer: coarse)');
 // Whether the page has the planner: 'unknown' until planner.js knows (it asks api/plan once the
 // page knows where it saves), then 'on' or 'off'. Never on the phone site or from disk.
 let plannerState = PHONE || LOCAL_FILES ? 'off' : 'unknown';
@@ -261,9 +267,13 @@ function folderLink(p, cls){
 // Where platform.json's answer says the page is: reached from another device (remote), or a public
 // copy of the platform (public, which is remote too). SchoolHub's own server answers 204 (no platform:
 // this Mac). Any other answer, or one that cannot be read, counts as another device, so the page then
-// offers only what works from anywhere.
-async function platformMode(r){
-  if (r.status !== 200) return {remote: r.status !== 204 && r.status !== 404, public: false};
+// offers only what works from anywhere. Except where the page was last known to be a public copy
+// (was: the place the copy or an earlier answer gave): there platform.json comes from the same site
+// as everything else, so an error answer is that site failing for a moment, and the page stays the
+// public copy rather than turning into another device with a Sync now that cannot work.
+async function platformMode(r, was){
+  if (r.status !== 200) return was?.public === true && r.status !== 204 && r.status !== 404
+    ? {remote: true, public: true} : {remote: r.status !== 204 && r.status !== 404, public: false};
   const p = await r.json(), isPublic = p?.public === true;
   return {remote: p?.remote === true || isPublic, public: isPublic};
 }
@@ -410,7 +420,8 @@ const runWords = n => `${n} ${n === 1 ? 'day' : 'days'} in a row`;
 const courseSlot = (c, i) => c.id === 'personal' ? 'var(--course-personal)' : `var(--course-${i % COURSE_COLORS + 1})`;
 const courseColor = (c, i) => c.id === 'personal' ? courseSlot(c) : c.color || courseSlot(c, i);
 function rebuild(){
-  shownDay = dayKey();
+  now = new Date();
+  shownDay = dayKey(now);
   let base = D.courses;
   if (tasks) base = base.filter(c => c.id !== 'personal').map(c => ({...c, assignments: c.assignments.filter(a => !a.is_task)}));
   courses = base.map((c, i) => ({...c, color: courseColor(c, i), slot: courseSlot(c, i), assignments: c.assignments.map(dailyItem)}));
@@ -465,8 +476,10 @@ const PILL_TIP = {
 };
 
 // An open item can be dragged onto the planner (planner.js reads the drag), with a grip on hover.
+// Not on a phone: a long press there would lift the row with no planner on screen to drop it on
+// ("Plan it" in the drawer does that there).
 const GRIP = '<span class="grip" aria-hidden="true" title="Drag onto the planner"><svg viewBox="0 0 6 14" fill="currentColor"><circle cx="1" cy="1.5" r="1"/><circle cx="5" cy="1.5" r="1"/><circle cx="1" cy="7" r="1"/><circle cx="5" cy="7" r="1"/><circle cx="1" cy="12.5" r="1"/><circle cx="5" cy="12.5" r="1"/></svg></span>';
-const draggable = a => plannerState === 'on' && !isDone(a);
+const draggable = a => plannerState === 'on' && !TOUCH.matches && !isDone(a);
 // A daily task's run on its row: a flame and the number of days, from a run of one, with the
 // words in its title and, for a screen reader, after the name. Worked out as the row is drawn, so
 // a ✓ just made counts.
@@ -570,6 +583,9 @@ function stats(){
   try { window.webkit?.messageHandlers?.schoolhub?.postMessage({badge: attention + soon}); } catch {}
   const banner = LIVE || WRITE || PROBING ? '' : LOCAL_FILES
     ? `<div class="banner">To mark assignments done and open files in their apps, use <a href="http://localhost:8722">localhost:8722</a>.</div>`
+    // The first questions were not answered (no signal, or the site could not answer): asked again
+    // by themselves ("asked again"), so the page says that rather than that it cannot save.
+    : unreached ? `<div class="banner">School can't be reached right now, so ✓ marks and tasks can't be saved yet. It tries again by itself; this page shows the last sync.</div>`
     : `<div class="banner">Read-only view. Your files and the ✓ buttons live on your Mac; this page shows the last sync.</div>`;
   const none = D.generated_at ? '' : '<div class="banner">No assignments yet: your Mac sends them with its next sync.</div>';
   // A newer sync's data.js that could not be read ("a sync that ran by itself"): yours to load.
@@ -631,6 +647,7 @@ function render(){
   const x = window.scrollX, y = window.scrollY;
   main.innerHTML = stats() + (view === 'courses' ? coursesView(vis) : upcomingView(vis));
   markEmoji(main);
+  phoneRender();
   refocus(main, key);
   if (window.scrollY !== y || window.scrollX !== x) window.scrollTo(x, y);
   emit('render');
@@ -750,7 +767,7 @@ function markNote(a, s){
 // (on Close when it was opened from the keyboard), and goes back to the assignment it was opened
 // from when it closes.
 let drawerId = null, drawerOpener = null;
-const BEHIND_DRAWER = ['.topbar', 'main', '#fab'];
+const BEHIND_DRAWER = ['.topbar', 'main', '#fab', '#undoPad'];
 function openDrawer(id, fromKeyboard = false){
   const a = byId[id]; if (!a) return;
   const drawer = $('#drawer'), first = drawerId === null;
@@ -791,6 +808,8 @@ function openDrawer(id, fromKeyboard = false){
   $('#close').onclick = closeDrawer;
   for (const sel of BEHIND_DRAWER) { const el = $(sel); if (el) el.inert = true; }
   if (first) (fromKeyboard ? $('#close') : drawer).focus(); else refocus(drawer, key);
+  // On a phone, Back closes it ("on a phone": layers).
+  if (first) layerOpened(drawer, closeDrawer);
 }
 function closeDrawer(){
   if (drawerId === null) return;
@@ -798,6 +817,7 @@ function closeDrawer(){
   drawerId = null;
   $('#drawer').hidden = $('#scrim').hidden = true;
   for (const sel of BEHIND_DRAWER) { const el = $(sel); if (el) el.inert = false; }
+  layerClosed($('#drawer'));
   // Back to where it was opened from; the list may have been drawn anew meanwhile.
   const back = drawerOpener?.isConnected ? drawerOpener : document.querySelector(`[data-drawer="${CSS.escape(id)}"]`);
   drawerOpener = null;
@@ -976,7 +996,10 @@ function openTaskForm(id){
   $('#tUntil').value = r?.until || '';
   showRepeat();
   taskDialog.showModal();
-  $('#tName').focus();
+  // (Back closes it on a phone, "on a phone": also where a dialog does not say it opened.)
+  layerOpened(taskDialog, () => closeDialog(taskDialog));
+  // On a phone the keyboard comes up when the learner taps a field, not over a form just opened.
+  if (!TOUCH.matches) $('#tName').focus();
 }
 // The form shows the days and the last day of a task that repeats, or the date and the pin of one
 // that does not.
@@ -1083,6 +1106,10 @@ $('#fab').onclick = () => openTaskForm();
 // the page has had for a while.
 const UNDO_STEPS = 100;
 const steps = {undo: [], redo: []};
+// Told each time the steps that can be taken back or made again may have changed: a phone's Undo
+// and Redo buttons ("on a phone") follow them.
+const stepWatchers = [];
+const stepsChanged = () => { for (const fn of stepWatchers) fn(); };
 let stepsMade = 0, travelling = Promise.resolve();
 let travels = 0;    // ways back asked for and not done with yet: the one running, and those waiting behind it
 const holds = [];   // while one of these answers true (a drag on the planner), the keys do nothing
@@ -1109,9 +1136,11 @@ function addStep(step, saved = true){
   const settle = ok => {
     if (ok !== false) return true;
     for (const list of [steps.undo, steps.redo]) { const i = list.indexOf(step); if (i >= 0) list.splice(i, 1); }
+    stepsChanged();
     return false;
   };
   step.settled = Promise.resolve(saved).then(settle, () => settle(false));
+  stepsChanged();
   return step;
 }
 // A toast's button for a step: Undo (or Redo), for as long as that step is the next one. The button
@@ -1152,7 +1181,7 @@ function travel(dir, o){
       } else if (r.why === 'kept') {
         toast(`Can't ${dir}: ${step.label}. A daily ✓ more than a week old stays in its run of days.`);
       } else endWait();     // the change itself was never saved, and has said so
-    } finally { travels--; }
+    } finally { travels--; stepsChanged(); }
   });
 }
 // Where the keys are the field's own undo while typing: text, not a checkbox or a button.
@@ -1286,7 +1315,7 @@ async function pollSync(){
 // (#syncNote in dashboard.html, the surface of the planner's previews) under Sync now while the
 // pointer rests on that button or the keyboard's focus is on it. The same element describes the
 // button to a screen reader. No line where the server does not sync by itself (auto.state "off")
-// or while a sync runs, and never on a public copy or the phone site: neither asks api/sync.
+// or while a sync runs, and never on a public copy or the phone site, where no sync runs by itself.
 const clockTime = iso => {
   const d = iso ? new Date(iso) : null;
   return d && !isNaN(d) ? d.toLocaleTimeString([], {hour: 'numeric', minute: '2-digit'}) : '';
@@ -1366,20 +1395,32 @@ window.addEventListener('resize', hideSyncNote);
 // form and the undo history stay as they were. The page never loads again by itself for it. Only a
 // data.js that cannot be read leaves the page as it is, with a quiet "New data · Refresh" above
 // the list (stats) for you to press.
+//
+// A public copy runs no syncs, but your Mac's reach it, and a phone keeps the page for days with no
+// reload control (an icon on the Home Screen). So it looks too, only when it comes back on show
+// (back), with no timer. Its api/sync may not say data_at: then its finished_at, the moment the
+// Mac's last sync reached the site, tells whether that was after the page got its data.js (dataAt),
+// and data.js is asked for again; one that turns out to hold the same sync changes nothing.
 const WATCH_MS = 60000;           // between two looks
 const WATCH_SOON_MS = 3000;       // while a sync runs (to see it end), or a drag holds new data back
 let watchTimer = 0, looking = false, running = false, soon = false;
 let unread = null;                // the data_at of a data.js that could not be read: "New data · Refresh"
 const watches = () => LIVE && !PUBLIC && !PHONE && !pressed && !document.hidden;
+// A public copy that saves (WRITE: its first answer came), back on show.
+const looksBack = () => PUBLIC && !!WRITE && !document.hidden;
+const REACHED_SLACK_MS = 60000;   // the site's clock and the phone's may differ by this much
+let dataAt = Date.now();          // when the page asked for the data.js it shows (with the page itself, at first)
+let followed = null;              // the last look's word (data_at or finished_at) whose data.js was read
 // The next look, a while from now: none while the page is hidden, or where it does not watch.
 function watchSync(){
   clearTimeout(watchTimer);
   watchTimer = watches() ? setTimeout(lookAtSync, running || soon ? WATCH_SOON_MS : WATCH_MS) : 0;
 }
-async function lookAtSync(){
+// back: the page has just come back on show (backOnShow).
+async function lookAtSync(back = false){
   clearTimeout(watchTimer);
   watchTimer = 0;
-  if (looking || !watches()) return;
+  if (looking || !(watches() || (back === true && looksBack()))) return;
   looking = true;
   let s = null;
   try { s = await getJson('api/sync'); } catch {}
@@ -1402,9 +1443,12 @@ async function heardSync(s){
   if (running) { running = false; showSyncing(false); }
   // Not before data.js itself has come (or failed): until then the page may show the copy kept of
   // an older sync, and data.js is on its way already. Not in the middle of a drag: soon after.
-  if (!dataSeen || !D || !s.data_at || s.data_at === D.generated_at || s.data_at === unread) return;
+  // A public copy whose answer has no data_at: when the Mac's last sync reached it (see above).
+  const reached = PUBLIC && !s.data_at && s.finished_at !== followed && Date.parse(s.finished_at) > dataAt - REACHED_SLACK_MS ? s.finished_at : null;
+  const at = s.data_at || reached;
+  if (!dataSeen || !D || !at || at === D.generated_at || at === unread) return;
   if (holds.some(fn => fn())) { soon = true; return; }
-  await newData(s.data_at);
+  await newData(at);
 }
 // data.js as text is one statement, `window.SCHOOL_DATA = {…};` (sync.py): what it holds, or null.
 function readData(text){
@@ -1413,14 +1457,20 @@ function readData(text){
     return dataShaped(d) ? d : null;
   } catch { return null; }
 }
-// at: the data_at that told of it.
-async function newData(at){
-  let text;
+// data.js as text, as the server has it now: null when it does not answer.
+async function dataText(){
   try {
     const r = await fetch('data.js', {cache: 'no-store'});
-    if (!r.ok) return;            // not answered: asked again at the next look
-    text = await r.text();
-  } catch { return; }
+    return r.ok ? await r.text() : null;
+  } catch { return null; }
+}
+// at: the data_at that told of it.
+async function newData(at){
+  const asked = Date.now();
+  const text = await dataText();
+  if (text === null) return;      // not answered: asked again at the next look
+  dataAt = asked;
+  followed = at;
   const fresh = readData(text), was = D;
   if (fresh && fresh.generated_at === was.generated_at) return;
   try {
@@ -1534,14 +1584,27 @@ async function loadNotes(){
 async function openNotes(){
   notesPop.show();
   notesBtn.setAttribute('aria-expanded', 'true');
+  notesCover();
+  layerOpened(notesPop, closeNotes);
   drawNotes();
   await loadNotes();
   if (!notesPop.open) return;
   // The note last changed, as Notes opens; none yet, a new one to type in.
   const newest = noteRows()[0];
-  if (newest) showNote(newest, matchMedia('(max-width:600px)').matches ? 'list' : 'note'); else newNote();
-  if (notesPop.dataset.pane === 'note') ntText.focus();
+  if (newest) showNote(newest, notesNarrow() ? 'list' : 'note'); else newNote();
+  // On a phone a note opens to be read: the keyboard comes up when the learner taps into it.
+  if (notesPop.dataset.pane === 'note' && !TOUCH.matches) ntText.focus();
 }
+// Narrow, the window is the whole screen (dashboard.html): one pane at a time, and the page behind
+// it is out of reach, as behind the drawer.
+const notesNarrow = () => matchMedia('(max-width:600px)').matches;
+function notesCover(){
+  const on = notesPop.open && notesNarrow();
+  for (const sel of BEHIND_DRAWER) { const el = $(sel); if (el) el.inert = on || drawerId !== null; }
+}
+// A phone turned on its side, or a narrow window widened, with Notes open turns the whole screen
+// back into the small window: the page behind it is the learner's again, and the other way round.
+matchMedia('(max-width:600px)').addEventListener?.('change', notesCover);
 function closeNotes(){
   if (!notesPop.open) return;
   saveNote();
@@ -1549,6 +1612,7 @@ function closeNotes(){
   if (note && !note.text.trim()) note = null;
   notesPop.close();
   notesBtn.setAttribute('aria-expanded', 'false');
+  notesCover();
   if (notesPop.contains(document.activeElement) || document.activeElement === document.body) notesBtn.focus({preventScroll: true});
 }
 function newNote(){
@@ -1564,7 +1628,12 @@ $('#ntList').addEventListener('click', e => {
   if (!b) return;
   saveNote();
   const n = noteRows().find(r => r.id === b.dataset.note);
-  if (n) { showNote(n); ntText.focus(); }
+  if (n) { showNote(n); if (!TOUCH.matches) ntText.focus(); }
+});
+// Narrow, each pane has its own New, and Done to close the window (it covers the Notes button).
+notesPop.addEventListener('click', e => {
+  if (e.target.closest('[data-nt-done]')) closeNotes();
+  else if (e.target.closest('[data-nt-new]')) newNote();
 });
 ntText.addEventListener('input', () => {
   if (!note) return;
@@ -1585,7 +1654,8 @@ $('#ntDelete').addEventListener('click', () => {
     if (notesPop.open) drawNotes();
   }, () => toast("Couldn't delete the note. Check your connection and try again."));
   delete notes[gone.id];
-  showNote(next || null);
+  // Narrow, back to the list: the next note opened in the editor would keep the keyboard up on it.
+  showNote(next || null, notesNarrow() ? 'list' : 'note');
   if (gone.text.trim()) toast(`Deleted “${noteTitle(gone.text)}”`, () => {
     // Back as it was, under its own id.
     notes[gone.id] = {...gone, updated_at: new Date().toISOString()};
@@ -1599,6 +1669,8 @@ $('#ntDelete').addEventListener('click', () => {
 function openNotesOn(id){
   notesPop.show();
   notesBtn.setAttribute('aria-expanded', 'true');
+  notesCover();
+  layerOpened(notesPop, closeNotes);
   const n = noteRows().find(r => r.id === id);
   if (n) showNote(n);
 }
@@ -1619,14 +1691,21 @@ window.addEventListener('pagehide', () => saveNote(true));
 
 // ---- a new day ----
 // A page left open over midnight (the Mac app's stays for days) builds its list again when the day
-// changes, so what repeats shows fresh: looked at once a minute, and on coming back to the tab.
+// changes, so what repeats shows fresh and Today, Tomorrow and Overdue are the present's (rebuild
+// renews now): looked at once a minute, and on coming back to the tab. A phone brings the page back
+// exactly as it was left, from the background or from the browser's back/forward cache (pageshow),
+// so on coming back after a while away (back) the list is built again for the present even on the
+// same day: what fell due meanwhile shows as overdue, and "Due in the next 48h" counts from now.
 // Never under an open form, whose task the list may be about to take.
-function newDay(){
+const STALE_LIST_MS = 10 * 60000;
+function newDay(back){
+  if (back === true && D && !dialogOpen() && Date.now() - now >= STALE_LIST_MS) return refreshTasks(tasks);
   if (dayKey() === shownDay || !D || dialogOpen()) return;
   refreshTasks(tasks);
 }
 setInterval(newDay, 60000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) newDay(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) newDay(true); });
+window.addEventListener('pageshow', e => { if (e.persisted) newDay(true); });
 // (A daily task's ✓ marks of days long past are its history: the page never takes one away. The
 // Mac's server folds them into the task's ledger when a daily ✓ is made there: server.py, tidy_daily.)
 // ---- end of a new day ----
@@ -1648,22 +1727,181 @@ async function reloadState(tries = 3){
 }
 
 // ---- back on show ----
-// Back in view (the tab, the Mac app's window or its School view): what changed meanwhile is taken
-// in quietly, the marks and tasks from your other devices (reloadState; the planner follows it)
-// and a sync that ran (lookAtSync, "sync now"). The same when the browser brings the page back from
-// its back/forward cache (pageshow, persisted): it is shown as it was left, however long ago, and
-// would say nothing of it. Asked once though both events tell of one return.
+// Back in view (the tab, the Mac app's window or its School view, the app on a phone): what changed
+// meanwhile is taken in quietly, the marks and tasks from your other devices (reloadState; the
+// planner follows it) and a sync that ran (lookAtSync, "sync now"; on a public copy too). The same
+// when the browser brings the page back from its back/forward cache (pageshow, persisted): it is
+// shown as it was left, however long ago, and would say nothing of it. Asked once though both
+// events tell of one return. A page whose first questions were never answered asks them again
+// (askAgain, "starting") instead: until they are, it has nowhere to ask for marks and tasks.
 let returning = null;
 function backOnShow(){
+  if (!D && dataSeen) return dataAgain(true);   // nothing drawn: data.js could not be had ("data.js asked again")
+  if (unreached) return askAgain(true);
   if (!returning) returning = reloadState().finally(() => { returning = null; });
-  lookAtSync();
+  lookAtSync(true);
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) watchSync(); else backOnShow(); });
 window.addEventListener('pageshow', e => { if (e.persisted) backOnShow(); });
 // The Mac app's glance (bar.js) stays loaded behind its menu bar icon and is told each time it is
-// opened, since nothing else says so: a window that was never the tab in front has no return.
+// opened, since nothing else says so: a window that was never the tab in front has no return. And
+// a tap on "Synced 2h ago" on a phone (bar.js) asks the same, as the app there has no reload.
 window.addEventListener('qp:glance', backOnShow);
+window.addEventListener('qp:look', backOnShow);
 // ---- end of back on show ----
+
+// ---- on a phone ----
+// A screen worked by touch alone (TOUCH) gets what a finger and an app with no browser bars need.
+// Nothing here runs in the Mac app or a desktop browser: each part asks TOUCH first.
+//
+// Layers. The drawer, Notes and every dialog (a form's sheet, a block's details, the list of keys)
+// are each one entry in the browser's history while they are open, so Back (Android's, the edge
+// swipe of an app on an iPhone's Home Screen, a browser's own button) closes the one on top instead
+// of leaving School. One closed any other way (its own button, a save, Esc) takes its entry back.
+// The entries carry nothing: only their number is kept equal to the layers open. The views are not
+// layers, and stay as they are.
+const layers = [];         // open, oldest first: {el, close}
+let goingBack = 0;         // the page's own history.back(), whose popstate is no Back
+const unmade = [];         // layers opened while one of those is on its way: their entries follow it
+function layerOpened(el, close){
+  if (!TOUCH.matches || layers.some(l => l.el === el)) return;
+  const layer = {el, close};
+  layers.push(layer);
+  if (goingBack) unmade.push(layer); else history.pushState({schoolLayer: true}, '');
+}
+function layerClosed(el){
+  const i = layers.findIndex(l => l.el === el);
+  if (i < 0) return;
+  const [layer] = layers.splice(i, 1), u = unmade.indexOf(layer);
+  if (u >= 0) return void unmade.splice(u, 1);
+  goingBack++;
+  history.back();
+}
+window.addEventListener('popstate', () => {
+  if (goingBack) {
+    if (--goingBack === 0) for (const l of unmade.splice(0)) history.pushState({schoolLayer: true}, '');
+    return;
+  }
+  // Back: the layer on top closes (it is already off the list, so it takes no entry back).
+  layers.pop()?.close();
+});
+// A dialog closed by Back closes as its Esc closes it (a block's details through planner.js's own
+// cancel), and Notes through its own closing, which saves the note.
+function closeDialog(d){
+  if (d === notesPop) return closeNotes();
+  if (d.dispatchEvent(new Event('cancel', {cancelable: true})) && d.open) d.close();
+}
+// Every dialog, the planner's too, says when it opens and closes (toggle; close as well, for an
+// engine that does not say toggle for a dialog). A form's changes are counted from its opening.
+document.addEventListener('toggle', e => {
+  const d = e.target;
+  if (!(d instanceof HTMLDialogElement)) return;
+  if (e.newState === 'open') { changedForms.delete(d); layerOpened(d, () => closeDialog(d)); }
+  else layerClosed(d);
+}, true);
+document.addEventListener('close', e => { if (e.target instanceof HTMLDialogElement) layerClosed(e.target); }, true);
+
+// Taps. What the learner last pressed (pointerdown) and when a key was last pressed, for the two
+// guards below.
+let lastDown = null, downAt = 0, keyAt = 0;
+document.addEventListener('pointerdown', e => { lastDown = e.target; downAt = performance.now(); }, true);
+document.addEventListener('keydown', () => { keyAt = performance.now(); }, true);
+// The dialogs whose fields the learner has changed since they opened.
+const changedForms = new WeakSet();
+for (const type of ['input', 'change']) document.addEventListener(type, e => { const d = e.target.closest?.('dialog'); if (d) changedForms.add(d); }, true);
+// A click in a dialog that the learner did not begin in it is the one that follows the tap which
+// opened it (the planner opens a block's details or its editor as the finger lifts, and the click
+// then lands on what is under it in the dialog: its backdrop, or Delete): it does nothing. And a
+// tap on the dim strip above a sheet, where a learner puts the keyboard away, never throws away a
+// form with changes in it: Cancel is always in reach on its bar.
+document.addEventListener('click', e => {
+  if (!TOUCH.matches || !e.isTrusted || e.detail === 0) return;
+  const d = e.target.closest?.('dialog[open]');
+  if (!d || d === notesPop) return;
+  const late = !!lastDown?.isConnected && !d.contains(lastDown);
+  const away = e.target === d && changedForms.has(d) && !!d.querySelector('form');
+  if (late || away) { e.preventDefault(); e.stopImmediatePropagation(); }
+}, true);
+// No field of a form takes the focus by itself (the dialog's own first focus, or a form moving it
+// after a tap elsewhere): the keyboard comes up when the learner taps the field or its label. A key
+// (a keyboard attached to a tablet) moves the focus as it does anywhere, and so does a move from
+// one field of the form to the next, which the keyboard's own arrows (iOS) or Next (Android) make
+// without a key or a tap.
+document.addEventListener('focusin', e => {
+  const f = e.target;
+  if (!TOUCH.matches || !editingText(f) || !f.closest?.('dialog.task') || keyAt > downAt) return;
+  if (editingText(e.relatedTarget) && e.relatedTarget.closest('dialog') === f.closest('dialog')) return;
+  if (lastDown && (f.contains(lastDown) || lastDown.closest?.('label')?.control === f)) return;
+  f.blur();
+}, true);
+// iOS gives a control its pressed look (:active) only on a page that listens to touches.
+if (TOUCH.matches) document.addEventListener('touchstart', () => {}, {passive: true});
+// Where a file is on the Mac is a tooltip on a computer; a tap says it on a phone.
+document.addEventListener('click', e => {
+  const o = TOUCH.matches && e.target.closest?.('.offsite[title]');
+  if (o) toast(o.title);
+});
+
+// The keyboard. A phone's keyboard covers the page without making it smaller (only the visual
+// viewport shrinks), so the part of the screen still in sight is written on <html> for the sheets,
+// Notes and the toast (dashboard.html, "School on a phone"): --vv-top and --vv-h, the top and
+// height of what is in sight, and --kb, what the keyboard covers at the bottom. Pinched in, the
+// page is the learner's to move, and nothing follows it.
+if (TOUCH.matches && window.visualViewport) {
+  const vv = window.visualViewport, css = document.documentElement.style;
+  let kb = 0;
+  const follow = () => {
+    if (vv.scale > 1.01) { for (const k of ['--kb', '--vv-top', '--vv-h']) css.removeProperty(k); return; }
+    const was = kb;
+    kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+    css.setProperty('--kb', kb + 'px');
+    css.setProperty('--vv-top', Math.round(vv.offsetTop) + 'px');
+    css.setProperty('--vv-h', Math.round(vv.height) + 'px');
+    // The sheet just got shorter for the keyboard: the field being typed in stays in its sight.
+    const f = document.activeElement;
+    if (kb > was && editingText(f) && f.closest('dialog.task')) requestAnimationFrame(() => f.scrollIntoView({block: 'nearest'}));
+  };
+  vv.addEventListener('resize', follow);
+  vv.addEventListener('scroll', follow);
+  follow();
+}
+
+// Undo and Redo, always in reach: two buttons at the bottom left, beside the + button's corner,
+// taking a step back or forward as Cmd+Z and Shift+Cmd+Z do (requestStep), each off while there is
+// nothing to take. Only on a phone, which has no keys for it, and only where the page saves.
+const STEP_ICON = {
+  undo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>',
+  redo: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg>',
+};
+let undoPad = null;
+if (TOUCH.matches) {
+  undoPad = document.createElement('div');
+  undoPad.className = 'undo-pad';
+  undoPad.id = 'undoPad';
+  undoPad.setAttribute('role', 'group');
+  undoPad.setAttribute('aria-label', 'Undo and redo');
+  undoPad.hidden = true;
+  undoPad.innerHTML = ['undo', 'redo'].map(dir => `<button type="button" data-undo="${dir}" aria-label="${dir === 'undo' ? 'Undo' : 'Redo'}" disabled>${STEP_ICON[dir]}</button>`).join('');
+  undoPad.addEventListener('click', e => { const b = e.target.closest('[data-undo]'); if (b && !b.disabled) requestStep(b.dataset.undo); });
+  $('#fab').after(undoPad);
+  stepWatchers.push(showSteps);
+}
+function showSteps(){
+  if (!undoPad) return;
+  for (const b of undoPad.querySelectorAll('[data-undo]')) b.disabled = !steps[b.dataset.undo].length;
+}
+// After each drawing of the list: the buttons show where the page saves. (And Notes goes where the
+// page has turned out not to save after all, as the + button does: a page drawn from the copy kept
+// from the last visit whose server then did not answer.)
+function phoneRender(){
+  if (WRITE !== 'local' && !notesBtn.hidden) { notesBtn.hidden = true; closeNotes(); }
+  if (!undoPad) return;
+  undoPad.hidden = !WRITE;
+  showSteps();
+}
+// A screen that starts or stops being worked by touch alone: the rows' drag follows.
+TOUCH.addEventListener?.('change', () => render());
+// ---- end of on a phone ----
 
 // ---- what planner.js uses ----
 // The day planner reads the list, opens the drawer and saves through this small namespace rather
@@ -1757,11 +1995,34 @@ function start(){
   // Drawn from the copy: what goes with a page that saves shows with it.
   if (copy && PHONE) $('#fab').hidden = false;
   if (copy && !PHONE) { enableServerFeatures(); showSyncbox(); emit('ready'); }
-  // The phone site: the cloud database saves marks and tasks when it is connected; without it the
-  // page stays a read-only view. Anywhere else your Mac's server answers api/marks and api/tasks,
-  // at / on its own port or under a platform's prefix, and a platform says in platform.json
-  // whether the page was reached from another device or is public.
-  const where = PHONE ? null : fetch('platform.json', {cache: 'no-store'}).then(platformMode).catch(() => ({remote: true, public: false}));
+  lastAt = copy?.at ?? platformCache();
+  askWhere(copy, false);
+}
+// The first questions: where the page is and what is stored. The phone site: the cloud database
+// saves marks and tasks when it is connected; without it the page stays a read-only view. Anywhere
+// else your Mac's server answers api/marks and api/tasks, at / on its own port or under a
+// platform's prefix, and a platform says in platform.json whether the page was reached from
+// another device or is public. Asked at the start (copy: what the page was drawn from), and again
+// (again, with no copy) while they have not been answered ("asked again", below): then each answer
+// tells the planner where the page saves ('ready'), which turns it on once the page does.
+let asking = false;
+let lastAt = null;         // where the page was last known to be: the copy's place, then each answer's
+// Without a copy (a first School visit, one older than the copy lasts, or the visit after a failed
+// answer), the platform's own word as this browser keeps it for the app switch: bar.js keepPlatform
+// and QuantPrep's pages write it with "public" on the public site. Only that mark is read, so a
+// platform.json that fails there for a moment does not turn the page into another device.
+function platformCache(){
+  try { return JSON.parse(localStorage.getItem('qp.platform'))?.public === true ? {remote: true, public: true} : null; } catch { return null; }
+}
+// Asked, and not answered (no signal, or a site that could not answer for a moment): read-only for
+// now, the page says so (stats) and asks again by itself ("asked again"). Never on the phone site.
+let unreached = false;
+function askWhere(copy, again){
+  asking = true;
+  // bar.js asked platform.json already, for the app switch: its answer serves the first time.
+  const first = !again && window.schoolHubPlatform;
+  const where = PHONE ? null : (first || fetch('platform.json', {cache: 'no-store'})).then(r => platformMode(r, lastAt))
+    .catch(() => lastAt?.public === true ? {remote: true, public: true} : {remote: true, public: false});
   // (The tasks not answering alone leaves those of the last sync, as it always did.)
   const asked = PHONE ? cloudApi()
     : Promise.all([getJson('api/marks'), where, getJson('api/tasks').catch(() => null)]).then(([m, at, t]) => ({marks: m, tasks: t?.tasks ?? null, at}));
@@ -1769,6 +2030,10 @@ function start(){
   asked.then(got => {
     // Another place than the copy's (or no copy): the page is drawn again whatever the marks are.
     const moved = !copy || (!PHONE && !same(copy.at, got.at));
+    asking = unreached = false;
+    askTries = 0;
+    if (!PHONE) lastAt = got.at;
+    if (again) window.dispatchEvent?.(new Event('qp:placed'));   // bar.js: the app switch, if it was not answered either
     if (PHONE) WRITE = 'cloud'; else setPlace(got.at);
     placed = true;
     keepState();
@@ -1778,16 +2043,40 @@ function start(){
     // coming back to a tab: they are asked for again (reloadState) rather than taken.
     if (saves !== sent) { if (moved) refresh(); reloadState(); }
     else if (!took(got.marks, got.tasks) && moved) refresh();
+    // The data.js of that start could not be had either: now that the page saves, its look asks.
+    if (again && !dataAt) lookAtSync(true);
   }, () => {
     // Asked, and not answered: drawn again without the banner's wait, so a page that cannot save
-    // says so. One drawn from a copy goes back to what it is without it.
+    // says so (that it will try again, but on the phone site). One drawn from a copy goes back to
+    // what it is without it.
+    asking = false;
+    unreached = !PHONE;
     PROBING = false;
     if (copy) forgetCopy(); else render();
+    askAgain();
   }).finally(() => {
     if (!copy && !PHONE) { showSyncbox(); emit('ready'); }
     nowKnown();
   });
 }
+// ---- asked again ----
+// One failed first answer (the app opened with no signal, or the site busy for a moment) would
+// leave the page read-only until it is loaded again, which an app on a phone's Home Screen never
+// is by itself. So the questions are asked again: after a pause that grows, while the page is on
+// show; at once when it comes back on show (backOnShow) and when the device is back online. Never
+// on the phone site or from disk, and never once answered.
+const ASK_AGAIN_MS = [3000, 10000, 30000, 60000, 300000];
+let askTimer = 0, askTries = 0;
+function askAgain(atOnce = false){
+  clearTimeout(askTimer);
+  askTimer = 0;
+  if (!unreached || asking) { if (!unreached) askTries = 0; return; }
+  if (atOnce === true && !document.hidden) return askWhere(null, true);
+  if (!document.hidden) askTimer = setTimeout(() => askAgain(true), ASK_AGAIN_MS[Math.min(askTries++, ASK_AGAIN_MS.length - 1)]);
+}
+// Back online: whatever was not had is asked for at once, the first questions, data.js with nothing
+// drawn (dataAgain), or the data.js a drawn page could not have (its look).
+window.addEventListener('online', () => { askAgain(true); dataAgain(true); if (D && !dataAt && !unreached) lookAtSync(true); });
 // The server did not answer after all: the page as it is without the copy, which cannot save (a
 // change made meanwhile fails as a save does, and is put back). The copy goes: the next visit asks
 // first, as a first visit does.
@@ -1801,6 +2090,32 @@ function forgetCopy(){
   if (drawerId !== null && !byId[drawerId]) closeDrawer();
   plannerState = PHONE ? plannerState : 'off';
   refresh();
+}
+// ---- data.js asked again ----
+// A visit with nothing kept to draw (a first one, or one whose copy has run out) whose data.js
+// could not be had has no list, and nothing else asks for it: the first questions wait for the data.
+// So data.js itself is asked for again, after the same growing pauses while the page is on show, and
+// at once when it comes back on show (backOnShow) and when the device is back online; once read, the
+// page starts as it would have. Never from disk.
+let dataTimer = 0, dataTries = 0, dataAsking = false;
+async function dataAgain(atOnce = false){
+  clearTimeout(dataTimer);
+  dataTimer = 0;
+  if (D || LOCAL_FILES || dataAsking) return;
+  if (atOnce !== true || document.hidden) {
+    if (!document.hidden) dataTimer = setTimeout(() => dataAgain(true), ASK_AGAIN_MS[Math.min(dataTries++, ASK_AGAIN_MS.length - 1)]);
+    return;
+  }
+  dataAsking = true;
+  const asked = Date.now();
+  const text = await dataText(), fresh = text === null ? null : readData(text);
+  dataAsking = false;
+  if (D) return;
+  if (!fresh) return dataAgain();
+  dataAt = asked;
+  D = fresh;
+  start();
+  keepData(JSON.stringify(fresh));
 }
 
 // data.js: here before this file ran, or awaited (its script's load or error, or the window's load
@@ -1830,8 +2145,16 @@ function dataHere(){
   const fresh = window.SCHOOL_DATA;
   if (!fresh) {
     // No data.js to be had. A page drawn from the copy stays as it is, under the copy's own sync
-    // time; with nothing to draw, it says what to do.
-    if (!D) $('#main').innerHTML = '<p class="empty">No data yet. Run <code>python3 sync.py</code> in the SchoolHub folder.</p>';
+    // time, and its next look asks for data.js whatever sync it hears of (dataAt 0: none has been
+    // read). With nothing to draw, it says what to do (on the public site, that it will try again:
+    // there is no sync.py to run on a phone) and asks again by itself.
+    dataAt = 0;
+    if (!D) {
+      $('#main').innerHTML = platformCache()
+        ? '<p class="empty">Couldn\'t load School. It tries again by itself, and when you come back.</p>'
+        : '<p class="empty">No data yet. Run <code>python3 sync.py</code> in the SchoolHub folder.</p>';
+      dataAgain();
+    }
     return;
   }
   const text = LOCAL_FILES ? '' : JSON.stringify(fresh);

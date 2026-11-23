@@ -96,7 +96,10 @@ console.log(JSON.stringify([nextApp(three).id, nextApp(['quant', 'school'].map(a
         self.assertRegex(JS, r"if \(op\) \{ e\.preventDefault\(\); if \(REMOTE\) return; return known\.then\(\(\) => REMOTE \|\| api\('api/open'")
 
     def test_remote_and_public_come_from_platform_json_and_unknown_counts_as_remote(self):
-        self.assertIn("fetch('platform.json', {cache: 'no-store'}).then(platformMode).catch(() => ({remote: true, public: false}))", JS)
+        # (bar.js's answer serves the first time, "asked again" asks itself; a page last known to be a
+        # public copy stays one when platform.json alone fails: PlaceTest.)
+        self.assertIn("(first || fetch('platform.json', {cache: 'no-store'})).then(r => platformMode(r, lastAt))\n"
+                      "    .catch(() => lastAt?.public === true ? {remote: true, public: true} : {remote: true, public: false});", JS)
         # Set with LIVE in one place (setPlace), before the page is drawn with the server's features.
         # A public copy serves no files (LIVE stays false); everywhere else LIVE is true, as before.
         # No answer (null) is a page that does not save.
@@ -119,8 +122,9 @@ console.log(JSON.stringify([nextApp(three).id, nextApp(['quant', 'school'].map(a
         # Asked, answered or not: drawn again without it, so a page that cannot save still says so.
         # (Answered, it is drawn by took or refresh, above; one drawn from a copy goes back to what
         # it is without the copy.)
-        self.assertRegex(JS, r"\}, \(\) => \{\s*(//[^\n]*\s*)*PROBING = false;\s*if \(copy\) forgetCopy\(\); else render\(\);\s*\}\)\.finally\(\(\) => \{\s*"
-                             r"if \(!copy && !PHONE\) \{ showSyncbox\(\); emit\('ready'\); \}")
+        # (And it asks again by itself, saying so: PlaceTest.)
+        self.assertRegex(JS, r"\}, \(\) => \{\s*(//[^\n]*\s*)*asking = false;\s*unreached = !PHONE;\s*PROBING = false;\s*if \(copy\) forgetCopy\(\); else render\(\);\s*askAgain\(\);\s*"
+                             r"\}\)\.finally\(\(\) => \{\s*(//[^\n]*\s*)*if \(!copy && !PHONE\) \{ showSyncbox\(\); emit\('ready'\); \}")
 
     def test_a_task_is_kept_at_the_top_or_in_the_list_as_chosen(self):
         html = (REPO / "dashboard.html").read_text(encoding="utf-8")
@@ -218,7 +222,7 @@ class PlannerPageTest(unittest.TestCase):
         # A server that does not serve planner.js: no planner rather than an empty Day view.
         self.assertIn("if (!window.SchoolHub.plannerLoaded && plannerState === 'unknown') window.SchoolHub.setPlanner('off');", JS)
         # Rows drag and the drawer offers Plan it only with the planner, and only for open items.
-        self.assertIn("const draggable = a => plannerState === 'on' && !isDone(a);", JS)
+        self.assertIn("const draggable = a => plannerState === 'on' && !TOUCH.matches && !isDone(a);", JS)
         self.assertIn("${plannerState === 'on' && !isDone(a) ? `<button type=\"button\" class=\"btn\" data-plan-it=", JS)
 
     def test_planner_hides_where_it_cannot_save(self):
@@ -240,7 +244,8 @@ class PlannerPageTest(unittest.TestCase):
     def test_planner_scale_and_keys(self):
         # The fixed 48 px an hour is gone: the hour is fitted to the room (docs/planner.md, "the whole
         # day always in view"), never under 22 px, blocks at least 20 px, words under 70 px a column.
-        self.assertNotIn("HOUR_PX = 48", PLANNER)
+        # (A phone's least hour, TOUCH_HOUR_PX, is 48 px: PhoneDayTest.)
+        self.assertNotRegex(PLANNER, r"\bHOUR_PX = 48")
         self.assertNotRegex(PLANNER, r"\bHOUR_PX\b")
         self.assertIn("const MIN_HOUR_PX = 22;", PLANNER)
         self.assertIn("const DENSE_HOUR_PX = 30;", PLANNER)
@@ -1718,6 +1723,117 @@ console.log(JSON.stringify(out));
         self.assertEqual(w["prevented"], 6)
         # The date's three lengths.
         self.assertRegex(w["heading"], r'<span class="long">Thursday, November 12</span><span class="short">Thu, Nov 12</span><span class="tiny">Nov 12</span>')
+
+
+PHONE_CSS_START, PHONE_CSS_END = "/* ---- the day planner on a phone ---- */", "/* ---- end of the day planner on a phone ---- */"
+
+
+class PhoneDayTest(unittest.TestCase):
+    """The day planner on a phone (a screen worked by touch alone): hours tall enough for a finger,
+    resize handles drawn, things due named, a long press to make a block, a typed to-do kept by Save,
+    and a meal's buttons that fit. A Mac, a desktop browser and a narrow window keep it as it was."""
+
+    def css(self):
+        return HTML[HTML.index(PHONE_CSS_START):HTML.index(PHONE_CSS_END)]
+
+    def test_only_a_screen_worked_by_touch_alone_changes(self):
+        self.assertIn("const TOUCH = matchMedia('(hover: none) and (pointer: coarse)');", PLANNER)
+        # The hour: TOUCH_HOUR_PX there, MIN_HOUR_PX everywhere else, as before.
+        self.assertIn("const TOUCH_HOUR_PX = 48;", PLANNER)
+        self.assertIn("fitHour(room - TIME_PAD - (padBottom - 7), s.day_end - s.day_start, TOUCH.matches ? TOUCH_HOUR_PX : MIN_HOUR_PX));", PLANNER)
+        self.assertIn("function fitHour(room, hours, least = MIN_HOUR_PX){", PLANNER)
+        # Every new touch rule is under the media query of a touch-only screen; only the meal's
+        # buttons go by width, which a narrow Mac window shares and where they also did not fit.
+        css = self.css()
+        touch = css[css.index("@media (hover:none) and (pointer:coarse){"):css.index("@media (max-width:430px){")]
+        for rule in (".pblock[data-grips] .pb-rs{", ".pflag .pf-name{display:inline}", '.page[data-view="day"] ~ .fab:not([hidden]){display:grid}'):
+            self.assertIn(rule, touch)
+        self.assertEqual(css.count("@media"), 2)
+        # The desktop's own rules stay: the name on hover or focus, handles of 7 px shown on hover.
+        self.assertIn(".pflag-wrap:is(:hover,:focus-within) .pf-name{display:inline}", HTML)
+        self.assertIn(".pb-rs{position:absolute;left:0;right:0;z-index:2;height:7px;cursor:ns-resize}", HTML)
+        self.assertIn(".pblock:hover .pb-rs::after{opacity:.4}", HTML)
+
+    def test_its_colours_are_the_pages_own_tokens(self):
+        self.assertNotRegex(self.css(), r"#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(")
+
+    def test_the_handles_are_drawn_where_a_finger_can_hold_them(self):
+        self.assertIn("const TWO_GRIPS_PX = 70, ONE_GRIP_PX = 44, GRIP_COL_PX = 130;", PLANNER)
+        self.assertIn("b.dataset.grips = b.classList.contains('nar') || b.offsetWidth < GRIP_COL_PX ? 0 : h >= TWO_GRIPS_PX ? 2 : h >= ONE_GRIP_PX ? 1 : 0;", PLANNER)
+        self.assertIn("if (TOUCH.matches) for (const b of grid.querySelectorAll('.pblock[data-ref]')) {", PLANNER)
+        css = self.css()
+        self.assertIn("width:48px;height:24px", css)
+        self.assertIn(".pblock[data-grips] .pb-rs::after{display:block;width:24px;height:4px;margin-left:-12px;opacity:.45}", css)
+        self.assertIn('.pblock[data-grips="0"] .pb-rs,.pblock[data-grips="1"] .pb-rs.top{display:none}', css)
+        # Which handle is held still decides the drag, as with a mouse.
+        self.assertIn("drag = {mode: entry ? e.target.closest('.pb-rs')?.dataset.edge || 'move' : 'create'", PLANNER)
+
+    def test_a_handle_leaves_a_blocks_middle_and_its_boxes_alone(self):
+        # The numbers the handles are drawn with, read from the CSS and planner.js.
+        css = self.css()
+        size = re.search(r"\.pblock\[data-grips\] \.pb-rs\{left:50%;right:auto;width:(\d+)px;height:(\d+)px;margin-left:-\d+px\}", css)
+        corner = re.search(r"\.pblock\[data-grips\] \.pb-rs\.bottom\{left:auto;right:(\d+)px;margin-left:0\}", css)
+        consts = re.search(r"const TOUCH_HOUR_PX = (\d+);\n  const TWO_GRIPS_PX = (\d+), ONE_GRIP_PX = (\d+), GRIP_COL_PX = (\d+);", PLANNER)
+        self.assertTrue(size and corner and consts)
+        hw, hh, right = int(size[1]), int(size[2]), int(corner[1])
+        hour, two, one, col = map(int, consts.groups())
+        # A block of an hour (an hour less the 2 px gap between blocks) has its bottom handle.
+        self.assertGreaterEqual(hour - 2, one)
+        # Its middle, where a long press moves it, is in no handle on any block that has one: the
+        # bottom one starts right of the middle; the top one, only from TWO_GRIPS_PX, ends above it.
+        for w in range(col, 400):
+            self.assertGreater(w - right - hw, w / 2 + 8)
+        self.assertGreater(two / 2, hh)
+        # Nor does it reach a to-do's box: its right edge, at its widest (a block's left padding, the
+        # items panel's margin and padding, the box) is left of the handle on the narrowest block.
+        box_right = 7 + 27 + 6 + 14
+        self.assertGreater(col - right - hw, box_right)
+        # On a phone a flag's name is cut short, not reaching far over the blocks.
+        self.assertIn(".pflag-wrap{max-width:calc(var(--lane, 92px) + 56px)}", css)
+        self.assertNotIn("min(64%", css)
+
+    def test_a_tap_on_empty_time_makes_nothing_and_a_near_miss_opens_the_block(self):
+        self.assertIn("if (d.touch && !d.armed && TOUCH.matches) {", PLANNER)
+        self.assertIn("return near ? openDetails(near.entry, near.el) : holdHint();", PLANNER)
+        # A long press held still shows the hour its release makes (a mouse's click makes the same).
+        self.assertIn("else if (TOUCH.matches) { const start = dropStart(drag.anchor); showGhost(start, start + 60, 'deep', KIND_NAME.deep); }", PLANNER)
+        # A mouse and a touch elsewhere make a block as they always did.
+        self.assertIn("else { drag.lastY = drag.y; drag.moved = true; update(); }", PLANNER)
+        self.assertIn("if (!d.armed && !d.touch) return;", PLANNER)
+
+    @unittest.skipUnless(NODE, "Node is not installed")
+    def test_the_hour_and_the_near_miss_behave(self):
+        near = PLANNER[PLANNER.index("  function nearBlock(x, y){"):PLANNER.index("  // A tap on empty time makes nothing on a phone")]
+        fit = PLANNER[PLANNER.index("  function fitHour("):PLANNER.index("  // Every how many hours a label is written")]
+        out = run_node(PLANNER[PLANNER.index(PLAN_START):PLANNER.index(PLAN_END)] + fit + near + """
+const box = (ref, left, top, right, bottom) => ({dataset: {ref}, getBoundingClientRect: () => ({left, top, right, bottom})});
+const grid = {querySelectorAll: () => [box('a', 100, 100, 300, 122), box('b', 100, 140, 300, 186), box('gone', 100, 300, 300, 320)]};
+const entryByRef = ref => ref === 'gone' ? null : {ref};
+const hit = (x, y) => nearBlock(x, y)?.entry.ref ?? null;
+console.log(JSON.stringify({
+  fit: [fitHour(700, 19, TOUCH_HOUR_PX), fitHour(1000, 19, TOUCH_HOUR_PX), fitHour(700, 19)],
+  near: [hit(200, 110), hit(200, 130), hit(200, 133), hit(200, 160), hit(200, 200), hit(200, 201), hit(310, 110), hit(200, 310), hit(50, 110)],
+}));
+""")
+        # 48 px an hour on a phone, scrolling; more where the room has it; elsewhere as before.
+        self.assertEqual(out["fit"], [{"px": 48, "scroll": True}, {"px": 52, "scroll": False}, {"px": 36, "scroll": False}])
+        # Inside a block, or within 14 px of it, the nearer one; farther, or a block not in the plan, none.
+        self.assertEqual(out["near"], ["a", "a", "b", "b", "b", None, "a", None, None])
+
+    def test_save_keeps_a_typed_to_do(self):
+        save = PLANNER[PLANNER.index("  function saveEditor(){"):PLANNER.index("    const start = readTime(F.bStart, false), end = readTime(F.bEnd, true);\n    const bad = spanError(start, end);\n    if (bad) return showErr(F.bErr, bad, F.bEnd);\n    const {date, ref, items} = ed")]
+        self.assertIn("const typed = cut(F.bNewItem.value, LIMIT.text);", save)
+        self.assertIn("if (!addEdItem({id: newId(), kind: 'own', text: typed, done: false})) return false;", save)
+        self.assertIn("F.bNewItem.value = '';", save)
+        # Enter still adds it at once, as before.
+        self.assertIn("if (text && addEdItem({id: newId(), kind: 'own', text, done: false})) F.bNewItem.value = '';", PLANNER)
+
+    def test_a_meals_buttons_fit_a_phone(self):
+        css = self.css()
+        self.assertIn("#blockDialog:has(#bPlaceField:not([hidden])) .buttons{flex-wrap:wrap;row-gap:0}", css)
+        self.assertIn("#blockDialog:has(#bPlaceField:not([hidden])) #bDelete:not([hidden]) + .grow{flex-basis:100%;height:8px}", css)
+        # The markup it counts on: Delete, the spacer, Cancel and Save.
+        self.assertIn('<div class="buttons"><button type="button" class="btn danger" id="bDelete">Delete</button><span class="grow"></span>', HTML)
 
 
 class BehaviourTest(unittest.TestCase):
@@ -3927,10 +4043,11 @@ class KeptSourceTest(unittest.TestCase):
         self.assertIn("if (typeof text !== 'string' || text.length > KEPT_MAX[what]) throw new Error('not kept');", JS)
 
     def test_storage_is_only_touched_where_a_failure_is_caught(self):
-        # localStorage in two places only, each call inside a try; the planner keeps its copy
+        # localStorage in three places only, each call inside a try; the planner keeps its copy
         # through dashboard.js.
         outside = JS[:JS.index(KEPT_START)] + JS[JS.index(KEPT_END):]
-        self.assertEqual(outside.count("localStorage"), 2)   # mem.get and mem.set, as before
+        # mem.get and mem.set, as before, and platformCache, which reads the platform's own word.
+        self.assertEqual(outside.count("localStorage"), 3)
         for line in JS.splitlines():
             if "localStorage." in line and "try" not in line:
                 self.assertRegex(line, r"^\s{6,}", line)     # inside a method's try block
@@ -4292,7 +4409,7 @@ def boot_sections():
     marks = re.search(r"^const syncedMarks = .*\nlet marks = \{\};$", JS, re.M).group(0)
     return "\n".join([
         "let D = window.SCHOOL_DATA || null;", kept_section(), JS[JS.index(ASK_START):JS.index(ASK_END)], source_of("const backend = {"),
-        source_of("async function platformMode(r){"), marks, source_of("function refreshTasks(next){"), source_of("function took(m, t){"),
+        source_of("async function platformMode(r, was){"), marks, source_of("function refreshTasks(next){"), source_of("function took(m, t){"),
         source_of("async function setMark(id, done, as){"), source_of("const unsavedMark = {};"), undo_section(),
         JS[JS.index(SYNC_START):JS.index(SYNC_END)], source_of("async function reloadState("), JS[JS.index(BACK_START):JS.index(BACK_END)],
         JS[JS.index(BOOT_START):]])
@@ -5002,12 +5119,15 @@ out.sync = net.log.filter(l => l.includes('sync') || l.includes('data.js'));
 out.watch = watch();
 out.live = LIVE;
 """
-        # A public copy, the phone site and a file on disk: api/sync is never asked, and no look waits.
-        public = boot(BOOT_SERVER + "there.sync = {running: false, data_at: 'G2'};", seen)
+        # The phone site and a file on disk: api/sync is never asked, and no look waits.
         phone = boot("PHONE = true; window.SCHOOL_DATA = DATA; there.sync = {running: false, data_at: 'G2'};", seen)
         disk = boot("LOCAL_FILES = true; window.SCHOOL_DATA = DATA;", seen)
-        for name, got in (("public", public), ("phone", phone), ("disk", disk)):
+        for name, got in (("phone", phone), ("disk", disk)):
             self.assertEqual([got["sync"], got["watch"], got["live"]], [[], [], False], name)
+        # A public copy looks only when it comes back on show, with no timer (StayingCurrentTest):
+        # here a newer sync, whose data.js it asks for.
+        public = boot(BOOT_SERVER + "there.sync = {running: false, data_at: 'G2'};", seen)
+        self.assertEqual([public["sync"], public["watch"], public["live"]], [["GET api/sync", "GET data.js"], [], False])
         # From another device through a platform, the Mac's server answers all the same.
         remote = boot(BOOT_MAC + "there.platform = {status: 200, body: {apps: [], remote: true}};", seen)
         self.assertEqual([set(remote["sync"]), remote["watch"], remote["live"]], [{"GET api/sync"}, [60000], True])
@@ -5037,7 +5157,7 @@ const document = {querySelectorAll: () => []};
 const window = {scrollX: 0, scrollY: 300, scrollTo(x, y){ said.push('to ' + x + ',' + y); this.scrollX = x; this.scrollY = y; }};
 let D = {}, plannerState = 'on', jumps = true;
 const shownView = () => 'upcoming', showSynced = () => {}, visible = () => [], focusKey = () => null, stats = () => 'S',
-  upcomingView = () => 'U', coursesView = () => 'C', markEmoji = () => {}, refocus = () => {},
+  upcomingView = () => 'U', coursesView = () => 'C', markEmoji = () => {}, refocus = () => {}, phoneRender = () => {},
   emit = what => said.push(what + ' at ' + window.scrollY);
 """ + source_of("function render") + """
 render();
@@ -5113,7 +5233,8 @@ await answerNow(); asked();
 window.on.pageshow({persisted: true}); await settle();
 out.restored = asked();
 """)
-        self.assertEqual(out["restored"], ["GET api/marks"])        # (then the tasks; never api/sync)
+        # (Then the tasks.) And whether the Mac has synced since: a phone keeps the page for days.
+        self.assertEqual(out["restored"], ["GET api/marks", "GET api/sync"])
 
     def test_where_it_is_wired(self):
         back = JS[JS.index(BACK_START):JS.index(BACK_END)]
@@ -5451,3 +5572,623 @@ console.log(JSON.stringify(out));
         # The list's styles use the page's tokens only.
         keys_css = HTML[HTML.index("dialog.task.keys{"):HTML.index("/* A field the keyboard moves to")]
         self.assertNotRegex(keys_css, r"#[0-9a-fA-F]{3,8}\b|rgb\(")
+
+
+# ---- School as an installed app, and staying current on a phone ----
+LOOKED = "const looked = () => asked().filter(l => l.includes('sync') || l.includes('data.js'));\n"
+ASK_TIMER = "const askTimers = () => later.filter(l => String(l.fn).includes('askAgain')).map(l => l.ms);\n" \
+            "const askNow = async () => { const i = later.findIndex(l => String(l.fn).includes('askAgain')); later.splice(i, 1)[0].fn(); await settle(); };\n"
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class StayingCurrentTest(unittest.TestCase):
+    """A page the phone keeps for days, with no reload control: each return takes in what changed,
+    a failed first answer is asked again, and a passing error does not change where the page is.
+    dashboard.js's own code under Node, as in WatchSyncTest."""
+
+    def test_a_public_copy_takes_a_newer_sync_when_it_comes_back(self):
+        out = boot(BOOT_SERVER, WATCH_STARTED + LOOKED + """
+// Back on show, nothing newer: the look itself, nothing drawn, no timer.
+there.sync = {running: false, data_at: 'G1'};
+show(false); show(true); await settle(); for (let i = 0; i < 3; i++) await answerNow();
+out.same = {looked: looked(), draws: draws.length - n, watch: watch()};
+// A newer sync by data_at: its data.js, taken in place, then the marks and tasks as stored now.
+there.sync = {running: false, data_at: 'G2'}; there.dataJs = asDataJs(NEXT);
+show(false); show(true); await settle(); for (let i = 0; i < 5; i++) await answerNow();
+out.newer = {looked: looked(), shown: shown().data, kept: keptNow('data').generated_at, watch: watch(), errors};
+// Out of view nothing is asked, and no timer runs while it is on show.
+show(false); await settle();
+out.hidden = {asked: asked(), timers: later.length};
+""")
+        self.assertEqual(out["start"], {"asked": ["GET platform.json", "GET api/marks", "GET api/tasks"], "watch": []})
+        self.assertEqual(out["same"], {"looked": ["GET api/sync"], "draws": 0, "watch": []})
+        self.assertEqual(out["newer"], {"looked": ["GET api/sync", "GET data.js"], "shown": "G2", "kept": "G2", "watch": [], "errors": []})
+        self.assertEqual(out["hidden"], {"asked": [], "timers": 0})
+
+    def test_without_data_at_the_time_the_sync_reached_the_site_decides(self):
+        # The public site's api/sync says finished_at: when the Mac's last sync reached it.
+        out = boot(BOOT_SERVER, WATCH_STARTED + LOOKED + """
+const back = async () => { show(false); show(true); await settle(); for (let i = 0; i < 5; i++) await answerNow(); return {looked: looked(), shown: shown().data}; };
+// Reached the site an hour before the page got its data.js: nothing to ask for.
+there.sync = {running: false, finished_at: new Date(Date.now() - 36e5).toISOString()};
+out.older = await back();
+// Reached it since: data.js is asked for once; holding the same sync, it changes nothing.
+there.sync = {running: false, finished_at: new Date(Date.now() + 1000).toISOString()}; there.dataJs = asDataJs(DATA);
+const drawn = draws.length;
+out.since = {...(await back()), draws: draws.length - drawn};
+out.again = await back();
+// The next sync to reach it is taken.
+there.sync = {running: false, finished_at: new Date(Date.now() + 2000).toISOString()}; there.dataJs = asDataJs(NEXT);
+out.next = await back();
+// None yet (a site the Mac has never synced to): nothing.
+there.sync = {running: false, finished_at: null};
+out.none = await back();
+""")
+        self.assertEqual(out["older"], {"looked": ["GET api/sync"], "shown": "G1"})
+        self.assertEqual(out["since"], {"looked": ["GET api/sync", "GET data.js"], "shown": "G1", "draws": 0})
+        self.assertEqual(out["again"], {"looked": ["GET api/sync"], "shown": "G1"})
+        self.assertEqual(out["next"], {"looked": ["GET api/sync", "GET data.js"], "shown": "G2"})
+        self.assertEqual(out["none"], {"looked": ["GET api/sync"], "shown": "G2"})
+
+    def test_a_tap_on_the_sync_time_asks_as_a_return_does(self):
+        out = boot(BOOT_SERVER, WATCH_STARTED + """
+window.on['qp:look'](); await settle();
+out.asked = asked().sort();
+""")
+        self.assertEqual(out["asked"], ["GET api/marks", "GET api/sync"])
+        self.assertIn("window.addEventListener('qp:look', backOnShow);", JS)
+        self.assertIn("if (el.id === 'sync') window.dispatchEvent(new Event('qp:look'));", BAR)
+
+    def test_a_failed_first_answer_is_asked_again(self):
+        out = boot(BOOT_SERVER + "there.down = true;\n", WATCHING + ASK_TIMER + """
+await answerNow();
+out.failed = {asked: asked(), unreached, write: WRITE, probing: PROBING, draws: draws.length, timers: askTimers(), events: [...events]};
+// Still down: asked again after the pause, and the pause grows.
+await askNow(); await answerNow();
+out.still = {asked: asked(), timers: askTimers()};
+// Back: the next try finds the page's place, and the page saves.
+there.down = false;
+await askNow(); await answerNow();
+out.back = {asked: asked(), unreached, write: WRITE, pub: PUBLIC, live: LIVE, fab: !els['#fab'].hidden, timers: askTimers(),
+  shown: shown(), events: events.filter(e => e === 'ready').length, kept: !!keptNow('state')};
+// Answered, it is never asked again: a return asks the marks and the sync, as always.
+show(false); show(true); await settle();
+out.later = asked().sort();
+""")
+        self.assertEqual(out["failed"]["asked"], ["GET platform.json", "GET api/marks", "GET api/tasks"])
+        self.assertEqual({k: out["failed"][k] for k in ("unreached", "write", "probing", "timers")},
+                         {"unreached": True, "write": None, "probing": False, "timers": [3000]})
+        self.assertEqual(out["still"], {"asked": ["GET platform.json", "GET api/marks", "GET api/tasks"], "timers": [10000]})
+        self.assertEqual(out["back"]["asked"], ["GET platform.json", "GET api/marks", "GET api/tasks"])
+        back = out["back"]
+        self.assertEqual([back["unreached"], back["write"], back["pub"], back["live"], back["fab"], back["timers"], back["kept"]],
+                         [False, "local", True, False, True, [], True])
+        self.assertEqual([back["shown"]["marks"], back["shown"]["tasks"]], ["a2", "task:aaaaaaaa"])
+        # 'ready' again with the place found, so the planner asks for the plan.
+        self.assertEqual(back["events"], 3)
+        self.assertEqual(out["later"], ["GET api/marks", "GET api/sync"])
+
+    def test_out_of_view_it_waits_and_asks_on_return_or_when_back_online(self):
+        out = boot(BOOT_SERVER + "there.down = true;\n", WATCHING + ASK_TIMER + """
+await answerNow(); asked();
+// Put away: the pause runs out and nothing is asked, and no further pause is set.
+show(false); await askNow();
+out.hidden = {asked: asked(), timers: askTimers()};
+// Back on show: asked at once (and only these: there is nowhere to ask for marks yet).
+show(true); await settle();
+out.shown = asked();
+await answerNow(); askTimers();
+// Back online: at once too.
+const t = later.findIndex(l => String(l.fn).includes('askAgain')); later.splice(t, 1);
+window.on.online(); await settle();
+out.online = asked();
+// Twice at once asks once.
+window.on.online(); await settle();
+out.twice = asked();
+there.down = false; await answerNow();
+out.saves = WRITE;
+""")
+        self.assertEqual(out["hidden"], {"asked": [], "timers": []})
+        self.assertEqual(out["shown"], ["GET platform.json", "GET api/marks", "GET api/tasks"])
+        self.assertEqual(out["online"], ["GET platform.json", "GET api/marks", "GET api/tasks"])
+        self.assertEqual(out["twice"], [])
+        self.assertEqual(out["saves"], "local")
+
+    def test_a_copy_drawn_page_that_was_not_answered_comes_back_when_it_is(self):
+        out = boot(BOOT_COPY + "there.down = true;\n", WATCHING + ASK_TIMER + """
+out.drawn = {write: WRITE, fab: !els['#fab'].hidden};
+await answerNow();
+out.failed = {write: WRITE, unreached, kept: keptNow('state'), plan: plannerState};
+there.down = false;
+await askNow(); await answerNow();
+out.back = {write: WRITE, pub: PUBLIC, fab: !els['#fab'].hidden, ready: events.filter(e => e === 'ready').length, kept: !!keptNow('state')};
+""")
+        self.assertEqual(out["drawn"], {"write": "local", "fab": True})
+        self.assertEqual(out["failed"], {"write": None, "unreached": True, "kept": None, "plan": "off"})
+        self.assertEqual(out["back"], {"write": "local", "pub": True, "fab": True, "ready": 2, "kept": True})
+
+    def test_the_page_says_it_will_try_again(self):
+        self.assertIn("    : unreached ? `<div class=\"banner\">School can't be reached right now, so ✓ marks and tasks can't be saved yet. It tries again by itself; this page shows the last sync.</div>`", JS)
+        self.assertLess(JS.index(": unreached ? `"), JS.index("Read-only view. Your files"))
+        # Never on the phone site, which has no server to ask again.
+        self.assertIn("    unreached = !PHONE;", JS)
+        self.assertIn("const ASK_AGAIN_MS = [3000, 10000, 30000, 60000, 300000];", JS)
+        self.assertIn("window.addEventListener('online', () => { askAgain(true); dataAgain(true); if (D && !dataAt && !unreached) lookAtSync(true); });", JS)
+
+    def test_a_public_copy_stays_one_when_platform_json_alone_fails(self):
+        seen = "await answerNow(); await answerNow();\nout.at = {pub: PUBLIC, live: LIVE, remote: REMOTE, write: WRITE, sync: !els['#syncBtn'].hidden};\n"
+        # Known to be public (the copy says so): a 503 for platform.json, or no answer, keeps it public.
+        for status in ("{status: 503}", "{status: 500}"):
+            got = boot(BOOT_COPY + f"there.platform = {status};\n", seen)
+            self.assertEqual(got["at"], {"pub": True, "live": False, "remote": True, "write": "local", "sync": False}, status)
+        # A first visit knows nothing: as before, another device.
+        got = boot(BOOT_SERVER + "there.platform = {status: 503};\n", seen)
+        self.assertEqual(got["at"], {"pub": False, "live": True, "remote": True, "write": "local", "sync": True})
+        # 204 (SchoolHub's own server) and 404 still say there is no platform.
+        got = boot(BOOT_COPY + "there.platform = {status: 204};\n", seen)
+        self.assertEqual(got["at"], {"pub": False, "live": True, "remote": False, "write": "local", "sync": True})
+        # How each answer is read, with and without a place known before.
+        out = run_node(source_of("async function platformMode(r, was){") + """
+const answer = status => ({status, json: async () => ({public: true})});
+(async () => console.log(JSON.stringify(await Promise.all([
+  platformMode(answer(503), {remote: true, public: true}), platformMode(answer(503), {remote: true, public: false}), platformMode(answer(503), null),
+  platformMode(answer(404), {remote: true, public: true}), platformMode(answer(204), {remote: true, public: true}), platformMode(answer(200), null)]))))();
+""")
+        self.assertEqual(out, [{"remote": True, "public": True}, {"remote": True, "public": False}, {"remote": True, "public": False},
+                               {"remote": False, "public": False}, {"remote": False, "public": False}, {"remote": True, "public": True}])
+
+    def test_with_no_copy_the_platforms_kept_word_keeps_it_public(self):
+        # A first School visit on the public site (Prep was used first, and wrote qp.platform).
+        seen = "await answerNow(); await answerNow();\nout.at = {pub: PUBLIC, live: LIVE, remote: REMOTE, write: WRITE, sync: !els['#syncBtn'].hidden};\n"
+        public = {"pub": True, "live": False, "remote": True, "write": "local", "sync": False}
+        other = {"pub": False, "live": True, "remote": True, "write": "local", "sync": True}
+        for kept, want in (("{apps: [], public: true}", public), ("{apps: [], remote: true}", other), ("{apps: [], public: 'true'}", other)):
+            got = boot(BOOT_SERVER + f"there.platform = {{status: 503}};\nstored.set('qp.platform', JSON.stringify({kept}));\n", seen)
+            self.assertEqual(got["at"], want, kept)
+        got = boot(BOOT_SERVER + "there.platform = {status: 503};\nstored.set('qp.platform', '{not json');\n", seen)
+        self.assertEqual(got["at"], other)
+        # No answer at all, as with no signal: the same.
+        got = boot(BOOT_SERVER + "there.platform = {status: 200, body: {apps: [], public: true}};\nstored.set('qp.platform', JSON.stringify({apps: [], public: true}));\n",
+                   "net.waiting.filter(q => q.url === 'platform.json').forEach(q => q.rej(new TypeError('Failed to fetch'))); net.waiting = net.waiting.filter(q => q.url !== 'platform.json');\n" + seen)
+        self.assertEqual(got["at"], public)
+        self.assertIn("  lastAt = copy?.at ?? platformCache();", JS)
+
+    def test_with_nothing_drawn_a_failed_data_js_is_asked_for_again(self):
+        out = boot("""
+there.marks = {a2: MARK('S1')};
+there.platform = {status: 200, body: {apps: [], public: true}};
+stored.set('qp.platform', JSON.stringify({apps: [], public: true}));
+""", WATCHING + """
+const dataTimers = () => later.filter(l => String(l.fn).includes('dataAgain')).map(l => l.ms);
+const runOut = async () => { const i = later.findIndex(l => String(l.fn).includes('dataAgain')); later.splice(i, 1)[0].fn(); await settle(); };
+script.on.error(); await settle();
+out.failed = {main: els['#main'].innerHTML, asked: asked(), timers: dataTimers(), draws: draws.length};
+// The pause runs out: asked, still not there, and the pause grows.
+await runOut(); out.still = {asked: asked()}; await answerNow(); out.still.timers = dataTimers();
+// Put away, the pause runs out and nothing is asked; back on show, asked at once.
+show(false); await runOut(); out.hidden = {asked: asked(), timers: dataTimers()};
+show(true); await settle(); out.back = asked(); await answerNow();
+// Back online, with data.js there now: read, and the page starts from it as a first visit does.
+there.dataJs = asDataJs(DATA);
+window.on.online(); await settle(); out.online = asked();
+await answerNow(); out.start = asked(); await answerNow();
+out.started = {shown: shown().data, write: WRITE, pub: PUBLIC, kept: keptNow('data')?.generated_at, timers: dataTimers()};
+// Started, it is not asked again: a return asks the marks and the sync, as always.
+show(false); show(true); await settle(); out.later = asked().sort();
+""")
+        self.assertEqual(out["failed"], {"main": "<p class=\"empty\">Couldn't load School. It tries again by itself, and when you come back.</p>",
+                                         "asked": [], "timers": [3000], "draws": 0})
+        self.assertEqual(out["still"], {"asked": ["GET data.js"], "timers": [10000]})
+        self.assertEqual(out["hidden"], {"asked": [], "timers": []})
+        self.assertEqual(out["back"], ["GET data.js"])
+        self.assertEqual(out["online"], ["GET data.js"])
+        self.assertEqual(out["start"], ["GET platform.json", "GET api/marks", "GET api/tasks"])
+        self.assertEqual(out["started"], {"shown": "G1", "write": "local", "pub": True, "kept": "G1", "timers": []})
+        self.assertEqual(out["later"], ["GET api/marks", "GET api/sync"])
+
+    def test_a_drawn_page_whose_data_js_failed_takes_the_sync_it_missed(self):
+        # The copy is shown, data.js fails at the load, and the newest sync reached the site before it.
+        setup = """
+keep('data', DATA);
+there.marks = {a2: MARK('S1')};
+there.platform = {status: 200, body: {apps: [], public: true}};
+"""
+        body = WATCHING + LOOKED + """
+await answerNow(); await answerNow();
+script.on.error(); await settle(); asked();
+there.sync = {running: false, finished_at: new Date(Date.now() - 36e5).toISOString()}; there.dataJs = asDataJs(NEXT);
+"""
+        out = boot(setup, body + """
+const back = async () => { show(false); show(true); await settle(); for (let i = 0; i < 5; i++) await answerNow(); return {looked: looked(), shown: shown().data}; };
+out.back = await back();
+// Read once, the same sync is not asked for again.
+out.again = await back();
+""")
+        self.assertEqual(out["back"], {"looked": ["GET api/sync", "GET data.js"], "shown": "G2"})
+        self.assertEqual(out["again"], {"looked": ["GET api/sync"], "shown": "G2"})
+        # Back online asks the same way, with no return.
+        out = boot(setup, body + "window.on.online(); await settle(); for (let i = 0; i < 5; i++) await answerNow(); out.online = {looked: looked(), shown: shown().data};")
+        self.assertEqual(out["online"], {"looked": ["GET api/sync", "GET data.js"], "shown": "G2"})
+
+    def test_bar_js_answer_serves_the_first_question(self):
+        out = boot(BOOT_SERVER + "window.schoolHubPlatform = Promise.resolve({ok: true, status: 200, json: async () => ({apps: [], public: true})});\n", """
+out.first = [...net.log];
+await answerNow();
+out.pub = PUBLIC;
+""")
+        self.assertEqual(out["first"], ["GET api/marks", "GET api/tasks"])
+        self.assertTrue(out["pub"])
+        self.assertIn("    window.schoolHubPlatform = askPlatform();", BAR)
+        self.assertIn("    const asked = fetch('platform.json', {cache: 'no-store'});\n    const copy = asked.then(r => r.clone());", BAR)
+        # Asked again for the switch once the page has reached the server after a failed start.
+        self.assertIn("window.addEventListener('qp:placed', () => { if (platformFailed) askPlatform(); });", BAR)
+        self.assertIn("if (again) window.dispatchEvent?.(new Event('qp:placed'));", JS)
+
+    def test_the_day_is_renewed_on_return(self):
+        section = JS[JS.index("// ---- a new day ----"):JS.index("// ---- end of a new day ----")]
+        out = run_node("""
+const dayKey = (d = new Date()) => d.toISOString().slice(0, 10);
+let now = new Date(Date.now() - 11 * 60000), shownDay = dayKey(), D = {}, open = false, tasks = null;
+const built = [], listeners = {};
+const dialogOpen = () => open;
+function refreshTasks(){ built.push(1); now = new Date(); shownDay = dayKey(now); }
+const setInterval = () => {};
+const document = {hidden: false, addEventListener: (t, fn) => { listeners[t] = fn; }};
+const window = {addEventListener: (t, fn) => { listeners['w:' + t] = fn; }};
+""" + section + """
+const n = () => built.splice(0).length;
+const out = {};
+newDay(); out.tick = n();                             // the minute's tick, the same day: nothing
+listeners.visibilitychange(); out.back = n();         // back after 11 minutes: built for now
+listeners.visibilitychange(); out.soon = n();         // and not again straight after
+now = new Date(Date.now() - 11 * 60000); open = true;
+listeners['w:pageshow']({persisted: true}); out.form = n();   // never under an open form
+open = false;
+listeners['w:pageshow']({persisted: false}); out.notCached = n();
+listeners['w:pageshow']({persisted: true}); out.cached = n();
+shownDay = '2000-01-01'; newDay(); out.newDay = n();  // another day: built at the tick, as before
+console.log(JSON.stringify(out));
+""")
+        self.assertEqual(out, {"tick": 0, "back": 1, "soon": 0, "form": 0, "notCached": 0, "cached": 1, "newDay": 1})
+        # The list is dated by the moment it is built, not the page's load.
+        self.assertIn("let now = new Date();", JS)
+        self.assertIn("function rebuild(){\n  now = new Date();\n  shownDay = dayKey(now);", JS)
+        self.assertNotIn("const now = new Date();", JS)
+
+
+THEME_INIT = (REPO / "theme-init.js").read_text(encoding="utf-8")
+# A document for theme-init.js: the tags it finds and adds in <head>.
+INIT_DOC = """
+const head = [];
+const el = tag => ({tag, attrs: {}, set name(v){ this.attrs.name = v; }, set rel(v){ this.attrs.rel = v; }, set href(v){ this.attrs.href = v; },
+  setAttribute(k, v){ this.attrs[k] = v; }, getAttribute(k){ return this.attrs[k]; }});
+globalThis.document = {documentElement: el('html'), head: {appendChild: e => head.push(e)}, createElement: el,
+  querySelector: sel => { const m = sel.match(/^(\\w+)\\[(\\w+)="([^"]+)"\\]$/); return head.find(e => e.tag === m[1] && e.attrs[m[2]] === m[3]) || null; }};
+globalThis.matchMedia = () => ({matches: false});
+"""
+
+
+class InstalledAppTest(unittest.TestCase):
+    """School in the installed app on a phone: the platform's manifest and icon under /school/ only,
+    the phone's bar coloured as School's in each theme, School noted as the last app open, the page
+    loaded again after an hour away, the bar's targets sized for a finger, and the hover-only words
+    on a tap. The Mac and a desktop browser see none of it."""
+
+    def test_the_phones_bar_takes_schools_bar_colour_in_each_theme(self):
+        want = {theme: _theme_tokens(theme)["titlebar"] for theme in ("light", "dark", "red")}
+        self.assertIn(f"const BAR_COLOR = {{light: '{want['light']}', dark: '{want['dark']}', red: '{want['red']}'}};", BAR)
+        self.assertIn(f'{{ light: "{want["light"]}", dark: "{want["dark"]}", red: "{want["red"]}" }}[t]', THEME_INIT)
+        # Night's red has no blue, as everything at night.
+        self.assertTrue(want["red"].endswith("00"))
+        # Kept in step where the theme changes, beside the tab's icon.
+        self.assertIn("    if (bar && bar.getAttribute('content') !== BAR_COLOR[theme]) bar.setAttribute('content', BAR_COLOR[theme]);", BAR)
+
+    @unittest.skipUnless(NODE, "Node is not installed")
+    def test_the_platforms_manifest_and_icon_only_under_the_platform(self):
+        out = run_node(INIT_DOC + "const init = %s;\nconst out = {};\n" % json.dumps(THEME_INIT) + """
+for (const [where, path, theme] of [['platform', '/school/', 'dark'], ['index', '/school/index.html', 'light'], ['own', '/', 'light'],
+                                    ['phone', '/k3y/', 'night'], ['prefix', '/schoolhub/', 'light']]) {
+  head.length = 0;
+  globalThis.location = {pathname: path};
+  globalThis.localStorage = {getItem: () => theme};
+  new Function(init)();
+  out[where] = head.map(e => [e.tag, e.attrs.name || e.attrs.rel, e.attrs.content || e.attrs.href]);
+}
+// A theme-color already in the page is used, not added twice.
+head.length = 0; head.push(el('meta')); head[0].attrs.name = 'theme-color';
+globalThis.location = {pathname: '/'}; globalThis.localStorage = {getItem: () => 'dark'};
+new Function(init)();
+out.kept = [head.length, head[0].attrs.content];
+console.log(JSON.stringify(out));
+""")
+        manifest = [["link", "manifest", "/manifest.webmanifest"], ["link", "apple-touch-icon", "/apple-touch-icon.png"]]
+        self.assertEqual(out["platform"], [["meta", "theme-color", "#17181e"]] + manifest)
+        self.assertEqual(out["index"], [["meta", "theme-color", "#fcfcfd"]] + manifest)
+        # SchoolHub's own server, the phone site and anything else: no platform, so no manifest.
+        self.assertEqual(out["own"], [["meta", "theme-color", "#fcfcfd"]])
+        self.assertEqual(out["phone"], [["meta", "theme-color", "#fcfcfd"]])
+        self.assertEqual(out["prefix"], [["meta", "theme-color", "#fcfcfd"]])
+        self.assertEqual(out["kept"], [1, "#17181e"])
+
+    def test_the_head_stays_free_of_script_and_of_the_colour_scheme_query(self):
+        # The tags are theme-init.js's: a tag in the page would name the manifest on SchoolHub's own
+        # server and from disk too, and could not follow the theme without a colour-scheme query.
+        head = HTML[:HTML.index("</head>")]
+        for tag in ('rel="manifest"', 'rel="apple-touch-icon"', 'name="theme-color"'):
+            self.assertNotIn(tag, head)
+        self.assertNotIn("prefers-color-scheme", HTML)
+        self.assertEqual(head.count("<script"), 2)
+
+    @unittest.skipUnless(NODE, "Node is not installed")
+    def test_the_platform_cache_keeps_the_answers_marks(self):
+        keep = re.search(r"^  const keepPlatform = \(apps, p\) => \{.*?^  \};$", BAR, re.M | re.S).group(0)
+        out = run_node("""
+const PLATFORM_KEY = 'qp.platform', stored = {};
+const localStorage = {setItem: (k, v) => { stored[k] = v; }, removeItem: k => { delete stored[k]; }};
+""" + keep + """
+const apps = [{id: 'quant', name: 'Prep', href: '/'}, {id: 'school', name: 'School', href: '/school/'}];
+const out = [];
+for (const p of [{apps, public: true}, {apps, remote: true}, {apps, public: 'true', remote: 1}, {apps}]) { keepPlatform(apps, p); out.push(JSON.parse(stored[PLATFORM_KEY])); }
+keepPlatform(null, null); out.push(stored[PLATFORM_KEY] ?? null);
+console.log(JSON.stringify(out));
+""")
+        self.assertEqual(out, [{"apps": [{"id": "quant", "name": "Prep", "href": "/"}, {"id": "school", "name": "School", "href": "/school/"}], "public": True},
+                               {"apps": out[1]["apps"], "remote": True}, {"apps": out[2]["apps"]}, {"apps": out[3]["apps"]}, None])
+        self.assertIn("      keepPlatform(apps, p);", BAR)
+
+    @unittest.skipUnless(NODE, "Node is not installed")
+    def test_in_the_installed_app_it_notes_itself_and_loads_again_after_an_hour(self):
+        section = BAR[BAR.index("  // ---- the installed app ----"):BAR.index("  // ---- what a pointer reads on hover, on a tap ----")]
+        out = run_node("""
+const run = ({standalone = true, path = '/school/', phone = false, open = null, focus = 'BODY'} = {}) => {
+  let clock = 1e12, reloads = 0;
+  const stored = {}, listeners = {};
+  const Date = {now: () => clock};
+  const navigator = {standalone};
+  const matchMedia = () => ({matches: false});
+  const location = {pathname: path, reload(){ reloads++; }};
+  const localStorage = {setItem: (k, v) => { stored[k] = v; }};
+  const sessionStorage = {setItem: (k, v) => { stored['session:' + k] = v; }};
+  const document = {hidden: false, activeElement: {tagName: focus}, querySelector: sel => open && sel.includes(open) ? {} : null,
+    addEventListener: (t, fn) => { listeners[t] = fn; }};
+  const window = {addEventListener: (t, fn) => { listeners['w:' + t] = fn; }};
+  const typingIn = el => ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName);
+  const PHONE = phone, LOCAL_FILES = false;
+  eval(%s);
+  const away = min => { document.hidden = true; listeners.visibilitychange?.(); clock += min * 60000; document.hidden = false; listeners.visibilitychange?.(); };
+  away(30); const short = reloads;
+  away(61); const long = reloads;
+  return {last: stored['qp.last'] ?? null, launched: stored['session:qp.launched'] ?? null, short, long};
+};
+console.log(JSON.stringify({
+  app: run(), browser: run({standalone: false}), own: run({path: '/'}), phone: run({path: '/k3y/', phone: true}),
+  dialog: run({open: 'dialog[open]'}), drawer: run({open: '#drawer'}), typing: run({focus: 'TEXTAREA'}),
+}));
+""" % json.dumps(section))
+        # The launch is marked as had, so QuantPrep's theme-init.js does not send a tap on Prep back here.
+        self.assertEqual(out["app"], {"last": "/school/", "launched": "1", "short": 0, "long": 1})
+        self.assertEqual(out["browser"], {"last": None, "launched": None, "short": 0, "long": 0})
+        # Installed elsewhere (SchoolHub's own server, the phone site): fresh, but not the platform's last app.
+        self.assertEqual(out["own"], {"last": None, "launched": None, "short": 0, "long": 1})
+        self.assertEqual(out["phone"], {"last": None, "launched": None, "short": 0, "long": 1})
+        for busy in ("dialog", "drawer", "typing"):
+            self.assertEqual(out[busy], {"last": "/school/", "launched": "1", "short": 0, "long": 0}, busy)
+
+    def test_hover_words_on_a_tap_only_on_a_touch_screen(self):
+        self.assertIn("const TOUCH = typeof matchMedia === 'function' ? matchMedia('(hover: none) and (pointer: coarse)') : null;", BAR)
+        self.assertIn("    if (!TOUCH?.matches) return;\n    const el = e.target.closest?.('#sync, .offsite');", BAR)
+        self.assertIn("window.SchoolHub.toast((el.id === 'sync' ? 'Synced ' : '') + words.split('\\n').join(' · '), null);", BAR)
+
+    def test_a_first_visit_says_it_is_loading(self):
+        self.assertIn("if (!main.firstChild && !window.SCHOOL_DATA) main.innerHTML = '<p class=\"empty\">Loading…</p>';", BAR)
+        self.assertIn('<div class="left"><div id="main"></div></div>', HTML)
+
+    def test_the_bars_targets_on_a_touch_screen(self):
+        touch = HTML[HTML.index("@media (hover:none) and (pointer:coarse){\n  .app-seg a,"):]
+        touch = touch[:touch.index("\n}\n")]
+        self.assertIn(".app-seg a::after{inset:-9px 0}", touch)                       # 26 px drawn, 44 to a finger
+        self.assertIn(".views button::after,.bar-end #syncBtn::after{inset:-6px 0}", touch)   # 32 px drawn
+        self.assertIn(".theme-btn::after{inset:-6px -2px}", touch)
+        self.assertIn(".notes-btn::after{left:-8px}", touch)
+        self.assertIn("#themeBtn::after{right:-10px}", touch)
+        rows = "@media (max-width:640px) and (hover:none) and (pointer:coarse){\n  :root{--bar-height:88px}\n  .bar{grid-template-rows:44px 44px;row-gap:0;padding-top:0;padding-bottom:0}\n}"
+        self.assertIn(rows, HTML)
+        # After the phone's own bar rules, which a narrow Mac window keeps as they were.
+        self.assertLess(HTML.index("  :root{--gutter:16px;--bar-height:82px}"), HTML.index(rows))
+        # The switch fits its column beside Notes and the theme button on every phone.
+        self.assertIn("@media (max-width:390px){.app-seg a{padding:0 9px}}\n@media (max-width:340px){.app-seg a{padding:0 7px}}", HTML)
+        for css in (touch, rows):
+            self.assertNotRegex(css, r"#[0-9a-fA-F]{3,8}\b|\brgba?\(|var\(")
+
+
+# ---- School on a phone (dashboard.js "on a phone", dashboard.html "School on a phone") ----
+SCHOOL_PHONE_START, SCHOOL_PHONE_END = "// ---- on a phone ----", "// ---- end of on a phone ----"
+SCHOOL_PHONE_CSS_START, SCHOOL_PHONE_CSS_END = "/* ---- School on a phone ---- */", "/* ---- end of School on a phone ---- */"
+SCHOOL_TOUCH_MEDIA = "@media (hover:none) and (pointer:coarse){"
+
+
+def school_phone_section():
+    return JS[JS.index(SCHOOL_PHONE_START):JS.index(SCHOOL_PHONE_END)]
+
+
+def school_phone_css():
+    return HTML[HTML.index(SCHOOL_PHONE_CSS_START):HTML.index(SCHOOL_PHONE_CSS_END)]
+
+
+class PhoneSourceTest(unittest.TestCase):
+    """What a phone gets and a Mac or a desktop browser does not: everything for a finger asks for a
+    screen worked by touch alone, never the width."""
+
+    def test_touch_is_asked_for_by_what_a_finger_works(self):
+        self.assertIn("const TOUCH = matchMedia('(hover: none) and (pointer: coarse)');", JS)
+        section = school_phone_section()
+        # Each part asks first: the layers, the guards, the keyboard and the Undo and Redo buttons.
+        self.assertIn("  if (!TOUCH.matches || layers.some(l => l.el === el)) return;", section)
+        self.assertIn("  if (!TOUCH.matches || !e.isTrusted || e.detail === 0) return;", section)
+        self.assertIn("  if (!TOUCH.matches || !editingText(f) || !f.closest?.('dialog.task') || keyAt > downAt) return;", section)
+        self.assertIn("if (TOUCH.matches && window.visualViewport) {", section)
+        self.assertIn("if (TOUCH.matches) {\n  undoPad = document.createElement('div');", section)
+        # History is touched only in the layers' two functions and their popstate.
+        self.assertEqual(JS.count("history.pushState("), 2)
+        self.assertEqual(JS.count("history.back();"), 1)
+        self.assertEqual(len(re.findall(r"(?m)^[^/\n]*\bhistory\.", JS)), 3)
+        # It sits above what planner.js uses and outside every part the Node tests run.
+        self.assertLess(JS.index(SCHOOL_PHONE_END), JS.index("// ---- what planner.js uses ----"))
+        self.assertGreater(JS.index(SCHOOL_PHONE_START), JS.index("// ---- end of back on show ----"))
+
+    def test_rows_are_not_dragged_on_a_phone(self):
+        self.assertIn("const draggable = a => plannerState === 'on' && !TOUCH.matches && !isDone(a);", JS)
+        self.assertIn("TOUCH.addEventListener?.('change', () => render());", JS)
+
+    def test_no_field_takes_the_focus_by_itself_on_a_phone(self):
+        self.assertIn("  if (!TOUCH.matches) $('#tName').focus();", JS)
+        self.assertIn("  if (notesPop.dataset.pane === 'note' && !TOUCH.matches) ntText.focus();", JS)
+        self.assertIn("  if (n) { showNote(n); if (!TOUCH.matches) ntText.focus(); }", JS)
+        # A new note is for typing in: its field takes the focus on a phone too.
+        self.assertIn("function newNote(){\n  saveNote();\n  showNote({id: noteId(), text: ''});\n  ntText.focus();\n}", JS)
+        # The keyboard's own arrows or Next move from one field of a form to the next: let through.
+        self.assertIn("  if (editingText(e.relatedTarget) && e.relatedTarget.closest('dialog') === f.closest('dialog')) return;\n  if (lastDown", school_phone_section())
+
+    def test_notes_cover_follows_the_width(self):
+        # Turned on its side with Notes open, the page behind the small window is live again.
+        self.assertIn("matchMedia('(max-width:600px)').addEventListener?.('change', notesCover);", JS)
+        self.assertIn("const notesNarrow = () => matchMedia('(max-width:600px)').matches;", JS)
+
+    def test_undo_and_redo_are_buttons_on_a_phone(self):
+        section = school_phone_section()
+        self.assertIn("if (b && !b.disabled) requestStep(b.dataset.undo);", section)
+        self.assertIn("b.disabled = !steps[b.dataset.undo].length;", section)
+        self.assertIn("  undoPad.hidden = !WRITE;", section)
+        # Told wherever the steps change: a step made, one whose save failed, a way back taken.
+        undo = undo_section()
+        self.assertEqual(undo.count("stepsChanged();"), 2 + 1)
+        self.assertIn("} finally { travels--; stepsChanged(); }", undo)
+        self.assertIn("const BEHIND_DRAWER = ['.topbar', 'main', '#fab', '#undoPad'];", JS)
+
+    def test_notes_fill_a_phone_with_done_and_new(self):
+        self.assertEqual(HTML.count('<button type="button" class="nt-done" data-nt-done>Done</button>'), 2)
+        self.assertEqual(HTML.count("data-nt-new"), 1)
+        self.assertIn("  if (e.target.closest('[data-nt-done]')) closeNotes();", JS)
+        self.assertIn("  showNote(next || null, notesNarrow() ? 'list' : 'note');", JS)
+        css = school_phone_css()
+        self.assertIn("dialog.notes{inset:var(--vv-top,0px) 0 auto 0;width:auto;height:100dvh;height:var(--vv-h,100dvh);", css)
+        self.assertIn("#ntText{font-size:16px;", css)
+        # Where the page has turned out not to save, the Notes button goes, as the + button does.
+        self.assertIn("  if (WRITE !== 'local' && !notesBtn.hidden) { notesBtn.hidden = true; closeNotes(); }", JS)
+
+    def test_the_css_for_a_phone(self):
+        css = school_phone_css()
+        touch = css[css.index(SCHOOL_TOUCH_MEDIA):]
+        # Only the page's tokens: every theme, Night's red too.
+        self.assertNotRegex(css, r"#[0-9a-fA-F]{3,8}\b|\brgba?\(|hsla?\(")
+        # 16 px fields, sheets in what the keyboard leaves, and the app's base rules, all on touch alone.
+        for rule in ("dialog.task :is(input,select,textarea),#ntText{font-size:16px}",
+                     "dialog.task{inset:var(--vv-top,0px) 0 var(--kb,0px) 0;max-height:calc(var(--vv-h,100dvh) - 12px)}",
+                     ".toast{translate:0 calc(-1 * var(--kb,0px))}",
+                     "html{-webkit-text-size-adjust:100%;text-size-adjust:100%;-webkit-tap-highlight-color:transparent;touch-action:manipulation}",
+                     '.row,.courses .row{grid-template-columns:minmax(0,1fr) auto auto 32px;grid-template-areas:"name name pill check" "chip due due check"}'):
+            self.assertIn(rule, touch)
+        # The drawer's Close stays in sight, its own; the details card's is left as it was.
+        self.assertIn("aside > .close{position:fixed;", css)
+        self.assertIn("dialog.pdetail .close{top:12px;right:12px}", HTML)
+        # The html rule Prep's bar is held to still begins as it did.
+        self.assertRegex(HTML, r"(?m)^html\{overflow-y:scroll;")
+
+    def test_hover_looks_only_where_a_pointer_hovers(self):
+        for rule in (".row:hover{", ".row:hover .grip{", ".check:hover{", ".btn:hover{", ".btn.primary:hover{", ".fab:hover{",
+                     ".close:hover{", ".nt-icon:hover{", ".nt-list button:hover{", ".clist button:hover{", ".chead > a:hover{", ".done-toggle:hover{"):
+            self.assertIn("@media (hover:hover){" + rule, HTML, rule)
+            self.assertEqual(len(re.findall(r"(?m)^" + re.escape(rule), HTML)), 0, rule)
+
+
+@unittest.skipUnless(NODE, "Node is not installed")
+class PhoneLayersTest(unittest.TestCase):
+    """The layers and Back (dashboard.js "on a phone"), run under Node with a stand-in history whose
+    back() answers later, as a browser's does."""
+
+    def run_layers(self, body, touch=True):
+        section = school_phone_section()
+        layers = section[section.index("const layers = [];"):section.index("// Taps.")]
+        return run_node("""
+const TOUCH = {matches: %s};
+const log = [], on = {}, waiting = [];
+const window = {addEventListener: (type, fn) => { on[type] = fn; }};
+const document = {addEventListener(){}};
+class HTMLDialogElement {}
+const notesPop = {};
+const closeNotes = () => log.push('notes closed');
+const changedForms = new Set();
+// A browser's history: entries above the page's own, and back() answered on a later turn.
+const history = {depth: 0, pushState(){ this.depth++; log.push('push'); },
+  back(){ waiting.push(() => { this.depth--; on.popstate(); }); }};
+const turn = async () => { while (waiting.length) { waiting.shift()(); await null; } };
+// The learner's Back: the same, from outside the page.
+const Back = async () => { history.depth--; on.popstate(); await turn(); };
+const el = name => ({name});
+""" % ("true" if touch else "false") + layers + """
+const out = {};
+(async () => {
+""" + body + """
+console.log(JSON.stringify(out));
+})();
+""")
+
+    def test_back_closes_the_layer_on_top_and_closing_takes_its_entry_back(self):
+        out = self.run_layers("""
+const drawer = el('drawer'), form = el('form');
+layerOpened(drawer, () => { log.push('drawer closed'); layerClosed(drawer); });
+layerOpened(form, () => { log.push('form closed'); layerClosed(form); });
+layerOpened(form, () => {});                       // told twice (toggle, and the page): one entry
+out.open = {depth: history.depth, layers: layers.length};
+log.length = 0;
+await Back();
+out.back = {depth: history.depth, layers: layers.length, log: log.splice(0)};
+// The drawer closed by its own button: its entry is taken back, and that popstate is no Back.
+layerClosed(drawer);
+await turn();
+out.closed = {depth: history.depth, layers: layers.length, log: log.splice(0)};
+""")
+        self.assertEqual(out["open"], {"depth": 2, "layers": 2})
+        self.assertEqual(out["back"], {"depth": 1, "layers": 1, "log": ["form closed"]})
+        self.assertEqual(out["closed"], {"depth": 0, "layers": 0, "log": []})
+
+    def test_a_layer_opened_while_an_entry_is_taken_back_follows_it(self):
+        # A block's details closed and its editor opened at once (Edit): the editor's entry is made
+        # once the details' is gone, so the count stays one.
+        out = self.run_layers("""
+const details = el('details'), editor = el('editor');
+layerOpened(details, () => {});
+layerClosed(details);
+layerOpened(editor, () => { log.push('editor closed'); layerClosed(editor); });
+out.during = {depth: history.depth, unmade: unmade.length};
+await turn();
+out.after = {depth: history.depth, layers: layers.map(l => l.el.name)};
+await Back();
+out.back = {depth: history.depth, layers: layers.length, log: log.splice(0).filter(l => l !== 'push')};
+""")
+        self.assertEqual(out["during"], {"depth": 1, "unmade": 1})
+        self.assertEqual(out["after"], {"depth": 1, "layers": ["editor"]})
+        self.assertEqual(out["back"], {"depth": 0, "layers": 0, "log": ["editor closed"]})
+
+    def test_nothing_of_it_without_touch(self):
+        out = self.run_layers("""
+layerOpened(el('drawer'), () => {});
+layerClosed(el('drawer'));
+await turn();
+out.state = {depth: history.depth, layers: layers.length, log};
+""", touch=False)
+        self.assertEqual(out["state"], {"depth": 0, "layers": 0, "log": []})
+
+
+class PlannerNewDayTest(unittest.TestCase):
+    """A planner showing today moves to the new day when the date changes, as the list does; one moved
+    to another day stays there. And the Day view keeps room under the phone's Undo pad as under +."""
+
+    def test_today_is_followed_and_another_day_kept(self):
+        self.assertIn("if (GLANCE || shown === was) { scrolledFor = null; setDate(t); }", PLANNER)
+        self.assertIn("document.addEventListener('visibilitychange', () => { if (!document.hidden) followToday(); });", PLANNER)
+        self.assertIn("window.addEventListener('pageshow', followToday);", PLANNER)
+
+    def test_the_undo_pad_takes_room_like_the_plus_button(self):
+        self.assertIn("for (const id of ['fab', 'undoPad']) {", PLANNER)
+        self.assertIn("undoPad.id = 'undoPad';", JS)

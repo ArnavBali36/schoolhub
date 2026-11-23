@@ -7,6 +7,9 @@
 <script src="theme-init.js"></script>
 <script src="bar.js"></script>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
+<!-- The installed app's tags are theme-init.js's, before the first paint: the colour of a phone's own
+     bar (theme-color, in step with the theme), and under the platform (/school/) its one manifest
+     and Home Screen icon at the site's root. -->
 <title>SchoolHub</title>
 <style>
 /* Light, dark and red: <html data-theme="light|dark|red"> picks the palette (theme-init.js before the first
@@ -279,11 +282,11 @@ dialog.notes[open]{display:grid;grid-template-columns:200px minmax(0,1fr);animat
 .nt-head{display:flex;align-items:center;justify-content:space-between;padding:12px 10px 8px 16px}
 .nt-head h2{margin:0;font:650 15px/1.2 var(--font-rounded)}
 .nt-icon{display:inline-grid;place-items:center;flex:none;width:30px;height:30px;padding:0;border:0;border-radius:15px;background:none;color:var(--muted);cursor:pointer}
-.nt-icon:hover{color:var(--text);background:var(--hover-fill)}
+@media (hover:hover){.nt-icon:hover{color:var(--text);background:var(--hover-fill)}}
 .nt-icon svg{width:18px;height:18px}
 .nt-list{flex:1;min-height:0;margin:0;padding:0 8px 8px;overflow:auto;list-style:none}
 .nt-list button{display:flex;flex-direction:column;gap:2px;width:100%;padding:8px 10px;border:0;border-radius:var(--radius-sm);background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
-.nt-list button:hover{background:var(--hover-fill)}
+@media (hover:hover){.nt-list button:hover{background:var(--hover-fill)}}
 .nt-list button[aria-current="true"]{background:var(--accent-soft)}
 .nt-list b{overflow:hidden;font-size:13.5px;font-weight:620;text-overflow:ellipsis;white-space:nowrap}
 .nt-list span{overflow:hidden;font-size:12px;color:var(--muted);text-overflow:ellipsis;white-space:nowrap}
@@ -327,8 +330,29 @@ dialog.notes[open]{display:grid;grid-template-columns:200px minmax(0,1fr);animat
    the same place in both apps. */
 @media (min-width:641px) and (max-width:960px){.app-switch .brand-mark{display:none}.app-seg a{padding:0 9px}}
 @media (max-width:360px){.app-switch .brand-mark{display:none}}
+/* Beside Notes and the theme button the switch needs more room than QuantPrep's: from 361 to 390 px
+   (an iPhone at 375) it ran past its column, so up to 390 px its segments narrow as they do between
+   641 and 960 px, and below 341 px (a phone's larger text) a little more. The mark stays where
+   QuantPrep shows it. */
+@media (max-width:390px){.app-seg a{padding:0 9px}}
+@media (max-width:340px){.app-seg a{padding:0 7px}}
+/* A screen worked by touch alone: each control of the bar is a target at least 44 px tall (and the
+   two round buttons 42 and 44 px wide), with nothing drawn larger. An invisible hit area (::after)
+   grows each one to its row; the phone's two rows are 44 px each (below), so a target of one row
+   never reaches into the other. A Mac and a desktop browser keep the bar as it was. */
+@media (hover:none) and (pointer:coarse){
+  .app-seg a,.views button,.theme-btn,.bar-end #syncBtn{position:relative}
+  .app-seg a::after,.views button::after,.theme-btn::after,.bar-end #syncBtn::after{content:"";position:absolute}
+  .app-seg a::after{inset:-9px 0}
+  .views button::after,.bar-end #syncBtn::after{inset:-6px 0}
+  .theme-btn::after{inset:-6px -2px}
+  .notes-btn::after{left:-8px}
+  #themeBtn::after{right:-10px}
+}
 
-/* Controls, as in QuantPrep. */
+/* Controls, as in QuantPrep. Their hover looks are only for a pointer that hovers: on a phone a
+   tapped control would keep one until something else is tapped ("School on a phone" has their
+   pressed looks). */
 dialog.task :is(input,select,textarea){padding:0 11px;height:36px;border:1px solid var(--border-input);border-radius:var(--radius-sm);background-color:var(--surface);color:var(--text);box-shadow:var(--input-inset);width:100%;transition:border-color 120ms ease,box-shadow 120ms ease}
 :is(input,select,textarea):focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--ring)}
 dialog.task :is(input,select,textarea):focus-visible{box-shadow:var(--input-inset),0 0 0 3px var(--ring)}
@@ -341,13 +365,14 @@ dialog.task :is(input,select,textarea):focus-visible{box-shadow:var(--input-inse
 input::placeholder,textarea::placeholder{color:var(--faint);opacity:1}
 input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:36px;padding:7px 16px;border-radius:18px;border:1px solid var(--border-strong);background:var(--btn-bg);color:var(--text);box-shadow:var(--btn-shadow);cursor:pointer;font-size:14px;font-weight:560;line-height:1.3;white-space:nowrap;transition:background-color var(--dur-1) var(--ease-out),box-shadow var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out)}
-.btn:hover{background:var(--btn-bg-hover);text-decoration:none}
+@media (hover:hover){.btn:hover{background:var(--btn-bg-hover);text-decoration:none}}
 .btn:active{background:var(--btn-bg-hover);transform:scale(.97)}
 .btn.small{min-height:30px;padding:4px 12px;border-radius:15px;gap:6px;font-size:13px}
 .btn svg{flex:none;width:14px;height:14px}
 .btn.primary{background:var(--sheen),var(--accent);border-color:var(--accent);color:var(--on-accent);
   box-shadow:inset 0 1px 0 var(--sheen-edge),0 1px 2px color-mix(in srgb,var(--accent) 40%,transparent),0 4px 12px -4px color-mix(in srgb,var(--accent) 55%,transparent)}
-.btn.primary:hover,.btn.primary:active{background:var(--sheen),var(--accent-hover);border-color:var(--accent-hover)}
+.btn.primary:active{background:var(--sheen),var(--accent-hover);border-color:var(--accent-hover)}
+@media (hover:hover){.btn.primary:hover{background:var(--sheen),var(--accent-hover);border-color:var(--accent-hover)}}
 .btn:disabled{opacity:.55;cursor:default;transform:none}
 .btn:disabled:hover{background:var(--btn-bg)}
 .btn.primary:disabled:hover{background:var(--sheen),var(--accent)}
@@ -377,7 +402,7 @@ input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 /* Each row is a soft cell of its own. */
 .list{display:grid;gap:8px}
 .row{display:grid;grid-template-columns:120px minmax(0,1fr) auto 150px 104px 28px;gap:14px;align-items:center;padding:11px 18px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);box-shadow:var(--shine),var(--neu-sm);cursor:pointer;font-size:14px;line-height:1.45;transition:box-shadow var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out)}
-.row:hover{border-color:var(--border-strong);box-shadow:var(--shine),var(--neu);transform:translateY(-1px)}
+@media (hover:hover){.row:hover{border-color:var(--border-strong);box-shadow:var(--shine),var(--neu);transform:translateY(-1px)}}
 .chip{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .dot{--dot-c:var(--dot);width:8px;height:8px;border-radius:50%;flex:none;background:var(--dot)}
 /* The name is a button, so the drawer opens from the keyboard too; it reads as text. */
@@ -410,7 +435,7 @@ input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 .s-todo{background:var(--surface-3);color:var(--text)}.s-submitted{background:var(--accent-soft);color:var(--accent)}
 .s-graded,.s-marked{background:var(--good-soft);color:var(--good)}.s-offline,.s-excused,.s-expired,.s-rest{background:var(--surface-3);color:var(--muted)}
 .check{width:26px;height:26px;border-radius:50%;border:1.5px solid var(--border-input);background:var(--surface);box-shadow:var(--neu-sm);color:transparent;cursor:pointer;display:grid;place-items:center;font-size:13px;font-weight:700;padding:0;transition:background-color var(--dur-1) var(--ease-out),border-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out),transform var(--dur-2) var(--ease-spring)}
-.check:hover{border-color:var(--good);color:var(--good)}
+@media (hover:hover){.check:hover{border-color:var(--good);color:var(--good)}}
 .check:active{transform:scale(.92)}
 .check.on{background:var(--good);border-color:var(--good);color:var(--surface);transform:scale(1.04)}
 .courses{display:grid;grid-template-columns:220px minmax(0,1fr);gap:20px}
@@ -419,7 +444,7 @@ input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 .courses .row .chip{display:none}
 .clist{display:flex;flex-direction:column;gap:2px;position:sticky;top:calc(var(--bar-height) + 17px);align-self:start;padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shine),var(--neu)}
 .clist button{text-align:left;border:0;background:none;color:var(--muted);font-size:14px;font-weight:520;padding:7px 10px;border-radius:14px;cursor:pointer;display:flex;gap:8px;align-items:center;transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out)}
-.clist button:hover{background:var(--hover-fill);color:var(--text)}
+@media (hover:hover){.clist button:hover{background:var(--hover-fill);color:var(--text)}}
 .clist button.on{background:var(--current-fill);color:var(--text)}
 .clist .n{margin-left:auto;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
 .chead{display:flex;align-items:baseline;gap:14px;margin-bottom:14px;flex-wrap:wrap}
@@ -427,7 +452,7 @@ input:is([type=checkbox],[type=radio]){accent-color:var(--accent)}
 /* The canvas is tinted, and only --text and --muted are written straight on it: a course's links
    are small pills on a ground of their own, and so is a note in a colour of its own. */
 .chead > a{align-self:center;padding:3px 12px;border:1px solid var(--border);border-radius:999px;background:var(--surface);box-shadow:var(--btn-shadow);font-size:13.5px;font-weight:560;white-space:nowrap}
-.chead > a:hover{background:var(--surface-2);text-decoration:none}
+@media (hover:hover){.chead > a:hover{background:var(--surface-2);text-decoration:none}}
 .chead .note.warn{padding:2px 10px;border-radius:999px;background:var(--warn-soft)}
 .sub{margin-top:28px}
 .mat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shine),var(--neu);padding:6px 20px;font-size:14px}
@@ -477,7 +502,7 @@ a.dl::after{content:"\2193";content:"\2193" / "";display:inline-block;margin-lef
 .doc :is(.hl-yellow,.hl-green,.hl-blue,.hl-red,mark){border-radius:3px;-webkit-box-decoration-break:clone;box-decoration-break:clone}
 .doc .tc-yellow{color:var(--warn)}.doc .tc-green{color:var(--good)}.doc .tc-blue{color:var(--accent)}.doc .tc-red{color:var(--bad)}
 .close{position:absolute;top:14px;right:16px;display:grid;place-items:center;border:0;background:var(--hover-fill);color:var(--muted);border-radius:50%;width:32px;height:32px;padding:0;font-size:20px;line-height:1;cursor:pointer;transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out)}
-.close:hover{background:var(--current-fill);color:var(--text)}
+@media (hover:hover){.close:hover{background:var(--current-fill);color:var(--text)}}
 .empty{color:var(--muted);padding:56px 24px;font-size:15px;text-align:center}
 /* The toast: an inverted capsule of glass; solid in Night and wherever transparency is reduced.
    Centred at its own width (up to 680 px), so a long name wraps only past that; its corners stay a
@@ -500,7 +525,7 @@ a.dl::after{content:"\2193";content:"\2193" / "";display:inline-block;margin-lef
      font:300 30px/1 var(--font-text);display:grid;place-items:center;cursor:pointer;z-index:8;
      box-shadow:inset 0 1px 0 var(--sheen-edge),0 2px 6px color-mix(in srgb,var(--accent) 35%,transparent),0 12px 28px -8px color-mix(in srgb,var(--accent) 60%,transparent);
      transition:transform var(--dur-2) var(--ease-spring)}
-.fab:hover{transform:scale(1.06);background:var(--sheen),var(--accent-hover)}
+@media (hover:hover){.fab:hover{transform:scale(1.06);background:var(--sheen),var(--accent-hover)}}
 .fab:active{transform:scale(.96)}
 dialog.task{border:1px solid var(--border);border-radius:var(--radius-lg);background:var(--surface);color:var(--text);padding:0;
             width:min(460px,calc(100% - 32px));box-shadow:var(--shine),var(--shadow-lg)}
@@ -615,11 +640,11 @@ dialog.task.week form > h3{position:sticky;top:0;z-index:2;margin:-24px -24px 0;
 .row{position:relative}
 .grip{position:absolute;left:3px;top:50%;display:grid;place-items:center;width:12px;height:22px;margin-top:-11px;color:var(--faint);opacity:0;cursor:grab;transition:opacity 120ms ease}
 .grip svg{width:6px;height:14px}
-.row:hover .grip{opacity:1}
+@media (hover:hover){.row:hover .grip{opacity:1}}
 .row.drag-src{opacity:.55}
 /* Show done / Hide done, quietly at the end of the list. */
 .done-toggle{display:inline-block;margin:-12px 0 0;padding:4px 2px;border:0;background:none;color:var(--muted);font-size:13px;cursor:pointer}
-.done-toggle:hover{color:var(--text);text-decoration:underline;text-underline-offset:2px}
+@media (hover:hover){.done-toggle:hover{color:var(--text);text-decoration:underline;text-underline-offset:2px}}
 
 /* The planner (direction B, "soft cells, vivid bars"): a tray holding a white header card (the
    date, the buttons, the week as a strip of day chips), a strip for what has no time on it (one
@@ -1116,12 +1141,128 @@ dialog.task .wk-hours label{flex:1 1 160px}
   .pstrip{padding-top:6px}
   .pgrid{margin-right:8px}
 }
+/* A phone worked by touch: the bar's two rows are 44 px each with nothing between, so each row's
+   targets fill it (above); 88 px in all where a pointer's bar is 82. */
+@media (max-width:640px) and (hover:none) and (pointer:coarse){
+  :root{--bar-height:88px}
+  .bar{grid-template-rows:44px 44px;row-gap:0;padding-top:0;padding-bottom:0}
+}
+/* ---- School on a phone ---- */
+/* What a phone needs of the page, outside the bar and the day planner. Width decides only the
+   layout (a narrow Mac window gets it too); what is for a finger asks for a screen worked by touch
+   alone, so the Mac app and a desktop browser are left as they were. --vv-top, --vv-h and --kb,
+   the part of the screen the keyboard leaves in sight, are written by dashboard.js ("on a phone"). */
+/* Undo and Redo, at the bottom left on a phone (dashboard.js makes them only there), level with
+   the + button. */
+.undo-pad{position:fixed;left:28px;bottom:29px;z-index:8;display:flex;gap:2px;padding:3px;border:1px solid var(--glass-edge);border-radius:999px;
+  background:var(--glass-thick);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);box-shadow:var(--shadow-lg)}
+.undo-pad button{display:grid;place-items:center;width:44px;height:44px;padding:0;border:0;border-radius:50%;background:none;color:var(--text);cursor:pointer;transition:background-color var(--dur-1) var(--ease-out),transform var(--dur-1) var(--ease-out)}
+.undo-pad button svg{width:20px;height:20px}
+.undo-pad button:active:not(:disabled){background:var(--current-fill);transform:scale(.94)}
+.undo-pad button:disabled{color:var(--faint);cursor:default}
+/* Notes' Done, and its New beside the note: only where the window fills the screen. */
+.nt-done,.nt-narrow{display:none}
+.nt-done{flex:none;min-height:36px;padding:0 12px;border:0;border-radius:18px;background:none;color:var(--accent);font:inherit;font-size:15px;font-weight:620;cursor:pointer}
+@media (max-width:780px){
+  .undo-pad{left:16px;bottom:calc(19px + env(safe-area-inset-bottom))}
+  /* The drawer's Close stays at the top right of the screen while long instructions scroll under
+     it, on a ground of its own. */
+  aside > .close{position:fixed;top:12px;right:12px;z-index:1;background:var(--surface-3)}
+  aside{overscroll-behavior:contain}
+  /* A file's name or a link with no spaces wraps rather than widening the drawer. */
+  .files a,.files .offsite,.comment{overflow-wrap:anywhere}
+  .chead h2{font-size:22px}
+  /* Buttons that do not fit on one line (a meal's three) go on two rather than off the sheet. */
+  dialog.task .buttons{flex-wrap:wrap}
+}
+@media (max-width:600px){
+  /* Notes fills the screen, as the drawer does: what the keyboard leaves of it, so the line being
+     typed is never under the keyboard. */
+  dialog.notes{inset:var(--vv-top,0px) 0 auto 0;width:auto;height:100dvh;height:var(--vv-h,100dvh);border:0;border-radius:0;box-shadow:none;
+    background:var(--surface);-webkit-backdrop-filter:none;backdrop-filter:none}
+  .nt-side{background:var(--surface)}
+  .nt-head{gap:2px;padding:8px 6px 6px 16px}
+  .nt-head h2{margin-right:auto;font-size:20px}
+  .nt-done{display:inline-block}
+  .nt-narrow{display:inline-grid}
+  .nt-icon{width:40px;height:40px;border-radius:20px}
+  .nt-icon svg{width:20px;height:20px}
+  .nt-list button{padding:10px 12px}
+  .nt-list b{font-size:15px}
+  .nt-list span{font-size:13px}
+  /* The note's bar: ‹ Notes at the left, New, Delete and Done at the right, and when it changed
+     on a line under them. */
+  .nt-bar{display:flex;flex-wrap:wrap;align-items:center;gap:2px;padding:6px 6px 0 6px}
+  .nt-back{min-height:36px;margin-right:auto;font-size:15px}
+  .nt-when{order:1;flex-basis:100%;text-align:center}
+  #ntText{font-size:16px;padding:10px 16px 16px}
+}
+@media (hover:none) and (pointer:coarse){
+  /* An app's page: text keeps its size when the phone turns, no grey flash on a tap, and no wait
+     for a double tap that would zoom (pinching still zooms). */
+  html{-webkit-text-size-adjust:100%;text-size-adjust:100%;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+  /* A field under 16 px makes the phone zoom the page in when it is tapped, and leave it zoomed. */
+  dialog.task :is(input,select,textarea),#ntText{font-size:16px}
+  /* A dialog sits in what the keyboard leaves in sight: a sheet's bottom, with Save and Cancel,
+     just above the keyboard, a card centred above it. */
+  dialog.task{inset:var(--vv-top,0px) 0 var(--kb,0px) 0;max-height:calc(var(--vv-h,100dvh) - 12px)}
+  @media (min-width:601px){dialog.notes{max-height:calc(var(--vv-h,100dvh) - var(--bar-height) - 12px)}}
+  .toast{translate:0 calc(-1 * var(--kb,0px))}
+  /* A drag past the end of a sheet, the drawer or a note does not move the page behind it. */
+  aside,dialog.task,dialog.notes,.nt-list,#ntText{overscroll-behavior:contain}
+  /* A long press on a row, a tile or a button is not a text selection or a link's preview. */
+  .row,.stats,.fab,.undo-pad,.nt-list button,.clist button{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  /* Pressed looks, where a mouse has hover looks. */
+  .row:active{border-color:var(--border-strong);background:var(--surface-2)}
+  .clist button:active,.nt-list button:active,.nt-icon:active,.close:active{background:var(--current-fill);color:var(--text)}
+  .chead > a:active{background:var(--surface-2)}
+  .done-toggle:active,.nt-done:active,.nt-back:active{opacity:.6}
+  /* Two-line rows: the name runs on up to the pill, and the due date under it takes the room
+     beside the course instead of widening the pill's column. */
+  @container (max-width:880px){
+    .row,.courses .row{grid-template-columns:minmax(0,1fr) auto auto 32px;grid-template-areas:"name name pill check" "chip due due check"}
+  }
+}
+/* ---- end of School on a phone ---- */
 /* Nothing moves for those who ask for less motion. */
 @media (prefers-reduced-motion:reduce){
   aside,dialog.task[open],dialog.pdetail[open],.ptip{animation:none}
   .btn,.fab,.check,.pblock,.phour,.toast button,.app-seg a,.views button,.theme-btn,.close,.ph-step,.pday,.row,.clist button{transition:none}
   .btn:active,.fab:hover,.fab:active,.check:active,.check.on,.row:hover,.pblock.moving,.toast button:active{transform:none}
 }
+/* ---- the day planner on a phone ---- */
+/* A screen worked by touch alone (planner.js's TOUCH): an hour is 48 px there and the day scrolls,
+   a tap on empty time makes nothing (a long press does), and what was shown only on hover shows. A
+   Mac, a desktop browser and a narrow window are left as they were. */
+@media (hover:none) and (pointer:coarse){
+  /* Resize handles a finger can hold: 48 by 24 px, their grip drawn, on the blocks planner.js gives
+     room for them (data-grips: 2 both, 1 the bottom one, 0 none). The top one is on the middle of
+     the top edge (only on a block 70 px tall, whose middle is below it); the bottom one is in the
+     bottom right corner, so on a one-hour block (46 px) it covers neither the middle, where a long
+     press moves the block, nor a to-do's box at the left (planner.js draws it only on a block at
+     least GRIP_COL_PX wide, where both stay clear). A to-do's line that runs under it gives way to
+     it there (a tap on it opens the details, where it is ticked). */
+  .pblock[data-grips] .pb-rs{left:50%;right:auto;width:48px;height:24px;margin-left:-24px}
+  .pblock[data-grips] .pb-rs.bottom{left:auto;right:6px;margin-left:0}
+  .pblock[data-grips] .pb-rs::after{display:block;width:24px;height:4px;margin-left:-12px;opacity:.45}
+  .pblock[data-grips="0"] .pb-rs,.pblock[data-grips="1"] .pb-rs.top{display:none}
+  /* Things due say what they are, not only when: the name shows, cut short, so a flag reaches only
+     a little over the blocks left of its lane (where only its own pill takes a tap); the whole name
+     shows while it is touched or focused, as on a desktop, and in what it opens. */
+  .pflag .pf-name{display:inline}
+  .pflag-wrap{max-width:calc(var(--lane, 92px) + 56px)}
+  /* A task can be added from the Day view too: the + button, which planner.js leaves room under at
+     the end of the day (fabRoom). */
+  .page[data-view="day"] ~ .fab:not([hidden]){display:grid}
+}
+/* A meal's editor on a phone: "No breakfast this day", Cancel and Save do not fit on one line, so
+   the first has a line of its own (the spacer after it takes a whole line, 8 px tall). */
+@media (max-width:430px){
+  #blockDialog:has(#bPlaceField:not([hidden])) .buttons{flex-wrap:wrap;row-gap:0}
+  #blockDialog:has(#bPlaceField:not([hidden])) #bDelete:not([hidden]){margin-right:auto}
+  #blockDialog:has(#bPlaceField:not([hidden])) #bDelete:not([hidden]) + .grow{flex-basis:100%;height:8px}
+}
+/* ---- end of the day planner on a phone ---- */
 </style>
 </head>
 <body>
@@ -1144,15 +1285,16 @@ dialog.task .wk-hours label{flex:1 1 160px}
 <aside id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" tabindex="-1" hidden></aside>
 <button class="fab" id="fab" hidden aria-label="Add a task" title="Add a task (N)">+</button>
 <!-- Notes (dashboard.js, "notes"): short text notes in a popup under the Notes button, a list at
-     the left and the note at the right, saved as you type. Narrow, one or the other. -->
+     the left and the note at the right, saved as you type. Narrow, one or the other, filling the
+     screen, each with New and Done. -->
 <dialog class="notes" id="notesPop" aria-label="Notes" data-pane="list">
   <div class="nt-side">
-    <header class="nt-head"><h2>Notes</h2><button type="button" class="nt-icon" id="ntNew" aria-label="New note" title="New note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.5H7a2.5 2.5 0 0 0-2.5 2.5v10A2.5 2.5 0 0 0 7 19.5h10a2.5 2.5 0 0 0 2.5-2.5v-5"/><path d="M17.6 3.9a1.9 1.9 0 0 1 2.7 2.7L12.6 14.3 9.5 15l.7-3.1z"/></svg></button></header>
+    <header class="nt-head"><h2>Notes</h2><button type="button" class="nt-icon" id="ntNew" aria-label="New note" title="New note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.5H7a2.5 2.5 0 0 0-2.5 2.5v10A2.5 2.5 0 0 0 7 19.5h10a2.5 2.5 0 0 0 2.5-2.5v-5"/><path d="M17.6 3.9a1.9 1.9 0 0 1 2.7 2.7L12.6 14.3 9.5 15l.7-3.1z"/></svg></button><button type="button" class="nt-done" data-nt-done>Done</button></header>
     <ul class="nt-list" id="ntList"></ul>
     <p class="nt-none" id="ntNone" hidden>No notes yet.</p>
   </div>
   <div class="nt-main">
-    <header class="nt-bar"><button type="button" class="nt-back" id="ntBack">‹ Notes</button><span class="nt-when" id="ntWhen"></span><button type="button" class="nt-icon" id="ntDelete" aria-label="Delete this note" title="Delete this note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 7h15M10 4.5h4M6.5 7l.8 11.2A2 2 0 0 0 9.3 20h5.4a2 2 0 0 0 2-1.8L17.5 7M10.2 10.5v6M13.8 10.5v6"/></svg></button></header>
+    <header class="nt-bar"><button type="button" class="nt-back" id="ntBack">‹ Notes</button><span class="nt-when" id="ntWhen"></span><button type="button" class="nt-icon" id="ntDelete" aria-label="Delete this note" title="Delete this note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 7h15M10 4.5h4M6.5 7l.8 11.2A2 2 0 0 0 9.3 20h5.4a2 2 0 0 0 2-1.8L17.5 7M10.2 10.5v6M13.8 10.5v6"/></svg></button><button type="button" class="nt-icon nt-narrow" data-nt-new aria-label="New note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.5H7a2.5 2.5 0 0 0-2.5 2.5v10A2.5 2.5 0 0 0 7 19.5h10a2.5 2.5 0 0 0 2.5-2.5v-5"/><path d="M17.6 3.9a1.9 1.9 0 0 1 2.7 2.7L12.6 14.3 9.5 15l.7-3.1z"/></svg></button><button type="button" class="nt-done" data-nt-done>Done</button></header>
     <textarea id="ntText" aria-label="Note" placeholder="Start typing…" spellcheck="true"></textarea>
   </div>
 </dialog>
