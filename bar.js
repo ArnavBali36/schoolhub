@@ -56,6 +56,9 @@
   // The tab's icon at night: SchoolHub's tick on red, with no blue.
   const ICON_DAY = 'favicon.svg';
   const ICON_RED = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#5c1000"/><path d="M9 16.5l4.5 4.5L23 11.5" fill="none" stroke="#ff4800" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+  // The colour a phone gives its own bar above the page, in each palette: School's bar's (--titlebar
+  // in dashboard.html), as theme-init.js writes it before the first paint.
+  const BAR_COLOR = {light: '#fcfcfd', dark: '#17181e', red: '#150100'};
   const darkQuery = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
   const READ_FAILED = {};
   const readTheme = () => { try { return localStorage.getItem(THEME_KEY); } catch { return READ_FAILED; } };
@@ -88,6 +91,8 @@
     const icon = $('link[rel="icon"]');
     const href = theme === 'red' ? ICON_RED : ICON_DAY;
     if (icon && icon.getAttribute('href') !== href) icon.setAttribute('href', href);
+    const bar = $('meta[name="theme-color"]');
+    if (bar && bar.getAttribute('content') !== BAR_COLOR[theme]) bar.setAttribute('content', BAR_COLOR[theme]);
     const btn = $('#themeBtn');
     if (!btn) return false;
     // "Theme: System (dark). Switch to Light": the choice, the palette it gives, and the next one.
@@ -170,7 +175,14 @@
     return ok && apps.some(a => a.id === SELF_APP) ? apps.map(a => ({id: a.id, name: a.name, href: a.href})) : null;
   }
   const readPlatform = () => { try { return validApps(JSON.parse(localStorage.getItem(PLATFORM_KEY))?.apps); } catch { return null; } };
-  const keepPlatform = apps => { try { apps ? localStorage.setItem(PLATFORM_KEY, JSON.stringify({apps})) : localStorage.removeItem(PLATFORM_KEY); } catch {} };
+  // Kept with the answer's marks: QuantPrep reads the same key, and tells the public site by its
+  // "public" (and another device by "remote") before its own answer comes. Each only as a plain true.
+  const keepPlatform = (apps, p) => {
+    try {
+      if (!apps) return localStorage.removeItem(PLATFORM_KEY);
+      localStorage.setItem(PLATFORM_KEY, JSON.stringify({apps, ...(p?.public === true ? {public: true} : {}), ...(p?.remote === true ? {remote: true} : {})}));
+    } catch {}
+  };
   let platformApps = LOCAL_FILES || PHONE ? null : readPlatform();
   // The app after this one in the switch's order, the first after the last (QuantPrep's otherApp).
   const nextApp = apps => apps[(apps.findIndex(a => a.id === SELF_APP) + 1) % apps.length];
@@ -202,17 +214,32 @@
     return true;
   }
   whenParsed(drawSwitch);
-  if (!LOCAL_FILES && !PHONE) {
-    fetch('platform.json', {cache: 'no-store'}).then(async r => {
+  // It answers a copy of the answer (dashboard.js reads it: "starting"), taken before this reads it.
+  let platformFailed = false;
+  function askPlatform(){
+    const asked = fetch('platform.json', {cache: 'no-store'});
+    const copy = asked.then(r => r.clone());
+    copy.catch(() => {});
+    asked.then(async r => {
       // No platform (SchoolHub's own server answers 204): the plain title. Any other failure keeps
       // what is shown.
       const body = await r.text();
-      const apps = r.status === 200 ? validApps(JSON.parse(body)?.apps) : r.status === 204 || r.status === 404 ? null : undefined;
-      if (apps === undefined) return;
+      const p = r.status === 200 ? JSON.parse(body) : null;
+      const apps = r.status === 200 ? validApps(p?.apps) : r.status === 204 || r.status === 404 ? null : undefined;
+      platformFailed = apps === undefined;
+      if (platformFailed) return;
       platformApps = apps;
-      keepPlatform(apps);
+      keepPlatform(apps, p);
       drawSwitch();
-    }).catch(() => {});
+    }).catch(() => { platformFailed = true; });
+    return copy;
+  }
+  if (!LOCAL_FILES && !PHONE) {
+    // dashboard.js asks where the page is by the same answer, so a load asks once.
+    window.schoolHubPlatform = askPlatform();
+    // Not answered (the app opened with no signal): asked again once dashboard.js has reached the
+    // server after all ("asked again"), so the switch is drawn then and not only at the next load.
+    window.addEventListener('qp:placed', () => { if (platformFailed) askPlatform(); });
   }
   // O opens the next app, as in QuantPrep; never while typing, nor with the drawer or a dialog open.
   document.addEventListener('keydown', e => {
@@ -221,5 +248,72 @@
     if (document.querySelector('dialog[open], [aria-modal="true"]:not([hidden])')) return;
     const other = nextApp(platformApps);
     if (other && other.id !== SELF_APP) { e.preventDefault(); location.assign(other.href); }
+  });
+
+  // ---- the page under the bar, before the data ----
+  // dashboard.js draws the list once it has the last sync, which on a first visit (nothing kept
+  // from an earlier one) is when data.js arrives: on a phone's connection a while. Until then a
+  // quiet line says the page is on its way, rather than a blank page under the bar.
+  whenParsed(() => {
+    const main = $('#main');
+    if (!main) return false;
+    if (!main.firstChild && !window.SCHOOL_DATA) main.innerHTML = '<p class="empty">Loading…</p>';
+    return true;
+  });
+
+  // ---- the installed app ----
+  // The site opened from its icon on a phone's Home Screen, as an app of its own (QuantPrep's
+  // lib/installed.ts, docs/15). Two things a browser's own controls did are the page's to do there.
+  // Where it opens: the app starts at Prep each time the phone has put it away, and goes on to the
+  // app that was open last (QuantPrep's theme-init.js reads qp.last), so School notes itself.
+  // Staying current: there is no reload control, and a phone brings a page back exactly as it was
+  // left, for days. dashboard.js takes in what changed on each return ("back on show"); and a page
+  // that comes back into sight after more than an hour away loads itself again, as the Mac app does
+  // for its own views, which is also how a new version of the page reaches it. Never while
+  // something is open or being typed in that a reload would take away.
+  const INSTALLED = (() => {
+    try { return navigator.standalone === true || matchMedia('(display-mode: standalone)').matches; } catch { return false; }
+  })();
+  if (INSTALLED && !LOCAL_FILES) {
+    const AWAY_MS = 60 * 60000;
+    // The launch has happened, too, once a page of the app is shown: QuantPrep's theme-init.js goes
+    // on to qp.last only at the first page of a launch (qp.launched, kept as long as the launch).
+    // A launch that started here (an icon added at /school/, or the app brought back here) would
+    // otherwise send the first tap on Prep back to School.
+    const rememberApp = () => {
+      if (PHONE || !/^\/school(\/|$)/.test(location.pathname)) return;   // only School under the platform
+      try { localStorage.setItem('qp.last', '/school/'); } catch {}
+      try { sessionStorage.setItem('qp.launched', '1'); } catch {}
+    };
+    // A dialog (a task's form, Notes, a block's details), the drawer, a field with the focus, or an
+    // undo on its way.
+    const busy = () => !!document.querySelector('dialog[open], #drawer:not([hidden]), #toast[data-wait]') || typingIn(document.activeElement);
+    let hiddenAt = document.hidden ? Date.now() : null;
+    const seen = () => {
+      if (document.hidden) { hiddenAt = Date.now(); return; }
+      rememberApp();
+      const away = hiddenAt === null ? 0 : Date.now() - hiddenAt;
+      hiddenAt = null;
+      if (away > AWAY_MS && !busy()) location.reload();
+    };
+    rememberApp();
+    document.addEventListener('visibilitychange', seen);
+    window.addEventListener('pageshow', e => { if (e.persisted) seen(); });
+  }
+
+  // ---- what a pointer reads on hover, on a tap ----
+  // A screen worked by touch alone never shows a title. Two say what the page does not: the exact
+  // time of the last sync, with when the next is due ("Synced 2h ago"), and where a file the page
+  // cannot open is ("On your Mac: ~/…"). There a tap on either says it in the page's toast; the tap
+  // on the sync time also asks for what is new (dashboard.js, "back on show"), as the app on a
+  // phone has no reload. A Mac and a desktop browser keep the tooltips as they were.
+  const TOUCH = typeof matchMedia === 'function' ? matchMedia('(hover: none) and (pointer: coarse)') : null;
+  document.addEventListener('click', e => {
+    if (!TOUCH?.matches) return;
+    const el = e.target.closest?.('#sync, .offsite');
+    const words = el?.getAttribute('title');
+    if (!words || !window.SchoolHub?.toast) return;
+    window.SchoolHub.toast((el.id === 'sync' ? 'Synced ' : '') + words.split('\n').join(' · '), null);
+    if (el.id === 'sync') window.dispatchEvent(new Event('qp:look'));
   });
 })();

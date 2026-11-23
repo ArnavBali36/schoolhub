@@ -35,6 +35,16 @@
   const CLICK_PX = 4;            // a pointer that moves less than this clicked
   const LONG_PRESS_MS = 450;     // a touch held this long without moving starts a drag
   const TOUCH_SLOP = 8;          // a touch that moves this far before then is a scroll
+  // A phone (a screen worked by touch alone): a finger needs room the whole day in view cannot give
+  // (about 27 px an hour on a phone's height), so there an hour is never under TOUCH_HOUR_PX and the
+  // day scrolls. A block that tall has both its resize handles (24 px to the touch, drawn), one
+  // this tall only its bottom one, so a long press still has room to move it; and a tap on empty
+  // time this near a block is a tap on the block. A block narrower than GRIP_COL_PX has none: its
+  // bottom handle sits in its bottom right corner, clear of its middle (where a long press moves
+  // it) and of its to-dos' boxes (at the left) only on a block at least this wide.
+  const TOUCH_HOUR_PX = 48;
+  const TWO_GRIPS_PX = 70, ONE_GRIP_PX = 44, GRIP_COL_PX = 130;
+  const NEAR_PX = 14;
   const LIMIT = {blocks: 40, items: 50, title: 120, place: 120, text: 200, course: 120, ref: 200};
   const WD = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
   const WD_NAME = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -824,10 +834,11 @@
     if (group.length) flush();
   }
   // The hour's height for the room the timeline has: the room divided by the hours, in whole pixels
-  // so the hour lines stay sharp. Under MIN_HOUR_PX the hour stays at that and the timeline scrolls.
-  function fitHour(room, hours){
+  // so the hour lines stay sharp. Under MIN_HOUR_PX (least: TOUCH_HOUR_PX on a phone) the hour stays
+  // at that and the timeline scrolls.
+  function fitHour(room, hours, least = MIN_HOUR_PX){
     const px = Math.floor(room / hours);
-    return px >= MIN_HOUR_PX ? {px, scroll: false} : {px: MIN_HOUR_PX, scroll: true};
+    return px >= least ? {px, scroll: false} : {px: least, scroll: true};
   }
   // Every how many hours a label is written: each hour, or every 2 (3) when the hours are short.
   const labelStep = px => px >= DENSE_HOUR_PX ? 1 : px >= 18 ? 2 : 3;
@@ -905,6 +916,10 @@
   // ---- drawing ----
   const root = $('#planner');
   if (!root) return;
+  // A screen worked by touch alone (a phone): taller hours, drawn resize handles, and a tap on empty
+  // time that makes nothing (a long press does). A Mac, a desktop browser and a narrow window keep
+  // the planner as it was, whatever their width.
+  const TOUCH = matchMedia('(hover: none) and (pointer: coarse)');
   // The header: the date as a heading, the buttons with an icon each, then the week as a strip of
   // day chips between the day arrows. Icons are inline SVG in currentColor.
   const svg = d => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="${d}"/></svg>`;
@@ -1077,11 +1092,18 @@
   let fitted = '', refitting = 0;   // the sizes the hour was last fitted to (measure, refit)
   // The + button (add a task), where it would cover the bottom of the timeline: room under the last
   // hour, so nothing hides behind it. The page keeps it clear of the planner where it can.
+  // The room the floating buttons take at the foot of the Day view: the + button's, and on a phone
+  // the Undo and Redo pad's (dashboard.js, "on a phone"), whichever reaches higher.
   function fabRoom(){
-    const fab = document.getElementById('fab');
-    if (!fab || fab.hidden || !fab.getClientRects().length) return 0;
-    const f = fab.getBoundingClientRect(), s = els.scroll.getBoundingClientRect();
-    return f.left < s.right && f.right > s.left && f.top < s.bottom && f.bottom > s.top ? Math.ceil(s.bottom - f.top) : 0;
+    const s = els.scroll.getBoundingClientRect();
+    let room = 0;
+    for (const id of ['fab', 'undoPad']) {
+      const el = document.getElementById(id);
+      if (!el || el.hidden || !el.getClientRects().length) continue;
+      const f = el.getBoundingClientRect();
+      if (f.left < s.right && f.right > s.left && f.top < s.bottom && f.bottom > s.top) room = Math.max(room, Math.ceil(s.bottom - f.top));
+    }
+    return room;
   }
   // The hour's height for the room under the header: the window's height on wide screens, the Day
   // view's on narrow ones (the planner's own height in CSS), less the strip and the margins.
@@ -1090,7 +1112,7 @@
     if (!room) return false;
     const fab = fabRoom(), s = settings();
     padBottom = fab ? fab + 4 : 7;
-    ({px: hourPx, scroll: scrolling} = fitHour(room - TIME_PAD - (padBottom - 7), s.day_end - s.day_start));
+    ({px: hourPx, scroll: scrolling} = fitHour(room - TIME_PAD - (padBottom - 7), s.day_end - s.day_start, TOUCH.matches ? TOUCH_HOUR_PX : MIN_HOUR_PX));
     // The sizes this hour was fitted to: any change from them (the strip, the header, the window)
     // fits the day again (refit).
     fitted = sizeKey();
@@ -1230,6 +1252,13 @@
     for (const f of timed) parts.push({t: f.m, html: flagHtml(f.a, f.m, f.top)});
     parts.sort((p, q) => p.t - q.t);
     grid.innerHTML = parts.map(p => p.html).join('');
+    // On a phone a block shows the handles a finger can hold (dashboard.html, "the day planner on a
+    // phone"): both where it is tall, the bottom one alone where that leaves room to move it, none on
+    // a short block or a narrow one, beside others (its editor still sets its times).
+    if (TOUCH.matches) for (const b of grid.querySelectorAll('.pblock[data-ref]')) {
+      const h = parseFloat(b.style.height);
+      b.dataset.grips = b.classList.contains('nar') || b.offsetWidth < GRIP_COL_PX ? 0 : h >= TWO_GRIPS_PX ? 2 : h >= ONE_GRIP_PX ? 1 : 0;
+    }
     SH.markEmoji?.(grid);
     placeNow();
 
@@ -1259,6 +1288,8 @@
   if (typeof ResizeObserver === 'function') new ResizeObserver(refit).observe(els.scroll);
   window.addEventListener('resize', refit);
   window.visualViewport?.addEventListener('resize', refit);
+  // A screen that starts or stops being worked by touch alone takes its own hour at once.
+  TOUCH.addEventListener?.('change', () => { fitted = ''; refit(); });
 
   // ---- the glance ----
   // What is on now and what comes next, in a line: "Now: Deep work until 3:30 PM" and "Next: Lunch
@@ -1289,13 +1320,25 @@
     render();
   }
 
-  // The now line moves each minute.
+  // The now line moves each minute. A planner that was showing today goes on to the new day when
+  // the date changes (a page left open over midnight, or one a phone brings back the next morning);
+  // one the learner moved to another day stays there. A glance always shows today.
+  let lastToday = todayIso();
+  function followToday(){
+    const t = todayIso();
+    if (t === lastToday) return;
+    const was = lastToday;
+    lastToday = t;
+    if (GLANCE || shown === was) { scrolledFor = null; setDate(t); }
+  }
   (function tick(){
-    // A glance left open over midnight moves on to the new day.
     if (GLANCE && shown !== todayIso()) setDate(todayIso());
+    followToday();
     if (SH.plannerState === 'on' && plan && !drag) placeNow();
     setTimeout(tick, 60000 - Date.now() % 60000 + 50);
   })();
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) followToday(); });
+  window.addEventListener('pageshow', followToday);
 
   // ---- changes from the timeline ----
   function addWork(date, entry, a){
@@ -1436,7 +1479,28 @@
     drag.armed = true;
     try { grid.setPointerCapture(drag.id); } catch {}
     if (drag.el) { drag.el.classList.add('armed'); drag.el.classList.toggle('moving', drag.mode === 'move'); }
+    // On a phone the press, held still, shows the hour its release makes (as a click on empty time
+    // does with a mouse); moved, the block is drawn from where it began.
+    else if (TOUCH.matches) { const start = dropStart(drag.anchor); showGhost(start, start + 60, 'deep', KIND_NAME.deep); }
     else { drag.lastY = drag.y; drag.moved = true; update(); }
+  }
+  // The block a tap on empty time nearly hit (a phone): the nearest within NEAR_PX, or null.
+  function nearBlock(x, y){
+    let best = null, least = NEAR_PX;
+    for (const el of grid.querySelectorAll('.pblock[data-ref]')) {
+      const r = el.getBoundingClientRect();
+      const d = Math.hypot(Math.max(r.left - x, 0, x - r.right), Math.max(r.top - y, 0, y - r.bottom));
+      const entry = d <= least && entryByRef(el.dataset.ref);
+      if (entry) { best = {el, entry}; least = d; }
+    }
+    return best;
+  }
+  // A tap on empty time makes nothing on a phone; the first one of a visit says what does.
+  let holdTold = false;
+  function holdHint(){
+    if (holdTold) return;
+    holdTold = true;
+    SH.toast('To make a block, press and hold on the timeline');
   }
   // Ends a drag. cancelled: put everything back as it was (Esc, or the browser took the pointer).
   function endDrag(cancelled){
@@ -1484,6 +1548,13 @@
       const click = !d.moved;
       endDrag(false);
       if (!d.armed && !d.touch) return;
+      // On a phone only a long press makes a block, so a tap that only missed a short block opens
+      // that block's details, and a tap on empty time elsewhere makes nothing (the first says how).
+      if (d.touch && !d.armed && TOUCH.matches) {
+        suppressClick();
+        const near = nearBlock(d.x, d.y);
+        return near ? openDetails(near.entry, near.el) : holdHint();
+      }
       let start = d.start, end = d.end;
       if (click) {
         const s = settings();
@@ -1869,6 +1940,13 @@
 
   // Saves the editor; false when something must be fixed first.
   function saveEditor(){
+    // A to-do typed and not entered is kept: on a phone Save is the button in sight and return a
+    // small key, and the block would be saved without it with nothing said.
+    const typed = cut(F.bNewItem.value, LIMIT.text);
+    if (typed) {
+      if (!addEdItem({id: newId(), kind: 'own', text: typed, done: false})) return false;
+      F.bNewItem.value = '';
+    }
     const start = readTime(F.bStart, false), end = readTime(F.bEnd, true);
     const bad = spanError(start, end);
     if (bad) return showErr(F.bErr, bad, F.bEnd);

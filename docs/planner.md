@@ -612,6 +612,24 @@ where it saves, and then for `/api/plan`.
   kept yesterday shows today as it was known then. A copy whose dates do not cover today is not
   used. One older than 3 days, or not a plan, is not used either.
 
+### Added 2026-11-23: on a phone
+
+On a screen worked by touch alone (`(hover: none) and (pointer: coarse)`), and nowhere else:
+
+- An hour is at least 48 px tall and the day scrolls, so a short block can be tapped and moved.
+- A quick tap on empty time makes nothing (once a visit a hint says how to make a block), and a tap
+  within 14 px of a block opens that block. A long press held still makes a block: a one-hour ghost
+  shows, and the New block editor opens.
+- Resize handles are drawn, 48 by 24 px: the bottom one in a block's bottom right corner, the top
+  one in the middle of its top edge on blocks at least 70 px tall. A block narrower than 130 px
+  (several side by side) or shorter than 44 px has none; its times change by a long-press move or
+  through Edit.
+- A thing due shows its name, cut short to about 148 px, not only its time.
+- A to-do typed but not entered is kept by Save, and a meal's editor fits at 360 px.
+- A planner showing today goes on to the new day when the date changes (a page a phone brings back
+  the next morning); one moved to another day stays there. This holds on the Mac too.
+- The Day view keeps room at its foot for the + button and the Undo and Redo pad.
+
 ### Access
 
 - Every control has a label.
