@@ -28,8 +28,12 @@ HUB = Path(__file__).resolve().parent
 MARKS = HUB / "state" / "marks.json"
 TASKS = HUB / "state" / "tasks.json"
 PLAN = HUB / "state" / "plan.json"  # the day planner, one key per object (docs/planner.md)
+NOTES = HUB / "state" / "notes.json"  # the Notes button's notes, one per id
 TASK_ID = re.compile(r"^task:[a-z0-9]{8,32}$")
-FILES = {"marks": MARKS, "tasks": TASKS, "plan": PLAN}
+NOTE_ID = re.compile(r"^note:[a-z0-9]{8,32}$")
+NOTE_LIMIT = 20000  # characters in a note
+NOTES_LIMIT = 500   # notes in all
+FILES = {"marks": MARKS, "tasks": TASKS, "plan": PLAN, "notes": NOTES}
 CLOUD = cloud.connect()  # shared with the phone view when state/cloud.env exists
 PORT = int(os.environ.get("SCHOOLHUB_PORT") or 8722)  # another port for a test copy beside the real one
 ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
@@ -248,7 +252,7 @@ def write_state(path, obj):
 
 
 SEEDED_FILE = HUB / "state" / "cloud-seeded.json"  # which shared databases hold all of this Mac's
-SEEDED = {"marks": False, "tasks": False, "plan": False}  # marks, tasks and plan: only then is the cloud trusted
+SEEDED = {"marks": False, "tasks": False, "plan": False, "notes": False}  # only then is the cloud trusted
 BACKUPS = HUB / "state" / "backups"
 KEEP_BACKUPS = 20
 
@@ -376,6 +380,25 @@ def clean_task(body, existing):
     }, None
 
 
+def clean_note(body, existing):
+    """A note from the Notes popup: its text, kept as typed (only the end's blank lines go), and
+    when it was made and last changed. Returns (note, error)."""
+    text = body.get("text")
+    if not isinstance(text, str):
+        return None, "a note's text must be a string"
+    text = text.rstrip()
+    if not text.strip():
+        return None, "a note needs some text"
+    if len(text) > NOTE_LIMIT:
+        return None, f"a note is at most {NOTE_LIMIT} characters"
+    stamp = datetime.now(timezone.utc).isoformat()
+    return {
+        "text": text,
+        "created_at": (existing or {}).get("created_at") or stamp,
+        "updated_at": stamp,
+    }, None
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "SchoolHub"
 
@@ -424,6 +447,9 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/marks":
             with LOCK:
                 return self._json(load("marks"))
+        if url.path == "/api/notes":
+            with LOCK:
+                return self._json({"notes": load("notes")})
         if url.path == "/api/plan":
             # Dates on this computer's clock, as the page shows them.
             try:
@@ -504,6 +530,36 @@ class Handler(BaseHTTPRequestHandler):
                 tasks = load("tasks")
             return self._json({"removed": removed, "tasks": tasks})
 
+        if path == "/api/note":
+            nid = str(body.get("id") or "") or f"note:{uuid.uuid4().hex[:12]}"
+            if not NOTE_ID.match(nid):
+                return self._send(400, b"bad note id")
+            with LOCK:
+                notes = load("notes")
+                if nid not in notes and len(notes) >= NOTES_LIMIT:
+                    return self._send(400, f"there is room for {NOTES_LIMIT} notes".encode())
+                note, error = clean_note(body, notes.get(nid))
+                if error:
+                    return self._send(400, error.encode())
+                note = {"id": nid, **note}
+                try:
+                    put("notes", nid, note)
+                except (OSError, RuntimeError):
+                    return self._send(502, b"couldn't reach the cloud database")
+                notes = load("notes")
+            return self._json({"note": note, "notes": notes})
+
+        if path == "/api/note/delete":
+            with LOCK:
+                nid = str(body.get("id") or "")
+                removed = load("notes").get(nid)
+                try:
+                    remove("notes", nid)
+                except (OSError, RuntimeError):
+                    return self._send(502, b"couldn't reach the cloud database")
+                notes = load("notes")
+            return self._json({"removed": removed, "notes": notes})
+
         if path == "/api/plan":
             # A whole value replaces the key's; null deletes it, which brings back the defaults. A
             # body without "value" is refused rather than read as null, so a slip never deletes.
@@ -559,8 +615,8 @@ def auto_sync_loop(clock=time.time, sleep=time.sleep, awake=time.monotonic):
 
 
 def seed_loop():
-    """Copies the local marks, tasks and plan to the shared database, retrying every minute until all
-    three are there. Each is tried on its own, so one that keeps failing (the plan's table not made
+    """Copies the local marks, tasks, plan and notes to the shared database, retrying every minute until all
+    four are there. Each is tried on its own, so one that keeps failing (the plan's table not made
     yet on Turso, say) never holds up the others."""
     while not all(SEEDED.values()):
         for name in FILES:

@@ -764,7 +764,9 @@ const VIEW_KEYS = {u: 'upcoming', c: 'courses', d: 'day'};
 document.addEventListener('keydown', e => {
   const typing = typingIn(document.activeElement);
   if (e.key === 'Escape' && !dialogOpen()) closeDrawer();
-  if (typing || dialogOpen() || e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.defaultPrevented) return;
+  // Nor in the Notes window, whose keys are its own.
+  if (typing || dialogOpen() || $('#notesPop')?.contains(document.activeElement)) return;
+  if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.defaultPrevented) return;
   const k = String(e.key).toLowerCase();
   if (k === 'n' && WRITE) { e.preventDefault(); return openTaskForm(); }
   if (k === '?') { e.preventDefault(); return showKeys(); }
@@ -1285,6 +1287,10 @@ async function newData(at){
 // names another place than the copy the page was drawn from: Sync now comes or goes.)
 function enableServerFeatures(){
   $('#fab').hidden = false;
+  // Notes save where marks and tasks do on your Mac's server or the public site; not on the old
+  // phone site, whose cloud database keeps only marks and tasks.
+  const nb = $('#notesBtn');
+  if (nb) nb.hidden = WRITE !== 'local';
   syncBtn.hidden = PUBLIC;
   if (PUBLIC || syncBtn.onclick) return;
   syncBtn.onclick = () => api('api/sync', {}).then(() => { pressed = true; watchSync(); showSyncing(true); setTimeout(pollSync, 1500); })
@@ -1293,6 +1299,167 @@ function enableServerFeatures(){
   lookAtSync();
 }
 // ---- end of sync now ----
+
+// ---- notes ----
+// Short text notes, the way Notes on the Mac keeps them: the Notes button in the bar opens a small
+// window with the notes at the left, newest first, and the one chosen at the right. A note saves
+// itself a moment after you stop typing, when another is chosen, and when the window closes or the
+// page is put away; its first line is its title. A note left empty goes. Each note is stored on its
+// own under its id (api/note), made here so a note being typed is never saved twice as two.
+const NOTE_PAUSE = 700;
+const notesPop = $('#notesPop'), notesBtn = $('#notesBtn'), ntText = $('#ntText');
+let notes = {};            // as the server last gave them
+let note = null;           // the note shown: {id, text, sent}, sent the text the server has (null: none yet)
+let notePause = null;
+const noteId = () => 'note:' + [...crypto.getRandomValues(new Uint8Array(6))].map(b => b.toString(16).padStart(2, '0')).join('');
+const noteLines = text => String(text).split('\n').map(l => l.trim()).filter(Boolean);
+const noteTitle = text => noteLines(text)[0]?.slice(0, 120) || 'New note';
+// When a note changed, as Notes says it: the time today, the weekday this week, else the date.
+function noteWhen(iso, long){
+  const d = iso ? new Date(iso) : new Date();
+  if (long) return d.toLocaleString(undefined, {month: 'long', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit'});
+  const days = -dayDiff(d);
+  return days <= 0 ? d.toLocaleTimeString(undefined, {hour: 'numeric', minute: '2-digit'})
+    : days < 7 ? d.toLocaleDateString(undefined, {weekday: 'long'})
+    : d.toLocaleDateString(undefined, {month: 'numeric', day: 'numeric', year: '2-digit'});
+}
+// The notes newest first, with the one being typed as it is now.
+function noteRows(){
+  const all = Object.values(notes).filter(n => isMap(n) && typeof n.id === 'string' && typeof n.text === 'string');
+  const rows = all.map(n => n.id === note?.id ? {...n, text: note.text, updated_at: note.sent === note.text ? n.updated_at : new Date().toISOString()} : n);
+  if (note && !notes[note.id]) rows.push({id: note.id, text: note.text, updated_at: new Date().toISOString()});
+  return rows.sort((a, b) => String(b.updated_at).localeCompare(String(a.updated_at)));
+}
+function drawNotes(){
+  const rows = noteRows();
+  $('#ntList').innerHTML = rows.map(n => `<li><button type="button" data-note="${esc(n.id)}" aria-current="${n.id === note?.id}">
+    <b>${esc(noteTitle(n.text))}</b><span><time>${esc(noteWhen(n.updated_at))}</time>${esc(noteLines(n.text)[1] || 'No additional text')}</span></button></li>`).join('');
+  $('#ntNone').hidden = rows.length > 0;
+  markEmoji($('#ntList'));
+  const shown = note && rows.find(n => n.id === note.id);
+  $('#ntWhen').textContent = shown ? noteWhen(shown.updated_at, true) : '';
+  $('#ntDelete').hidden = !note;
+}
+function showNote(n, pane = 'note'){
+  note = n ? {id: n.id, text: n.text, sent: notes[n.id] ? notes[n.id].text : null} : null;
+  ntText.value = note ? note.text : '';
+  ntText.disabled = !note;
+  notesPop.dataset.pane = note ? pane : 'list';
+  drawNotes();
+}
+// Sends the note shown if it changed: saved, or deleted when it was emptied. With keepalive true
+// the page is going away, and the save must outlive it.
+function saveNote(keepalive = false){
+  clearTimeout(notePause);
+  const n = note;
+  if (!n || n.text === n.sent) return Promise.resolve();
+  const empty = !n.text.trim();
+  if (empty && n.sent === null) return Promise.resolve();
+  const text = n.text;
+  const path = empty ? 'api/note/delete' : 'api/note';
+  const body = empty ? {id: n.id} : {id: n.id, text};
+  n.sent = empty ? null : text;
+  const send = () => fetch(path, {method: 'POST', keepalive,
+    headers: {'Content-Type': 'application/json', 'X-SchoolHub': '1'}, body: JSON.stringify(body)}).then(answer);
+  return inTurn(n.id, send).then(r => {
+    if (isMap(r?.notes)) notes = r.notes;
+    if (notesPop.open) drawNotes();
+  }, () => {
+    if (note === n && n.sent === (empty ? null : text)) n.sent = empty ? text : null;
+    toast("Couldn't save the note. Check your connection and try again.");
+  });
+}
+async function loadNotes(){
+  try {
+    const r = await getJson('api/notes');
+    if (isMap(r?.notes)) notes = r.notes;
+  } catch { toast("Couldn't load your notes. Check your connection and try again."); }
+}
+async function openNotes(){
+  notesPop.show();
+  notesBtn.setAttribute('aria-expanded', 'true');
+  drawNotes();
+  await loadNotes();
+  if (!notesPop.open) return;
+  // The note last changed, as Notes opens; none yet, a new one to type in.
+  const newest = noteRows()[0];
+  if (newest) showNote(newest, matchMedia('(max-width:600px)').matches ? 'list' : 'note'); else newNote();
+  if (notesPop.dataset.pane === 'note') ntText.focus();
+}
+function closeNotes(){
+  if (!notesPop.open) return;
+  saveNote();
+  // An empty new note is not kept, as in Notes.
+  if (note && !note.text.trim()) note = null;
+  notesPop.close();
+  notesBtn.setAttribute('aria-expanded', 'false');
+  if (notesPop.contains(document.activeElement) || document.activeElement === document.body) notesBtn.focus({preventScroll: true});
+}
+function newNote(){
+  saveNote();
+  showNote({id: noteId(), text: ''});
+  ntText.focus();
+}
+notesBtn.addEventListener('click', () => notesPop.open ? closeNotes() : openNotes());
+$('#ntNew').addEventListener('click', newNote);
+$('#ntBack').addEventListener('click', () => { saveNote(); notesPop.dataset.pane = 'list'; drawNotes(); });
+$('#ntList').addEventListener('click', e => {
+  const b = e.target.closest('[data-note]');
+  if (!b) return;
+  saveNote();
+  const n = noteRows().find(r => r.id === b.dataset.note);
+  if (n) { showNote(n); ntText.focus(); }
+});
+ntText.addEventListener('input', () => {
+  if (!note) return;
+  note.text = ntText.value;
+  drawNotes();
+  clearTimeout(notePause);
+  notePause = setTimeout(saveNote, NOTE_PAUSE);
+});
+$('#ntDelete').addEventListener('click', () => {
+  if (!note) return;
+  const gone = {id: note.id, text: note.text};
+  const stored = note.sent !== null;
+  clearTimeout(notePause);
+  const next = noteRows().find(r => r.id !== gone.id);
+  note = null;
+  if (stored) inTurn(gone.id, () => api('api/note/delete', {id: gone.id})).then(r => {
+    if (isMap(r?.notes)) notes = r.notes;
+    if (notesPop.open) drawNotes();
+  }, () => toast("Couldn't delete the note. Check your connection and try again."));
+  delete notes[gone.id];
+  showNote(next || null);
+  if (gone.text.trim()) toast(`Deleted “${noteTitle(gone.text)}”`, () => {
+    // Back as it was, under its own id.
+    notes[gone.id] = {...gone, updated_at: new Date().toISOString()};
+    showNote(gone);
+    note.sent = null;
+    saveNote();
+    if (!notesPop.open) openNotesOn(gone.id);
+  });
+});
+// Opened again on one note (an undo after the window closed).
+function openNotesOn(id){
+  notesPop.show();
+  notesBtn.setAttribute('aria-expanded', 'true');
+  const n = noteRows().find(r => r.id === id);
+  if (n) showNote(n);
+}
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && notesPop.open && !dialogOpen()) { e.preventDefault(); closeNotes(); }
+});
+// A click anywhere else closes the window, as a popover does (the toast's Undo excepted).
+document.addEventListener('pointerdown', e => {
+  if (notesPop.open && !notesPop.contains(e.target) && !notesBtn.contains(e.target) && !e.target.closest?.('#toast')) closeNotes();
+});
+// The page put away (the tab hidden or closed): what is typed is sent at once.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) saveNote(true);
+  else if (notesPop.open && (!note || note.text === note.sent)) loadNotes().then(() => notesPop.open && showNote(note && (noteRows().find(r => r.id === note.id) || null), notesPop.dataset.pane));
+});
+window.addEventListener('pagehide', () => saveNote(true));
+// ---- end of notes ----
 
 // Pick up changes made on your other device when you come back to this tab.
 async function reloadState(tries = 3){

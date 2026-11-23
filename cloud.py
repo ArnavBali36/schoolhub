@@ -30,10 +30,13 @@ except ImportError:
 
 HUB = Path(__file__).resolve().parent
 ENV_FILE = HUB / "state" / "cloud.env"
-KEYS = {"marks": "schoolhub:marks", "tasks": "schoolhub:tasks", "plan": "schoolhub:plan"}
-# The names kept in Turso's school_kv. The plan has a table of its own (school_plan): school_kv's
-# CHECK allows only these two, and rebuilding the table that holds the live marks is not worth it.
+KEYS = {"marks": "schoolhub:marks", "tasks": "schoolhub:tasks", "plan": "schoolhub:plan",
+        "notes": "schoolhub:notes"}
+# The names kept in Turso's school_kv. The plan and the notes have tables of their own (school_plan,
+# school_notes): school_kv's CHECK allows only these two, and rebuilding the table that holds the
+# live marks is not worth it.
 KV_NAMES = ("marks", "tasks")
+TABLES = {"plan": "school_plan", "notes": "school_notes"}
 
 
 def _read_env():
@@ -165,7 +168,8 @@ def _now_ms():
 class Turso:
     """Turso (hosted libSQL): marks and tasks as rows of school_kv (name 'marks' or 'tasks', key the
     assignment or task id, value_json the object, updated_at in milliseconds), the planner's keys as
-    rows of school_plan (key, value_json, updated_at), and the latest sync's data.js as the one row
+    rows of school_plan (key, value_json, updated_at), the notes as rows of school_notes (the same
+    columns, key the note's id), and the latest sync's data.js as the one row
     of school_data. The tables are made by turso-schema.sql or by the app that
     owns the database; SchoolHub never creates or changes them.
 
@@ -209,8 +213,8 @@ class Turso:
     def get_all(self, name):
         # Oldest change first, as the local files keep them; a hosted copy reading the same table
         # answers in this order too, so both views list them alike.
-        if name == "plan":
-            rows, = self.pipeline(("SELECT key, value_json FROM school_plan ORDER BY updated_at, key", ()))
+        if name in TABLES:
+            rows, = self.pipeline((f"SELECT key, value_json FROM {TABLES[name]} ORDER BY updated_at, key", ()))
         else:
             rows, = self.pipeline(("SELECT key, value_json FROM school_kv WHERE name = ? ORDER BY updated_at, key",
                                    (_kv(name),)))
@@ -226,8 +230,8 @@ class Turso:
         return out
 
     def put(self, name, field, obj):
-        if name == "plan":
-            return self.pipeline(("INSERT INTO school_plan (key, value_json, updated_at) VALUES (?, ?, ?) "
+        if name in TABLES:
+            return self.pipeline((f"INSERT INTO {TABLES[name]} (key, value_json, updated_at) VALUES (?, ?, ?) "
                                   "ON CONFLICT (key) DO UPDATE SET value_json = excluded.value_json, "
                                   "updated_at = excluded.updated_at", (field, json.dumps(obj), _now_ms())))
         self.pipeline(("INSERT INTO school_kv (name, key, value_json, updated_at) VALUES (?, ?, ?, ?) "
@@ -235,8 +239,8 @@ class Turso:
                        "updated_at = excluded.updated_at", (_kv(name), field, json.dumps(obj), _now_ms())))
 
     def remove(self, name, field):
-        if name == "plan":
-            return self.pipeline(("DELETE FROM school_plan WHERE key = ?", (field,)))
+        if name in TABLES:
+            return self.pipeline((f"DELETE FROM {TABLES[name]} WHERE key = ?", (field,)))
         self.pipeline(("DELETE FROM school_kv WHERE name = ? AND key = ?", (_kv(name), field)))
 
     def save_data(self, data_js, synced_at):

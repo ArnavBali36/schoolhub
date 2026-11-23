@@ -68,7 +68,8 @@ class ServerTest(unittest.TestCase):
         server.HUB = hub
         server.MARKS, server.TASKS = hub / "state" / "marks.json", hub / "state" / "tasks.json"
         server.PLAN = hub / "state" / "plan.json"
-        server.FILES = {"marks": server.MARKS, "tasks": server.TASKS, "plan": server.PLAN}
+        server.NOTES = hub / "state" / "notes.json"
+        server.FILES = {"marks": server.MARKS, "tasks": server.TASKS, "plan": server.PLAN, "notes": server.NOTES}
         server.CLOUD = None
         course = cls.root / "Some Course"
         course.mkdir()
@@ -254,6 +255,33 @@ class ServerTest(unittest.TestCase):
         self.assertEqual({k: v for k, v in back["task"].items() if k != "updated_at"}, {k: v for k, v in task.items() if k != "updated_at"})
         self.assertEqual(back["tasks"][task["id"]], back["task"])
         self.post("/api/task/delete", {"id": task["id"]})
+
+    def test_notes_are_kept_as_typed_under_their_own_ids(self):
+        status, data = self.post("/api/note", {"id": "note:abc123def456", "text": "Lab 4\n  bring goggles  \n\n"})
+        self.assertEqual(status, 200)
+        note = data["note"]
+        # Kept as typed, the end's blank lines taken off.
+        self.assertEqual((note["id"], note["text"]), ("note:abc123def456", "Lab 4\n  bring goggles"))
+        self.assertEqual(data["notes"]["note:abc123def456"], note)
+        self.assertEqual(json.loads(self.request("GET", "/api/notes")[2])["notes"]["note:abc123def456"], note)
+        # Changed: the same note, made when it was.
+        _, again = self.post("/api/note", {"id": note["id"], "text": "Lab 4"})
+        self.assertEqual(again["note"]["created_at"], note["created_at"])
+        self.assertEqual(again["note"]["text"], "Lab 4")
+        # No id: the server makes one.
+        _, fresh = self.post("/api/note", {"text": "Call home"})
+        self.assertRegex(fresh["note"]["id"], r"^note:[a-z0-9]{12}$")
+        # Refused: no text, not a string, too long, a bad id.
+        for body, why in (({"text": "  \n "}, b"a note needs some text"), ({"text": 5}, b"a note's text must be a string"),
+                          ({"text": "x" * 20001}, b"a note is at most 20000 characters"),
+                          ({"id": "task:abc123def456", "text": "x"}, b"bad note id")):
+            with self.subTest(body=str(body)[:40]):
+                self.assertEqual(self.post("/api/note", body), (400, why))
+        _, gone = self.post("/api/note/delete", {"id": note["id"]})
+        self.assertEqual(gone["removed"]["text"], "Lab 4")
+        self.assertNotIn(note["id"], gone["notes"])
+        self.post("/api/note/delete", {"id": fresh["note"]["id"]})
+        self.assertEqual(json.loads(self.request("GET", "/api/notes")[2]), {"notes": {}})
 
     def test_security_headers(self):
         status, h, _ = self.request("GET", "/", full=True)

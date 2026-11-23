@@ -31,3 +31,12 @@ CREATE TABLE school_plan (
   value_json  TEXT NOT NULL,
   updated_at  INTEGER NOT NULL
 ) STRICT;
+
+-- Notes (the Notes button), one row per note: key 'note:<id>', value_json {id, text, created_at,
+-- updated_at}, updated_at in milliseconds. QuantPrep makes the same table in its migration
+-- 0009_school_notes.sql.
+CREATE TABLE school_notes (
+  key         TEXT PRIMARY KEY,
+  value_json  TEXT NOT NULL,
+  updated_at  INTEGER NOT NULL
+) STRICT;

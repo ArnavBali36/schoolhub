@@ -2075,6 +2075,27 @@ class SyncWordsTest(unittest.TestCase):
         self.assertIn("The next sync will double-check ${esc(a.platform)} for your submission.</div>`;", JS)
 
 
+
+class NotesTest(unittest.TestCase):
+    """The Notes button and its window (dashboard.js, "notes")."""
+
+    def test_the_button_shows_only_where_notes_save(self):
+        self.assertRegex(HTML, r'<button type="button" class="theme-btn notes-btn" id="notesBtn" aria-label="Notes"[^>]* hidden>')
+        self.assertIn('<dialog class="notes" id="notesPop" aria-label="Notes" data-pane="list">', HTML)
+        self.assertIn("if (nb) nb.hidden = WRITE !== 'local';", JS)
+
+    def test_a_note_saves_under_an_id_made_on_the_page_and_goes_when_emptied(self):
+        self.assertIn("const noteId = () => 'note:' + [...crypto.getRandomValues(new Uint8Array(6))]", JS)
+        self.assertIn("const path = empty ? 'api/note/delete' : 'api/note';", JS)
+        self.assertIn("if (empty && n.sent === null) return Promise.resolve();", JS)
+        self.assertIn("return inTurn(n.id, send)", JS)
+        # Saved a moment after typing stops, and before the page goes.
+        self.assertIn("const NOTE_PAUSE = 700;", JS)
+        self.assertIn("if (document.hidden) saveNote(true);", JS)
+
+    def test_the_pages_keys_stay_out_of_the_notes_window(self):
+        self.assertIn("if (typing || dialogOpen() || $('#notesPop')?.contains(document.activeElement)) return;", JS)
+
 if __name__ == "__main__":
     unittest.main()
 
@@ -3600,8 +3621,9 @@ class KeptSourceTest(unittest.TestCase):
         # The same requests to the same places as before the copies: only when they are made changed.
         # (One more since: data.js again, on the Mac only, once a sync has run while the page was
         # open. See WatchSyncTest.)
-        self.assertEqual(sorted(re.findall(r"fetch\(([^,)]+)", JS)), ["'/api/state/'", "'data.js'", "'platform.json'", "path", "path"])
-        self.assertEqual(sorted(set(re.findall(r"getJson\('([^']+)'\)", JS))), ["api/marks", "api/sync", "api/tasks"])
+        # (And the notes since: their save is the third fetch(path, see NotesTest.)
+        self.assertEqual(sorted(re.findall(r"fetch\(([^,)]+)", JS)), ["'/api/state/'", "'data.js'", "'platform.json'", "path", "path", "path"])
+        self.assertEqual(sorted(set(re.findall(r"getJson\('([^']+)'\)", JS))), ["api/marks", "api/notes", "api/sync", "api/tasks"])
         self.assertEqual(re.findall(r"fetch\(([^,)]+)", PLANNER), ["`api/plan?from=${from}&to=${to}`"] * 2)
         self.assertEqual(re.findall(r"fetch\(([^,)]+)", BAR), ["'platform.json'"])
         for text in (JS, PLANNER, BAR, HTML):
@@ -3643,8 +3665,12 @@ class KeptSourceTest(unittest.TestCase):
         self.assertIn("document.addEventListener('visibilitychange', () => { if (document.hidden) nowLeaving(); });", JS)
         self.assertIn("window.addEventListener('pagehide', () => nowLeaving());", JS)
         self.assertEqual(JS.count("nowLeaving()"), 2)
-        # A save sent early outlives the page; no other request is changed.
+        # A save sent early outlives the page; no other request is changed. The third is a note's:
+        # the Notes button shows only once the server has answered, and what was typed in the
+        # moment before the page was put away is sent then, to outlive it.
         self.assertEqual(len(re.findall(r"keepalive: ", JS)), 2)
+        self.assertEqual(len(re.findall(r"keepalive[,:]", JS)), 3)
+        self.assertIn("window.addEventListener('pagehide', () => saveNote(true));", JS)
         self.assertEqual(JS.count("nowKnown()"), 2)          # from disk at once; else when the server answered or did not
         self.assertRegex(JS, r"\}\)\.finally\(\(\) => \{\s*if \(!copy && !PHONE\) \{ showSyncbox\(\); emit\('ready'\); \}\s*nowKnown\(\);\s*\}\);")
         # What is kept is what the server said, once it has said where the page saves.
@@ -5138,4 +5164,3 @@ console.log(JSON.stringify(out));
         # The list's styles use the page's tokens only.
         keys_css = HTML[HTML.index("dialog.task.keys{"):HTML.index("/* A field the keyboard moves to")]
         self.assertNotRegex(keys_css, r"#[0-9a-fA-F]{3,8}\b|rgb\(")
-

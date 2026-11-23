@@ -267,6 +267,45 @@ a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline;tex
 .theme-btn{display:inline-grid;place-items:center;flex:none;width:32px;height:32px;padding:0;border:0;border-radius:16px;background:none;color:var(--muted);cursor:pointer;transition:background-color var(--dur-1) var(--ease-out),color var(--dur-1) var(--ease-out)}
 .theme-btn:hover{color:var(--text);background:var(--hover-fill)}
 .theme-btn svg{width:18px;height:18px}
+/* ---- notes (dashboard.js, "notes") ----
+   A small window under the Notes button, the way Notes on the Mac lays one out: the notes at the
+   left, newest first, each its first line and when it changed; the note itself at the right, plain
+   text on the page's surface. Narrow, it shows the list or the note (data-pane). */
+.notes-btn[aria-expanded="true"]{color:var(--text);background:var(--hover-fill)}
+dialog.notes{position:fixed;inset:calc(var(--bar-height) + 6px) 16px auto auto;margin:0;width:min(620px,calc(100vw - 32px));height:min(440px,calc(100vh - var(--bar-height) - 40px));height:min(440px,calc(100dvh - var(--bar-height) - 40px));padding:0;border:1px solid var(--glass-edge);border-radius:var(--radius-lg);background:var(--glass-thick);-webkit-backdrop-filter:var(--glass-blur-thick);backdrop-filter:var(--glass-blur-thick);color:var(--text);box-shadow:var(--shadow-lg);z-index:15;overflow:hidden}
+dialog.notes[open]{display:grid;grid-template-columns:200px minmax(0,1fr);animation:nt-in var(--dur-2) var(--ease-out)}
+@keyframes nt-in{from{opacity:0;transform:translateY(-6px) scale(.98)}}
+.nt-side{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--border);background:color-mix(in srgb,var(--surface-2) 55%,transparent)}
+.nt-head{display:flex;align-items:center;justify-content:space-between;padding:12px 10px 8px 16px}
+.nt-head h2{margin:0;font:650 15px/1.2 var(--font-rounded)}
+.nt-icon{display:inline-grid;place-items:center;flex:none;width:30px;height:30px;padding:0;border:0;border-radius:15px;background:none;color:var(--muted);cursor:pointer}
+.nt-icon:hover{color:var(--text);background:var(--hover-fill)}
+.nt-icon svg{width:18px;height:18px}
+.nt-list{flex:1;min-height:0;margin:0;padding:0 8px 8px;overflow:auto;list-style:none}
+.nt-list button{display:flex;flex-direction:column;gap:2px;width:100%;padding:8px 10px;border:0;border-radius:var(--radius-sm);background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.nt-list button:hover{background:var(--hover-fill)}
+.nt-list button[aria-current="true"]{background:var(--accent-soft)}
+.nt-list b{overflow:hidden;font-size:13.5px;font-weight:620;text-overflow:ellipsis;white-space:nowrap}
+.nt-list span{overflow:hidden;font-size:12px;color:var(--muted);text-overflow:ellipsis;white-space:nowrap}
+.nt-list time{margin-right:6px;color:var(--text);opacity:.75;font-variant-numeric:tabular-nums}
+.nt-none{margin:4px 16px;font-size:13px;color:var(--muted)}
+.nt-main{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--surface)}
+.nt-bar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:8px 8px 0 12px}
+.nt-bar .nt-icon{justify-self:end}
+.nt-when{grid-column:2;font-size:12px;color:var(--muted);white-space:nowrap}
+.nt-back{display:none;justify-self:start;padding:4px 6px;border:0;background:none;color:var(--accent);font:inherit;font-size:14px;cursor:pointer}
+#ntText{flex:1;min-height:0;width:100%;padding:10px 20px 20px;border:0;background:none;color:var(--text);font:15px/1.55 var(--font-text);resize:none;outline:none}
+#ntText::placeholder{color:var(--faint)}
+/* The page is the note: no ring round it while typing, as in Notes. */
+#ntText:focus-visible{outline:none;box-shadow:none}
+@media (max-width:600px){
+  dialog.notes{inset:calc(var(--bar-height) + 6px) 8px auto 8px;width:auto;height:min(520px,calc(100dvh - var(--bar-height) - 24px))}
+  dialog.notes[open]{grid-template-columns:minmax(0,1fr)}
+  dialog.notes[data-pane="list"] .nt-main,dialog.notes[data-pane="note"] .nt-side{display:none}
+  .nt-side{border-right:0}
+  .nt-back{display:block}
+}
+@media (prefers-reduced-motion:reduce){dialog.notes[open]{animation:none}}
 
 /* The app switch, when the page is part of a platform: the platform's mark, then QuantPrep | School
    with the app you are in raised. */
@@ -1070,7 +1109,7 @@ dialog.task .wk-hours label{flex:1 1 160px}
 <header class="topbar"><div class="bar">
   <div class="brand-slot" id="brand"><h1 class="brand">SchoolHub</h1></div>
   <nav class="views" id="views" aria-label="Views"><button type="button" data-view="upcoming" title="Upcoming (U)">Upcoming</button><button type="button" data-view="courses" title="By course (C)">By course</button><button type="button" data-view="day" title="Day (D)" hidden>Day</button></nav>
-  <div class="bar-end"><div class="syncbox" id="syncbox" hidden><span id="sync" class="sync"></span><button type="button" class="btn small" id="syncBtn" hidden>Sync now</button></div><button type="button" class="theme-btn" id="themeBtn" aria-label="Theme"></button></div>
+  <div class="bar-end"><div class="syncbox" id="syncbox" hidden><span id="sync" class="sync"></span><button type="button" class="btn small" id="syncBtn" hidden>Sync now</button></div><button type="button" class="theme-btn notes-btn" id="notesBtn" aria-label="Notes" title="Notes" aria-haspopup="dialog" aria-expanded="false" aria-controls="notesPop" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3.5" width="14" height="17" rx="3"/><path d="M8.5 8.5h7M8.5 12h7M8.5 15.5h4"/></svg></button><button type="button" class="theme-btn" id="themeBtn" aria-label="Theme"></button></div>
 </div></header>
 <main class="page">
   <div class="syncrow" id="syncrow"></div>
@@ -1082,6 +1121,19 @@ dialog.task .wk-hours label{flex:1 1 160px}
 <div id="scrim" class="scrim" hidden></div>
 <aside id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" tabindex="-1" hidden></aside>
 <button class="fab" id="fab" hidden aria-label="Add a task" title="Add a task (N)">+</button>
+<!-- Notes (dashboard.js, "notes"): short text notes in a popup under the Notes button, a list at
+     the left and the note at the right, saved as you type. Narrow, one or the other. -->
+<dialog class="notes" id="notesPop" aria-label="Notes" data-pane="list">
+  <div class="nt-side">
+    <header class="nt-head"><h2>Notes</h2><button type="button" class="nt-icon" id="ntNew" aria-label="New note" title="New note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.5H7a2.5 2.5 0 0 0-2.5 2.5v10A2.5 2.5 0 0 0 7 19.5h10a2.5 2.5 0 0 0 2.5-2.5v-5"/><path d="M17.6 3.9a1.9 1.9 0 0 1 2.7 2.7L12.6 14.3 9.5 15l.7-3.1z"/></svg></button></header>
+    <ul class="nt-list" id="ntList"></ul>
+    <p class="nt-none" id="ntNone" hidden>No notes yet.</p>
+  </div>
+  <div class="nt-main">
+    <header class="nt-bar"><button type="button" class="nt-back" id="ntBack">‹ Notes</button><span class="nt-when" id="ntWhen"></span><button type="button" class="nt-icon" id="ntDelete" aria-label="Delete this note" title="Delete this note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 7h15M10 4.5h4M6.5 7l.8 11.2A2 2 0 0 0 9.3 20h5.4a2 2 0 0 0 2-1.8L17.5 7M10.2 10.5v6M13.8 10.5v6"/></svg></button></header>
+    <textarea id="ntText" aria-label="Note" placeholder="Start typing…" spellcheck="true"></textarea>
+  </div>
+</dialog>
 <dialog class="task" id="taskDialog">
   <form id="taskForm" autocomplete="off">
     <h3 id="taskHeading">New task</h3>

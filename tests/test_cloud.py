@@ -247,6 +247,14 @@ class TursoTest(unittest.TestCase):
         self.cloud.seed(self.db, "plan", {"settings": {"day_start": 5, "day_end": 24}, "week:mon": {"blocks": []}})
         self.assertEqual(self.db.get_all("plan"), {"settings": {"day_start": 6, "day_end": 23}, "week:mon": {"blocks": []}})
 
+    def test_the_notes_live_in_school_notes(self):
+        self.db.put("notes", "note:abc123def456", {"id": "note:abc123def456", "text": "Lab 4"})
+        self.assertEqual(self.db.get_all("notes"), {"note:abc123def456": {"id": "note:abc123def456", "text": "Lab 4"}})
+        self.assertEqual([r[0] for r in self.fake.query("SELECT key FROM school_notes")], ["note:abc123def456"])
+        self.assertEqual(self.rows(), [])  # never in school_kv
+        self.db.remove("notes", "note:abc123def456")
+        self.assertEqual(self.db.get_all("notes"), {})
+
     def test_without_the_plan_table_the_plan_fails_and_the_rest_works(self):
         # A database whose owner has not yet run QuantPrep's migration 0008.
         with FakeTurso(without=("school_plan",)) as old:
